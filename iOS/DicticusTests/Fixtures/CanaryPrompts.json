@@ -1,0 +1,8 @@
+[
+  { "lang": "de", "input": "hallo velt das ist ein test", "expected_contains": ["Hallo", "Welt", "Test"] },
+  { "lang": "de", "input": "ich gehe zum bahnhof um drei uhr", "expected_contains": ["Bahnhof", "Uhr"] },
+  { "lang": "de", "input": "kaufe brot milch und käse", "expected_contains": ["Brot", "Milch", "Käse"] },
+  { "lang": "en", "input": "hello world this is a test", "expected_contains": ["Hello", "world", "test"] },
+  { "lang": "en", "input": "meet me at three pm", "expected_contains": ["PM"] },
+  { "lang": "en", "input": "buy bread milk and cheese", "expected_contains": ["bread", "milk", "cheese"] }
+]

@@ -1,0 +1,13 @@
+[
+  { "input": "Straße", "expected": "Strasse" },
+  { "input": "groß und süß", "expected": "gross und süss" },
+  { "input": "STRAẞE", "expected": "STRASSE" },
+  { "input": "Heißgetränke und Grüße", "expected": "Heissgetränke und Grüsse" },
+  { "input": "Nix ohne Eszett", "expected": "Nix ohne Eszett" },
+  { "input": "1.250", "expected": "1.250" },
+  { "input": "ẞ", "expected": "SS" },
+  { "input": "Fußball", "expected": "Fussball" },
+  { "input": "Strasse mit 1'250 Franken", "expected": "Strasse mit 1'250 Franken" },
+  { "input": "Großes Haus", "expected": "Grosses Haus" },
+  { "input": "5.70 CHF", "expected": "5.70 CHF" }
+]

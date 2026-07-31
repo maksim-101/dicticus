@@ -1,0 +1,144 @@
+name: Dicticus
+options:
+  bundleIdPrefix: com.dicticus
+  deploymentTarget:
+    iOS: "26.0"
+settings:
+  SWIFT_VERSION: "6.0"
+  IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+  MARKETING_VERSION: "1.0.0"
+  CURRENT_PROJECT_VERSION: "2"
+  ENABLE_USER_SCRIPT_SANDBOXING: YES
+  SWIFT_EMIT_LOC_STRINGS: YES
+
+packages:
+  GRDB:
+    url: https://github.com/groue/GRDB.swift.git
+    from: 7.0.0
+  WhisperKit:
+    url: https://github.com/argmaxinc/argmax-oss-swift.git
+    from: 1.0.0
+  llama:
+    url: https://github.com/mattt/llama.swift.git
+    from: 2.8832.0
+
+targets:
+  Dicticus:
+    type: application
+    platform: iOS
+    sources:
+      - path: Dicticus
+      - path: ../Shared
+        excludes:
+          - "DicticusTests/**"
+    resources:
+      - path: ../Shared/Resources
+      - path: Dicticus/PrivacyInfo.xcprivacy
+    entitlements:
+      path: Dicticus/Dicticus.entitlements
+      properties:
+        com.apple.security.application-groups:
+          - group.com.dicticus
+        com.apple.developer.kernel.increased-memory-limit: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dicticus.ios
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_FILE: Dicticus/Info.plist
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_ENTITLEMENTS: Dicticus/Dicticus.entitlements
+        DEVELOPMENT_TEAM: ${DEVELOPER_TEAM_ID}
+        CODE_SIGN_STYLE: Automatic
+        OTHER_LDFLAGS: "-framework llama"
+        INFOPLIST_KEY_CFBundleURLTypes:
+          - CFBundleURLName: com.dicticus.ios
+            CFBundleURLSchemes:
+              - dicticus
+      configs:
+        Debug:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG PERSONAL_LEXICON"
+    dependencies:
+      - package: GRDB
+        product: GRDB
+      - package: WhisperKit
+        product: WhisperKit
+      - package: llama
+        product: LlamaSwift
+      - target: DicticusWidget
+
+  DicticusWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: DicticusWidget
+      - path: Dicticus/LiveActivity/DictationActivity.swift
+      - path: Dicticus/Intents/StopDictationIntent.swift
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: com.dicticus.ios.widget
+      INFOPLIST_FILE: DicticusWidget/Info.plist
+      GENERATE_INFOPLIST_FILE: YES
+      SKIP_INSTALL: YES
+      PRODUCT_NAME: DicticusWidget
+      SWIFT_VERSION: "6.0"
+      DEVELOPMENT_TEAM: ${DEVELOPER_TEAM_ID}
+    info:
+      path: DicticusWidget/Info.plist
+      properties:
+        CFBundleDisplayName: Dicticus
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+        NSSupportsLiveActivities: true
+
+  DicticusTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: DicticusTests
+      - path: ../Shared/DicticusTests
+    # NSPrincipalClass (2026-07-24 test-isolation hard fix, quick task 260724-9v8):
+    # Xcode instantiates this class before any XCTestCase runs, which lets
+    # DicticusTestBootstrap.init() redirect DicticusDefaults.suite to an
+    # ephemeral store for the whole test process. See
+    # Shared/DicticusTests/DicticusTestBootstrap.swift.
+    info:
+      path: DicticusTests/Info.plist
+      properties:
+        NSPrincipalClass: DicticusTests.DicticusTestBootstrap
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: DicticusTests/Info.plist
+      configs:
+        Debug:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG PERSONAL_LEXICON"
+    dependencies:
+      - target: Dicticus
+
+  DicticusUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: DicticusUITests
+    settings:
+      GENERATE_INFOPLIST_FILE: YES
+      TEST_TARGET_NAME: Dicticus
+      DEVELOPMENT_TEAM: ${DEVELOPER_TEAM_ID}
+    dependencies:
+      - target: Dicticus
+
+schemes:
+  Dicticus:
+    build:
+      targets:
+        Dicticus: all
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - DicticusTests
+        - DicticusUITests
+    archive:
+      config: Release
+    profile:
+      config: Release

@@ -1,0 +1,27 @@
+[
+  { "input": "1250", "expected": "1250" },
+  { "input": "1.250", "expected": "1250" },
+  { "input": "1'250", "expected": "1250" },
+  { "input": "5,70", "expected": "5.70" },
+  { "input": "5.70", "expected": "5.70" },
+  { "input": "CHF 1250", "expected": "CHF 1250" },
+  { "input": "EUR 6,70", "expected": "EUR 6.70" },
+  { "input": "€6,70", "expected": "€6.70" },
+  { "input": "$1250", "expected": "$1250" },
+  { "input": "Hello world", "expected": "Hello world" },
+  { "input": "15 Franken 50", "expected": "15.50 Franken" },
+  { "input": "15 Euro 50", "expected": "15.50 Euro" },
+  { "input": "15 CHF 50", "expected": "15.50 CHF" },
+  { "input": "15 EUR 50", "expected": "15.50 EUR" },
+  { "input": "Es kostet 15 Franken 50.", "expected": "Es kostet 15.50 Franken." },
+  { "input": "15 Franken 5 Stück", "expected": "15 Franken 5 Stück" },
+  { "input": "15 Franken 100", "expected": "15 Franken 100" },
+  { "input": "2026", "expected": "2026" },
+  { "input": "im Jahr 2026", "expected": "im Jahr 2026" },
+  { "input": "1250 Franken 20", "expected": "1250.20 Franken" },
+
+  { "input": "15 Franken 50 Rappen", "expected": "CHF 15.50", "category": "currency_fold" },
+  { "input": "15 Franken 5 Rappen",  "expected": "CHF 15.05", "category": "currency_fold" },
+  { "input": "10 Euro 75 Cent",       "expected": "€10.75",   "category": "currency_fold" },
+  { "input": "CHF 15.50",              "expected": "CHF 15.50", "category": "currency_fold" }
+]

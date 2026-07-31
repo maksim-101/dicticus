@@ -1,0 +1,30 @@
+Claude
+Claude Code
+Claude Desktop
+Gemini
+Gemma
+Sonnet
+Opus
+Antigravity
+Antigravity CLI
+GSD
+Tauri
+Vercel
+SwiftBar
+NGINX
+Ollama
+LiteLLM
+Tailscale
+TrueNAS
+Xcode
+Zed
+Zigbee
+MacWhisper
+Dockge
+Dokku
+Govee
+Reolink
+Aqara
+Cellguard
+Swissquote
+Dicticus

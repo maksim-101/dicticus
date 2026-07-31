@@ -1,0 +1,286 @@
+[
+  {
+    "id": "rc-de-filler-001",
+    "language": "de",
+    "input": "äh, das ist gut",
+    "expected": "das ist gut",
+    "category": "filler"
+  },
+  {
+    "id": "rc-de-filler-002",
+    "language": "de",
+    "input": "Das ist, äh, gut",
+    "expected": "Das ist gut",
+    "category": "filler"
+  },
+  {
+    "id": "rc-de-filler-003",
+    "language": "de",
+    "input": "Äh, das ist gut.",
+    "expected": "Das ist gut.",
+    "category": "filler"
+  },
+  {
+    "id": "rc-de-filler-004",
+    "language": "de",
+    "input": "ähm, vielleicht",
+    "expected": "vielleicht",
+    "category": "filler"
+  },
+  {
+    "id": "rc-en-filler-001",
+    "language": "en",
+    "input": "uh, this is good",
+    "expected": "this is good",
+    "category": "filler"
+  },
+  {
+    "id": "rc-en-filler-002",
+    "language": "en",
+    "input": "This is, um, good",
+    "expected": "This is good",
+    "category": "filler"
+  },
+  {
+    "id": "rc-en-filler-003",
+    "language": "en",
+    "input": "umm, maybe",
+    "expected": "maybe",
+    "category": "filler"
+  },
+  {
+    "id": "rc-en-filler-004",
+    "language": "en",
+    "input": "er, well that's interesting",
+    "expected": "well that's interesting",
+    "category": "filler"
+  },
+
+  {
+    "id": "rc-de-selfcorr-001",
+    "language": "de",
+    "input": "Das kostet 110 Franken, ich meine 110 Euro.",
+    "expected": "Das kostet 110 Euro.",
+    "category": "self_correction"
+  },
+  {
+    "id": "rc-de-selfcorr-002",
+    "language": "de",
+    "input": "Ich gehe nach Bern, genauer gesagt nach Thun.",
+    "expected": "Ich gehe nach Thun.",
+    "category": "self_correction"
+  },
+  {
+    "id": "rc-de-selfcorr-003",
+    "language": "de",
+    "input": "Wir treffen uns morgen, besser gesagt übermorgen.",
+    "expected": "Wir treffen uns übermorgen.",
+    "category": "self_correction"
+  },
+  {
+    "id": "rc-de-selfcorr-004",
+    "language": "de",
+    "input": "Es war Montag, oder vielmehr Dienstag.",
+    "expected": "Es war Dienstag.",
+    "category": "self_correction"
+  },
+  {
+    "id": "rc-en-selfcorr-001",
+    "language": "en",
+    "input": "Send to Boston, I mean to Denver.",
+    "expected": "Send to Denver.",
+    "category": "self_correction"
+  },
+  {
+    "id": "rc-en-selfcorr-002",
+    "language": "en",
+    "input": "the red car, or rather the blue one",
+    "expected": "the blue one",
+    "category": "self_correction"
+  },
+  {
+    "id": "rc-en-selfcorr-003",
+    "language": "en",
+    "input": "Call him Tuesday, I meant Wednesday.",
+    "expected": "Call him Wednesday.",
+    "category": "self_correction"
+  },
+  {
+    "id": "rc-en-selfcorr-004",
+    "language": "en",
+    "input": "ten dollars, scratch that twelve dollars",
+    "expected": "twelve dollars",
+    "category": "self_correction"
+  },
+
+  {
+    "id": "rc-de-curfold-001",
+    "language": "de",
+    "input": "15 Franken 50 Rappen",
+    "expected": "CHF 15.50",
+    "category": "currency_fold"
+  },
+  {
+    "id": "rc-de-curfold-002",
+    "language": "de",
+    "input": "15 Franken 5 Rappen",
+    "expected": "CHF 15.05",
+    "category": "currency_fold"
+  },
+  {
+    "id": "rc-de-curfold-003",
+    "language": "de",
+    "input": "10 Euro 75 Cent",
+    "expected": "€10.75",
+    "category": "currency_fold"
+  },
+  {
+    "id": "rc-de-curfold-idem-001",
+    "language": "de",
+    "input": "CHF 15.50",
+    "expected": "CHF 15.50",
+    "category": "currency_fold"
+  },
+  {
+    "id": "rc-de-curfold-idem-002",
+    "language": "de",
+    "input": "100 Franken",
+    "expected": "100 Franken",
+    "category": "currency_fold"
+  },
+  {
+    "id": "rc-de-curfold-adv-001",
+    "language": "de",
+    "input": "Franken-Politik",
+    "expected": "Franken-Politik",
+    "category": "currency_fold"
+  },
+
+  {
+    "id": "rc-de-comp-001",
+    "language": "de",
+    "input": "äh, das kostet 15 Franken 50 Rappen",
+    "expected": "das kostet CHF 15.50",
+    "category": "composition"
+  },
+  {
+    "id": "rc-de-comp-002",
+    "language": "de",
+    "input": "Das kostet 110 Franken, ich meine 110 Euro 50 Cent.",
+    "expected": "Das kostet €110.50.",
+    "category": "composition"
+  },
+  {
+    "id": "rc-en-comp-001",
+    "language": "en",
+    "input": "um, send 10 dollars, I mean 15 dollars",
+    "expected": "send 15 dollars",
+    "category": "composition"
+  },
+  {
+    "id": "rc-de-comp-003",
+    "language": "de",
+    "input": "ähm, drei Stück, oder besser fünf Stück.",
+    "expected": "fünf Stück.",
+    "category": "composition"
+  },
+
+  {
+    "id": "rc-de-adv-filler-001",
+    "language": "de",
+    "input": "also gut",
+    "expected": "also gut",
+    "category": "adversarial"
+  },
+  {
+    "id": "rc-de-adv-filler-002",
+    "language": "de",
+    "input": "ja, das stimmt",
+    "expected": "ja, das stimmt",
+    "category": "adversarial"
+  },
+  {
+    "id": "rc-de-adv-filler-003",
+    "language": "de",
+    "input": "genau, so meine ich es",
+    "expected": "genau, so meine ich es",
+    "category": "adversarial"
+  },
+  {
+    "id": "rc-en-adv-filler-001",
+    "language": "en",
+    "input": "I like it",
+    "expected": "I like it",
+    "category": "adversarial"
+  },
+  {
+    "id": "rc-en-adv-filler-002",
+    "language": "en",
+    "input": "well, I am well",
+    "expected": "well, I am well",
+    "category": "adversarial"
+  },
+  {
+    "id": "rc-en-adv-filler-003",
+    "language": "en",
+    "input": "so it goes",
+    "expected": "so it goes",
+    "category": "adversarial"
+  },
+  {
+    "id": "rc-de-adv-selfcorr-001",
+    "language": "de",
+    "input": "Ich meine es ernst",
+    "expected": "Ich meine es ernst",
+    "category": "adversarial"
+  },
+  {
+    "id": "rc-en-adv-selfcorr-001",
+    "language": "en",
+    "input": "I mean it",
+    "expected": "I mean it",
+    "category": "adversarial"
+  },
+  {
+    "id": "rc-en-adv-selfcorr-002",
+    "language": "en",
+    "input": "I mean what I say",
+    "expected": "I mean what I say",
+    "category": "adversarial"
+  },
+  {
+    "id": "rc-en-adv-selfcorr-003",
+    "language": "en",
+    "input": "or rather not",
+    "expected": "or rather not",
+    "category": "adversarial"
+  },
+  {
+    "id": "rc-de-adv-mixed-001",
+    "language": "de",
+    "input": "also, ich meine es ernst",
+    "expected": "also, ich meine es ernst",
+    "category": "adversarial"
+  },
+  {
+    "id": "rc-en-adv-mixed-001",
+    "language": "en",
+    "input": "well, I mean it",
+    "expected": "well, I mean it",
+    "category": "adversarial"
+  },
+  {
+    "id": "rc-de-adv-mixed-002",
+    "language": "de",
+    "input": "ja, das stimmt — Franken-Politik",
+    "expected": "ja, das stimmt — Franken-Politik",
+    "category": "adversarial"
+  },
+  {
+    "id": "rc-en-adv-mixed-002",
+    "language": "en",
+    "input": "so it goes, I mean what I say",
+    "expected": "so it goes, I mean what I say",
+    "category": "adversarial"
+  }
+]

@@ -1,0 +1,42 @@
+[
+  {
+    "input": "Ich habe 5 Franken bezahlt",
+    "llmOutput": "Ich habe 5 Euro bezahlt.",
+    "expected": "Ich habe 5 Franken bezahlt."
+  },
+  {
+    "input": "Das kostet 10 CHF",
+    "llmOutput": "Das kostet 10 EUR.",
+    "expected": "Das kostet 10 CHF."
+  },
+  {
+    "input": "Ich habe 5 Euro bezahlt",
+    "llmOutput": "Ich habe 5 Euro bezahlt.",
+    "expected": "Ich habe 5 Euro bezahlt."
+  },
+  {
+    "input": "5 Franken oder 10 EUR",
+    "llmOutput": "5 Euro oder 10 EUR.",
+    "expected": "5 Franken oder 10 EUR."
+  },
+  {
+    "input": "Hello world",
+    "llmOutput": "Hello world.",
+    "expected": "Hello world."
+  },
+  {
+    "input": "Ich habe 5€ bezahlt",
+    "llmOutput": "Ich habe 5 EUR bezahlt.",
+    "expected": "Ich habe 5 EUR bezahlt."
+  },
+  {
+    "input": "Das macht 5 Fr.",
+    "llmOutput": "Das macht 5 EUR.",
+    "expected": "Das macht 5 CHF."
+  },
+  {
+    "input": "5 € heute",
+    "llmOutput": "5 EUR heute.",
+    "expected": "5 EUR heute."
+  }
+]

@@ -1,0 +1,67 @@
+macOS/build/
+macOS/build-verify/
+iOS/build/
+.env
+.env.build
+
+# Release artifacts — built locally by scripts/build-dmg.sh, distributed via
+# GitHub Releases, not via git.
+Dicticus.dmg
+*.dmg
+
+# GSD planning artifacts — research notes, plan docs, UAT transcripts (which
+# include actual user dictation samples). Local-only working files; not for
+# public distribution. Untracking ONLY hides these from future commits — see
+# git history for previously-published versions.
+.planning/
+# (2026-07-31 reboot: previously ROADMAP/STATE/MILESTONES/REQUIREMENTS were
+# re-included for worktree-executor merges; worktrees are off for this repo and
+# planning docs contain dictation samples — nothing under .planning/ is public.)
+
+# Gemini/Antigravity agent config — internal, same class as CLAUDE.md
+GEMINI.md
+.gemini/
+.geminiignore
+
+# macOS Finder metadata
+.DS_Store
+**/.DS_Store
+
+# Local dictionary snapshots — personal App Group UserDefaults backups taken
+# before rebuilds. Contain the developer's personal dictionary keys; never commit.
+.dict-backups/
+
+# Claude Code session state — local-only, includes worktrees + per-machine settings
+.claude/
+
+# .remember/ keeps source-of-truth memory files (now.md, today-*.md, recent.md,
+# archive.md) but the autonomous save logs are local-only churn. The
+# `.remember/.gitignore` already excludes new files, but historical log files
+# were already tracked before that gitignore landed; they're being untracked
+# in the same commit that adds this rule.
+.remember/logs/
+.remember/tmp/
+
+# DebugRecorder output — local-only JSONL cleanup traces produced by the
+# Dicticus-Debug-Recorder scheme. Recorder code is compiled out of the public
+# Release build (no DEBUG_RECORDER flag); the on-disk path lives under
+# ~/Library/Application Support, but this guards against a project-relative
+# override.
+DebugRecordings/
+
+# Developer-personal dictionary lexicon — gitignored so personal entries never
+# land in the public Release binary. The entire file is inside #if PERSONAL_LEXICON
+# so it compiles to zero bytes in Release even when physically present on disk.
+# Must be gitignored BEFORE the file is created (see RESEARCH Pitfall 5).
+Shared/Services/PersonalLexicon.swift
+
+# Agent/executor hermetic scratch (swiftc drivers, etc.)
+scratchpad/
+
+# Internal agent instructions & session state — never public (contain ops/signing details)
+CLAUDE.md
+.continue-here
+
+# Coverage + Xcode user state
+*.profraw
+xcuserdata/
