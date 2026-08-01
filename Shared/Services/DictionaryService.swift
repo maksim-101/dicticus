@@ -81,6 +81,15 @@ class DictionaryService: ObservableObject {
     /// remind->Gemini (0.333) and applies->AppLite (0.286).
     private static let fuzzyRatioCap: Double = 0.25
 
+    /// 260801-m0c: single source of truth for what the fuzzy pass's tokenizer
+    /// can emit as a token. Used BOTH to walk `text` into tokens and to
+    /// filter which dictionary keys are eligible fuzzy candidates — the two
+    /// uses must never drift, or a key can be admitted as a candidate that
+    /// the tokenizer could never actually produce as a matching token.
+    private static func isFuzzyTokenChar(_ c: Character) -> Bool {
+        c.isLetter || c.isNumber
+    }
+
     /// The active dictionary of [Original: Metadata] pairs.
     @Published private(set) var dictionary: [String: DictionaryMetadata] = [:]
 
@@ -688,8 +697,22 @@ class DictionaryService: ObservableObject {
         // could otherwise produce different outputs across runs depending on
         // which key the hash table happened to surface first. Lexicographic
         // sort is the simplest stable order; no quality signal is encoded.
+        // 260801-m0c: the candidate filter and the tokenizer below must agree
+        // on what a token is. The tokenizer (isFuzzyTokenChar) can only ever
+        // emit letter-or-number characters, so a key containing any other
+        // character (e.g. ".cloud") can never equal a token — yet admitting
+        // such keys as candidates let Levenshtein treat the punctuation as
+        // one ordinary substitutable character (".cloud" vs "icloud":
+        // distance 1, ratio 0.167, under the 0.25 cap), corrupting a
+        // correctly-heard word like "iCloud" into ".claude". This is safe
+        // to reject: punctuation-bearing keys are still fully served by the
+        // exact-match lookaround regex pass above — the guard only removes
+        // matches the tokenizer could never have produced legitimately. A
+        // miss is preferable to a stage-1 corruption no downstream guard
+        // can see. Subsumes the prior no-spaces condition (a space is
+        // neither a letter nor a number).
         let candidateKeys = dictionary.keys
-            .filter { $0.count >= 6 && !$0.contains(" ") }
+            .filter { $0.count >= 6 && $0.allSatisfy(Self.isFuzzyTokenChar) }
             .sorted()
         if candidateKeys.isEmpty { return (text, [], []) }
 
@@ -701,9 +724,8 @@ class DictionaryService: ObservableObject {
         // positions. Split on whitespace; preserve trailing punctuation per token.
         var result = ""
         var current = ""
-        let isWordChar: (Character) -> Bool = { $0.isLetter || $0.isNumber }
         for ch in text {
-            if isWordChar(ch) {
+            if Self.isFuzzyTokenChar(ch) {
                 current.append(ch)
             } else {
                 if !current.isEmpty {

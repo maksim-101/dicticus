@@ -220,6 +220,33 @@ final class DictionaryServiceFuzzyMatchTests: XCTestCase {
         XCTAssertEqual(out, "use engine for builds", "Single-token input must not fuzzy-match multi-word key")
     }
 
+    // MARK: - m0c-B (260801) — punctuation-bearing keys are exact-match only
+
+    // Evidence lock (260801-m0c, evidence record 2): the fuzzy pass's own
+    // tokenizer only ever emits letter-or-number tokens, so a key containing
+    // punctuation can never equal a token — yet the candidate filter admitted
+    // it anyway, and Levenshtein treated the punctuation as one ordinary
+    // substitutable character. ".cloud" vs "icloud": distance 1, ratio 1/6 =
+    // 0.167, under the 0.25 cap. Today "iCloud" is corrupted to ".claude".
+    func testFuzzyPassIgnoresPunctuationKeys_260801_m0c() {
+        DictionaryService.shared.setReplacement(for: ".cloud", with: ".claude")
+        let input = "do we even need the iCloud or just keychain"
+        let out = DictionaryService.shared.apply(to: input)
+        XCTAssertEqual(out, input,
+                       "260801-m0c evidence record 2: 'iCloud' must survive untouched — punctuation key '.cloud' (distance 1, ratio 0.167) must not be a fuzzy candidate. Got: \(out)")
+        DictionaryService.shared.removeReplacement(for: ".cloud")
+    }
+
+    // Capability guard: the same punctuation key must still fire on EXACT
+    // match — this is a fuzzy-window guard, not an entry disablement. This
+    // path goes through the untouched exact-match lookaround regex pass.
+    func testPunctuationKeyExactMatchStillFires() {
+        DictionaryService.shared.setReplacement(for: ".cloud", with: ".claude")
+        let out = DictionaryService.shared.apply(to: "check the .cloud settings")
+        XCTAssertEqual(out, "check the .claude settings")
+        DictionaryService.shared.removeReplacement(for: ".cloud")
+    }
+
     func testPhase251_FuzzyMatch_PerformanceBudget() {
         // 2KB input, seeded dictionary. Fuzzy pass must complete < 50ms.
         let longInput = String(repeating: "Tailskill dashboard config and tools ", count: 60)
