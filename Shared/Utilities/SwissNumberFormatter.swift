@@ -340,6 +340,16 @@ public struct SwissNumberFormatter {
         let stripped = s
             .replacingOccurrences(of: "'", with: "")
             .replacingOccurrences(of: "\u{2019}", with: "")
+        // 260801-m0c: a valid Swiss numeric core has at most one period —
+        // the period is its decimal separator, and thousands grouping is
+        // the apostrophe (already stripped above). Two or more periods
+        // means the token is not a number this formatter is entitled to
+        // rewrite (e.g. a version string like "2.4.0"). Foundation's
+        // Decimal(string:) parses lenient-ly up to the second period and
+        // silently stops there — that is what previously deleted the
+        // patch segment ("2.4.0" -> 2.4 -> "2.4"). Reject instead of
+        // truncating; reformatToken emits the original token verbatim.
+        guard stripped.filter({ $0 == "." }).count <= 1 else { return nil }
         return Decimal(string: stripped, locale: Locale(identifier: "en_US_POSIX"))
     }
 

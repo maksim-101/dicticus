@@ -53,6 +53,32 @@ final class SwissNumberFormatterTests: XCTestCase {
         XCTAssertEqual(result, "5.70")
     }
 
+    // MARK: - m0c-A (260801) — reject multi-period cores instead of truncating
+
+    // Evidence lock (260801-m0c, evidence record 1): the formatter's lenient
+    // Swiss parse handed "2.4.0" to Foundation's Decimal(string:), which
+    // parses up to the second period and stops — silently deleting the
+    // patch segment. Today this returns "...the version 2.4."
+    func testVersionTripleNotTruncated_260801_m0c() {
+        let input = "I still only see the version 2.4.0."
+        let result = SwissNumberFormatter.format(input)
+        XCTAssertEqual(result, input,
+                       "260801-m0c evidence record 1: version triple must round-trip intact, not truncate to 'the version 2.4.'")
+    }
+
+    // Coverage set: any numeric core carrying more than one period that is
+    // NOT valid 3-digit thousands grouping must be emitted byte-identical.
+    // Legitimate period-grouped thousands ("1.234.567" -> "1234567") and the
+    // pre-existing "1.250" -> "1250" case must keep reformatting as before.
+    func testMultiDotTokensRejectedThousandsStillReformat() {
+        XCTAssertEqual(SwissNumberFormatter.format("1.0.1"), "1.0.1")
+        XCTAssertEqual(SwissNumberFormatter.format("0.13.6"), "0.13.6")
+        XCTAssertEqual(SwissNumberFormatter.format("1.23.456"), "1.23.456")
+        XCTAssertEqual(SwissNumberFormatter.format("v2.4.0"), "v2.4.0")
+        XCTAssertEqual(SwissNumberFormatter.format("1.234.567"), "1234567")
+        XCTAssertEqual(SwissNumberFormatter.format("1.250"), "1250")
+    }
+
     func testNonNumericTokensUnchanged() {
         let result = SwissNumberFormatter.format("Hello world")
         XCTAssertEqual(result, "Hello world")

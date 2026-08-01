@@ -20,6 +20,12 @@
   { "input": "im Jahr 2026", "expected": "im Jahr 2026" },
   { "input": "1250 Franken 20", "expected": "1250.20 Franken" },
 
+  { "input": "1.0.1", "expected": "1.0.1", "category": "multi_dot_260801_m0c" },
+  { "input": "0.13.6", "expected": "0.13.6", "category": "multi_dot_260801_m0c" },
+  { "input": "1.23.456", "expected": "1.23.456", "category": "multi_dot_260801_m0c" },
+  { "input": "v2.4.0", "expected": "v2.4.0", "category": "multi_dot_260801_m0c" },
+  { "input": "1.234.567", "expected": "1234567", "category": "multi_dot_260801_m0c" },
+
   { "input": "15 Franken 50 Rappen", "expected": "CHF 15.50", "category": "currency_fold" },
   { "input": "15 Franken 5 Rappen",  "expected": "CHF 15.05", "category": "currency_fold" },
   { "input": "10 Euro 75 Cent",       "expected": "€10.75",   "category": "currency_fold" },
