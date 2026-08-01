@@ -38,11 +38,22 @@ struct DictionaryView: View {
     @State private var newReplacement: String = ""
     @State private var isShowingAddRow = false
 
+    // In-place edit state (quick task 260801-ftf). `editingOriginal` is the
+    // dictionary key currently being edited (the pre-edit "Original" string);
+    // nil means the inline form is in Add mode.
+    @State private var editingOriginal: String? = nil
+
     // Import / Export state (Phase 31-02)
     @State private var importResult: String? = nil
     @State private var isShowingImportResult = false
-    @State private var pendingImportURL: URL? = nil
     @State private var isShowingMergeStrategyPicker = false
+    // quick task 260801-ftf: the file is read into memory at pick time (inside
+    // the security scope) and the parse preview is computed BEFORE the merge
+    // dialog ever opens, replacing the old pendingImportURL + late-read design.
+    @State private var pendingImportData: Data? = nil
+    @State private var pendingImportFormat: String = "csv"
+    @State private var pendingImportPreview: DictionaryIOService.ImportPreview? = nil
+    @State private var isShowingReplaceAllConfirmation = false
 
     // Starter pack state (Phase 31-03)
     @State private var starterPackResult: String? = nil
@@ -106,6 +117,10 @@ struct DictionaryView: View {
             }
             .tableStyle(.inset)
             .contextMenu {
+                Button("Edit…") {
+                    beginEdit()
+                }
+                .disabled(selection.count != 1)
                 Button("Delete") {
                     deleteSelected()
                 }
@@ -148,9 +163,13 @@ struct DictionaryView: View {
                             .textFieldStyle(.roundedBorder)
                             .controlSize(.regular)
                             .font(.system(size: 13))
-                        
-                        Button("Add") {
-                            addEntry()
+
+                        Button(editingOriginal != nil ? "Save" : "Add") {
+                            if editingOriginal != nil {
+                                saveEdit()
+                            } else {
+                                addEntry()
+                            }
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.regular)
@@ -163,18 +182,25 @@ struct DictionaryView: View {
                         .controlSize(.regular)
                     }
                 } else {
-                    Button(action: { 
+                    Button(action: {
                         withAnimation(.spring(response: 0.3)) {
-                            isShowingAddRow = true 
+                            isShowingAddRow = true
                         }
                     }) {
                         Label("Add Entry", systemImage: "plus")
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.regular)
-                    
+
+                    Button("Edit") {
+                        beginEdit()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.regular)
+                    .disabled(selection.count != 1)
+
                     Spacer()
-                    
+
                     Button("Delete Selected") {
                         deleteSelected()
                     }
@@ -405,19 +431,40 @@ struct DictionaryView: View {
             Text(starterPackResult ?? "")
         }
         .confirmationDialog("Choose Merge Strategy", isPresented: $isShowingMergeStrategyPicker, titleVisibility: .visible) {
-            Button("Replace All (delete current, then import)") {
-                if let url = pendingImportURL { performImport(url: url, strategy: .replaceAll) }
-            }
             Button("Merge — keep mine on conflicts") {
-                if let url = pendingImportURL { performImport(url: url, strategy: .existingWins) }
+                performImport(strategy: .existingWins)
             }
+            .keyboardShortcut(.defaultAction)
             Button("Merge — use imported on conflicts") {
-                if let url = pendingImportURL { performImport(url: url, strategy: .incomingWins) }
+                performImport(strategy: .incomingWins)
             }
-            Button("Cancel", role: .cancel) { pendingImportURL = nil }
+            Button("Replace All (delete current, then import)", role: .destructive) {
+                requestReplaceAll()
+            }
+            Button("Cancel", role: .cancel) { pendingImportData = nil; pendingImportPreview = nil }
         } message: {
-            Text("You have \(dictionaryService.dictionary.count) entries. Choose how to combine them with the imported file. \"Conflicts\" are entries whose Original appears in both.")
+            Text(mergeDialogMessage)
         }
+        .alert("Replace All Entries?", isPresented: $isShowingReplaceAllConfirmation) {
+            Button("Delete \(pendingImportPreview?.deletedByReplaceAll ?? 0) and Replace", role: .destructive) {
+                performImport(strategy: .replaceAll)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will permanently delete \(pendingImportPreview?.deletedByReplaceAll ?? 0) \((pendingImportPreview?.deletedByReplaceAll ?? 0) == 1 ? "entry" : "entries") not present in this file. This cannot be undone.")
+        }
+    }
+
+    private var mergeDialogMessage: String {
+        var lines = ["You have \(dictionaryService.dictionary.count) entries."]
+        if let p = pendingImportPreview {
+            lines.append("The file has \(p.fileCount) \(p.fileCount == 1 ? "entry" : "entries") — \(p.newCount) new, \(p.conflictCount) conflicting.")
+            if p.skippedCount > 0 {
+                lines.append("\(p.skippedCount) \(p.skippedCount == 1 ? "row" : "rows") in the file will be skipped (empty or identical original/replacement).")
+            }
+        }
+        lines.append("\"Conflicts\" are entries whose Original appears in both.")
+        return lines.joined(separator: " ")
     }
 
     private func refreshEntries() {
@@ -444,7 +491,7 @@ struct DictionaryView: View {
 
     private func checkForDuplicate(_ value: String) {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        if dictionaryService.dictionary.keys.contains(trimmed) {
+        if trimmed != editingOriginal, dictionaryService.dictionary.keys.contains(trimmed) {
             duplicateWarning = "Entry '\(trimmed)' already exists."
         } else {
             duplicateWarning = nil
@@ -465,6 +512,42 @@ struct DictionaryView: View {
         newOriginal = ""
         newReplacement = ""
         duplicateWarning = nil
+        editingOriginal = nil
+    }
+
+    // MARK: - In-place editing (quick task 260801-ftf)
+
+    private func beginEdit() {
+        guard selection.count == 1, let id = selection.first,
+              let entry = dictionaryService.dictionary[id] else { return }
+        editingOriginal = id
+        newOriginal = id
+        newReplacement = entry.replacement
+        duplicateWarning = nil
+        withAnimation(.spring(response: 0.3)) {
+            isShowingAddRow = true
+        }
+    }
+
+    private func saveEdit() {
+        guard let oldOriginal = editingOriginal else { return }
+        let result = dictionaryService.renameEntry(from: oldOriginal, to: newOriginal, replacement: newReplacement)
+        switch result {
+        case .saved:
+            selection.removeAll()
+            isShowingAddRow = false
+            newOriginal = ""
+            newReplacement = ""
+            duplicateWarning = nil
+            editingOriginal = nil
+            refreshEntries()
+        case .collision(let key):
+            duplicateWarning = "'\(key)' already exists — choose a different Original."
+        case .invalid(let reason):
+            duplicateWarning = reason
+        case .notFound:
+            duplicateWarning = "This entry no longer exists."
+        }
     }
 
     private func deleteSelected() {
@@ -501,18 +584,8 @@ struct DictionaryView: View {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.commaSeparatedText, .json]
         panel.allowsMultipleSelection = false
-        if panel.runModal() == .OK, let url = panel.url {
-            pendingImportURL = url
-            // Nothing to conflict with on an empty dictionary — skip the merge prompt.
-            if dictionaryService.dictionary.isEmpty {
-                performImport(url: url, strategy: .incomingWins)
-            } else {
-                isShowingMergeStrategyPicker = true
-            }
-        }
-    }
+        guard panel.runModal() == .OK, let url = panel.url else { return }
 
-    private func performImport(url: URL, strategy: MergeStrategy) {
         let accessing = url.startAccessingSecurityScopedResource()
         defer { if accessing { url.stopAccessingSecurityScopedResource() } }
         guard let data = try? Data(contentsOf: url) else {
@@ -521,9 +594,41 @@ struct DictionaryView: View {
             return
         }
         let format = url.pathExtension.lowercased()
-        let result = dictionaryService.importData(data, format: format, strategy: strategy)
+
+        switch dictionaryService.previewImport(data, format: format) {
+        case .failure(let message):
+            importResult = "Import failed: \(message)"
+            isShowingImportResult = true
+        case .preview(let preview):
+            pendingImportData = data
+            pendingImportFormat = format
+            pendingImportPreview = preview
+            // Nothing to conflict with on an empty dictionary — skip the merge prompt.
+            if dictionaryService.dictionary.isEmpty {
+                performImport(strategy: .incomingWins)
+            } else {
+                isShowingMergeStrategyPicker = true
+            }
+        }
+    }
+
+    /// Replace All is gated behind a second confirmation whenever it would
+    /// delete entries not present in the file (T-ftf-03). When nothing would
+    /// be lost, import proceeds directly.
+    private func requestReplaceAll() {
+        if (pendingImportPreview?.deletedByReplaceAll ?? 0) > 0 {
+            isShowingReplaceAllConfirmation = true
+        } else {
+            performImport(strategy: .replaceAll)
+        }
+    }
+
+    private func performImport(strategy: MergeStrategy) {
+        guard let data = pendingImportData else { return }
+        let result = dictionaryService.importData(data, format: pendingImportFormat, strategy: strategy)
         importResult = result.summaryMessage()
         isShowingImportResult = true
-        pendingImportURL = nil
+        pendingImportData = nil
+        pendingImportPreview = nil
     }
 }

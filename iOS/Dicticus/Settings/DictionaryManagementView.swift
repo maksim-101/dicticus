@@ -18,7 +18,10 @@ private struct AddEntrySheet: View {
     @Binding var original: String
     @Binding var replacement: String
     let duplicateWarning: String?
-    let onAdd: () -> Void
+    /// nil = Add mode; non-nil (the pre-edit original) = Edit mode. Drives
+    /// the navigation title and confirm-button label (quick task 260801-ftf).
+    let editingOriginal: String?
+    let onConfirm: () -> Void
     let onCancel: () -> Void
     let onOriginalChange: (String) -> Void
 
@@ -43,14 +46,14 @@ private struct AddEntrySheet: View {
                         .disableAutocorrection(true)
                 }
             }
-            .navigationTitle("Add Entry")
+            .navigationTitle(editingOriginal != nil ? "Edit Entry" : "Add Entry")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel", action: onCancel)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Add", action: onAdd)
+                    Button(editingOriginal != nil ? "Save" : "Add", action: onConfirm)
                         .disabled(original.isEmpty || replacement.isEmpty || duplicateWarning != nil)
                 }
             }
@@ -83,6 +86,10 @@ struct DictionaryManagementView: View {
     @State private var duplicateWarning: String? = nil
     @State private var sortOrder: EntrySortOrder = .alphabetical
 
+    // In-place edit state (quick task 260801-ftf). nil = the sheet is in Add
+    // mode; non-nil = editing the entry with this (pre-edit) original key.
+    @State private var editingOriginal: String? = nil
+
     // Import / Export state (Phase 31-02)
     @State private var showingExporter = false
     @State private var exportFormat = "csv"
@@ -90,6 +97,8 @@ struct DictionaryManagementView: View {
     @State private var showingMergeStrategyPicker = false
     @State private var pendingImportData: Data? = nil
     @State private var pendingImportFormat: String = "csv"
+    @State private var pendingImportPreview: DictionaryIOService.ImportPreview? = nil
+    @State private var showingReplaceAllConfirmation = false
     @State private var importResultMessage: String? = nil
     @State private var showingImportResult = false
 
@@ -166,10 +175,15 @@ struct DictionaryManagementView: View {
                 Text("No custom entries yet.").foregroundColor(.secondary)
             } else {
                 ForEach(sortedKeys, id: \.self) { key in
-                    DictionaryEntryRow(
-                        key: key,
-                        replacement: dictionaryService.dictionary[key]?.replacement ?? ""
-                    )
+                    Button {
+                        beginEdit(key)
+                    } label: {
+                        DictionaryEntryRow(
+                            key: key,
+                            replacement: dictionaryService.dictionary[key]?.replacement ?? ""
+                        )
+                    }
+                    .buttonStyle(.plain)
                 }
                 .onDelete(perform: deleteEntries)
             }
@@ -199,23 +213,41 @@ struct DictionaryManagementView: View {
             defer { if accessing { url.stopAccessingSecurityScopedResource() } }
             guard let data = try? Data(contentsOf: url) else { return }
             let format = url.pathExtension.lowercased()
-            // Store data before closure exits — URL scope ends here (Pitfall 4).
-            pendingImportData = data
-            pendingImportFormat = format.isEmpty ? "csv" : format
-            // Nothing to conflict with on an empty dictionary — skip the merge prompt.
-            if dictionaryService.dictionary.isEmpty {
-                applyImport(strategy: .incomingWins)
-            } else {
-                showingMergeStrategyPicker = true
+            let resolvedFormat = format.isEmpty ? "csv" : format
+
+            switch dictionaryService.previewImport(data, format: resolvedFormat) {
+            case .failure(let message):
+                importResultMessage = "Import failed: \(message)"
+                showingImportResult = true
+            case .preview(let preview):
+                // Store data before closure exits — URL scope ends here (Pitfall 4).
+                pendingImportData = data
+                pendingImportFormat = resolvedFormat
+                pendingImportPreview = preview
+                // Nothing to conflict with on an empty dictionary — skip the merge prompt.
+                if dictionaryService.dictionary.isEmpty {
+                    applyImport(strategy: .incomingWins)
+                } else {
+                    showingMergeStrategyPicker = true
+                }
             }
         }
         .confirmationDialog("Choose Merge Strategy", isPresented: $showingMergeStrategyPicker, titleVisibility: .visible) {
-            Button("Replace All (delete current, then import)") { applyImport(strategy: .replaceAll) }
             Button("Merge — keep mine on conflicts") { applyImport(strategy: .existingWins) }
+                .keyboardShortcut(.defaultAction)
             Button("Merge — use imported on conflicts") { applyImport(strategy: .incomingWins) }
-            Button("Cancel", role: .cancel) { pendingImportData = nil }
+            Button("Replace All (delete current, then import)", role: .destructive) { requestReplaceAll() }
+            Button("Cancel", role: .cancel) { pendingImportData = nil; pendingImportPreview = nil }
         } message: {
             Text(mergeDialogMessage)
+        }
+        .alert("Replace All Entries?", isPresented: $showingReplaceAllConfirmation) {
+            Button("Delete \(pendingImportPreview?.deletedByReplaceAll ?? 0) and Replace", role: .destructive) {
+                applyImport(strategy: .replaceAll)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will permanently delete \(pendingImportPreview?.deletedByReplaceAll ?? 0) \((pendingImportPreview?.deletedByReplaceAll ?? 0) == 1 ? "entry" : "entries") not present in this file. This cannot be undone.")
         }
         .alert("Import Result", isPresented: $showingImportResult) {
             Button("OK", role: .cancel) {}
@@ -255,10 +287,26 @@ struct DictionaryManagementView: View {
                 original: $newOriginal,
                 replacement: $newReplacement,
                 duplicateWarning: duplicateWarning,
-                onAdd: {
-                    dictionaryService.setReplacement(for: newOriginal, with: newReplacement)
-                    showingAddSheet = false
-                    resetFields()
+                editingOriginal: editingOriginal,
+                onConfirm: {
+                    if let oldOriginal = editingOriginal {
+                        let result = dictionaryService.renameEntry(from: oldOriginal, to: newOriginal, replacement: newReplacement)
+                        switch result {
+                        case .saved:
+                            showingAddSheet = false
+                            resetFields()
+                        case .collision(let key):
+                            duplicateWarning = "'\(key)' already exists — choose a different Original."
+                        case .invalid(let reason):
+                            duplicateWarning = reason
+                        case .notFound:
+                            duplicateWarning = "This entry no longer exists."
+                        }
+                    } else {
+                        dictionaryService.setReplacement(for: newOriginal, with: newReplacement)
+                        showingAddSheet = false
+                        resetFields()
+                    }
                 },
                 onCancel: {
                     showingAddSheet = false
@@ -268,10 +316,28 @@ struct DictionaryManagementView: View {
             )
         }
     }
-    
+
     private var mergeDialogMessage: String {
-        let count = dictionaryService.dictionary.count
-        return "You have \(count) entries. Choose how to combine them with the imported file. Conflicts are entries whose Original appears in both."
+        var lines = ["You have \(dictionaryService.dictionary.count) entries."]
+        if let p = pendingImportPreview {
+            lines.append("The file has \(p.fileCount) \(p.fileCount == 1 ? "entry" : "entries") — \(p.newCount) new, \(p.conflictCount) conflicting.")
+            if p.skippedCount > 0 {
+                lines.append("\(p.skippedCount) \(p.skippedCount == 1 ? "row" : "rows") in the file will be skipped (empty or identical original/replacement).")
+            }
+        }
+        lines.append("Conflicts are entries whose Original appears in both.")
+        return lines.joined(separator: " ")
+    }
+
+    // MARK: - In-place editing (quick task 260801-ftf)
+
+    private func beginEdit(_ key: String) {
+        guard let entry = dictionaryService.dictionary[key] else { return }
+        editingOriginal = key
+        newOriginal = key
+        newReplacement = entry.replacement
+        duplicateWarning = nil
+        showingAddSheet = true
     }
 
     private func deleteEntries(at offsets: IndexSet) {
@@ -285,11 +351,12 @@ struct DictionaryManagementView: View {
         newOriginal = ""
         newReplacement = ""
         duplicateWarning = nil
+        editingOriginal = nil
     }
 
     private func checkForDuplicate(_ value: String) {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        if dictionaryService.dictionary.keys.contains(trimmed) {
+        if trimmed != editingOriginal, dictionaryService.dictionary.keys.contains(trimmed) {
             duplicateWarning = "Entry '\(trimmed)' already exists."
         } else {
             duplicateWarning = nil
@@ -319,12 +386,24 @@ struct DictionaryManagementView: View {
         String(ISO8601DateFormatter().string(from: Date()).prefix(10))
     }
 
+    /// Replace All is gated behind a second confirmation whenever it would
+    /// delete entries not present in the file (T-ftf-03). When nothing would
+    /// be lost, import proceeds directly.
+    private func requestReplaceAll() {
+        if (pendingImportPreview?.deletedByReplaceAll ?? 0) > 0 {
+            showingReplaceAllConfirmation = true
+        } else {
+            applyImport(strategy: .replaceAll)
+        }
+    }
+
     private func applyImport(strategy: MergeStrategy) {
         guard let data = pendingImportData else { return }
         let result = dictionaryService.importData(data, format: pendingImportFormat, strategy: strategy)
         importResultMessage = result.summaryMessage()
         showingImportResult = true
         pendingImportData = nil
+        pendingImportPreview = nil
     }
 }
 
