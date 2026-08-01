@@ -254,6 +254,68 @@ final class EditGuardMergeAtomicityTests: XCTestCase {
         assertNeitherSourceClean(out, baseline, llm)
     }
 
+    // MARK: - Quick task 260801-9n7: sentence-glue restore-boundary regression
+    //
+    // Evidence record 2026-07-29T03:47:35.149Z
+    // (260801-9n7-EVIDENCE.json; "Apple support" anonymized to "Pearcom
+    // support" for this public repo): EditGuard correctly REJECTS the LLM's
+    // cross-sentence em-dash merge at the "...it's labeled. So it matches..."
+    // boundary, but the restored sentence-terminal "." inherits the
+    // candidate em-dash's EMPTY trailing instead of its own baseline " "
+    // trailing — gluing the two sentences together ("labeled.So") in the
+    // rebuilt text. See `materialize`'s rejected-`.substitute` render
+    // branch.
+
+    /// RED positive (must FAIL at HEAD — captured HEAD failure diff recorded
+    /// in `260801-9n7-SUMMARY.md`). `assertNeitherSourceClean` is kept below
+    /// for consistency with this file's convention, but its tier-1 checker
+    /// normalizes whitespace away before comparing and therefore PASSES even
+    /// WITH this defect present — it is never evidence the bug is fixed.
+    /// `XCTAssertEqual(out, expected)` is the load-bearing assertion.
+    func testRestoredTerminalPunctuation_keepsInterSentenceSpace_labeledSo() {
+        let baseline = "So help me adjust the feedback email or however it's labeled. So it matches these new states because I haven't sent it yet. I only was in contact with Pearcom support and now I want to go that separate lane as well because this is not acceptable anymore."
+        let llm = "So, help me adjust the feedback email—or however it's labeled—to match these new states, because I haven't sent it yet. I was only in contact with Pearcom support, and now I want to go down that separate lane as well, because this is not acceptable anymore.</corrected_text>"
+        let expected = "So, help me adjust the feedback email—or however it's labeled. So it matches these new states, because I haven't sent it yet. I was only in contact with Pearcom support, and now I want to go that separate lane as well, because this is not acceptable anymore."
+        let out = guardOut(baseline, llm)
+        XCTAssertEqual(out, expected)
+        assertNeitherSourceClean(out, baseline, llm)
+    }
+
+    /// N1 (must PASS at HEAD and stay passing): pins that a restored
+    /// punctuation token never fabricates a separator inside a legitimate
+    /// abbreviation seam ("a.m" tokenizes word/./word, every trailing
+    /// empty — see EditGuardTokenizer's contract). The rejected
+    /// "budget"->"finances" substitute exercises the restore machinery in
+    /// the same sentence; "a.m" itself is untouched and must stay unspaced
+    /// in the output. A naive "space after any mark before a word" fix
+    /// would corrupt this.
+    func testRestore_doesNotFabricateSpaceInsideAbbreviation() {
+        let baseline = "We should meet at 9 a.m tomorrow to discuss the budget."
+        let llm = "We should meet at 9 a.m tomorrow to discuss the finances."
+        XCTAssertTrue(
+            EditGuard.apply(rulesCleaned: baseline, llmOutput: llm, language: "en", lexicon: TestSpellLexicon.allKnown).edits.contains { !$0.accepted },
+            "fixture must exercise a rejected edit for the restore machinery to genuinely run"
+        )
+        let out = guardOut(baseline, llm)
+        XCTAssertEqual(out, baseline)
+    }
+
+    /// N2 (must PASS at HEAD and stay passing): pins that a restored
+    /// punctuation token never fabricates a separator after an opening mark
+    /// directly against a word ("(the" seam). The rejected "whole"->
+    /// "entire" substitute sits immediately inside the parenthetical, so
+    /// restoration genuinely runs right at this seam.
+    func testRestore_doesNotFabricateSpaceAfterOpeningMark() {
+        let baseline = "Let's finalize the presentation (the whole thing) before Friday so the client is happy."
+        let llm = "Let's finalize the presentation (the entire thing) before Friday so the client is happy."
+        XCTAssertTrue(
+            EditGuard.apply(rulesCleaned: baseline, llmOutput: llm, language: "en", lexicon: TestSpellLexicon.allKnown).edits.contains { !$0.accepted },
+            "fixture must exercise a rejected edit for the restore machinery to genuinely run"
+        )
+        let out = guardOut(baseline, llm)
+        XCTAssertEqual(out, baseline)
+    }
+
     // MARK: - Aggregate invariant tests
 
     /// (i) The checker run over all 5 resolved evidence fixtures' guard
