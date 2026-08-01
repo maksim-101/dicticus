@@ -123,6 +123,14 @@ public enum EditGuard {
         /// aligned near-duplicate blocks (stutter/restart) down to one
         /// copy. Additive in this commit (Task 1); wired in Task 2.
         case disfluencyCollapse
+        /// Quick task 260801-m8o: a `.delete` of a lone `.` that structurally
+        /// reads as a Whisper pause-split rather than a genuine sentence
+        /// boundary — see `isPauseSplitPeriod`'s four-arm predicate. Classified
+        /// context-free (whether or not the surrounding edit group would
+        /// otherwise revert) so `applyAtomicGroupCoupling`'s exemption for this
+        /// class alone can drop the period even when a bundled neighbour edit
+        /// in the same atomic group is independently rejected.
+        case pauseSplitMerge
     }
 
     /// D-11's forensics vocabulary — the classes of edit this guard REJECTS.
@@ -644,6 +652,15 @@ public enum EditGuard {
         guard let a = edit.from else { return (false, nil, .unclassified) }
 
         if a.kind == .punctuation {
+            // Quick task 260801-m8o: checked FIRST, before the unconditional
+            // punctuation accept below — a qualifying pause-split period gets
+            // its own class so `applyAtomicGroupCoupling` can exempt it
+            // specifically; every other punctuation delete (including a
+            // non-qualifying period) keeps the unchanged `punctuationOrCasing`
+            // behavior.
+            if isPauseSplitPeriod(a, baseline: baseline) {
+                return (true, .pauseSplitMerge, nil)
+            }
             return (true, .punctuationOrCasing, nil)
         }
         // Quick task 260723-sx1, criterion B: consulted BEFORE the
@@ -681,6 +698,77 @@ public enum EditGuard {
         // the filler reading is the MINORITY reading for nearly all of
         // them.
         return (false, nil, .contentWordDeletion)
+    }
+
+    // MARK: - Quick task 260801-m8o: pause-split period predicate
+
+    /// Four-arm structural predicate recognising a Whisper pause-split
+    /// period — a false mid-clause sentence boundary the LLM correctly
+    /// deletes — as distinct from a genuine sentence terminator, an
+    /// abbreviation dot, or a glued/ellipsis form. Lexicon-free by
+    /// construction: tests inject `TestSpellLexicon.allKnown` (an
+    /// all-known stub), so a lexicon-based abbreviation check would
+    /// diverge from production; every arm below is purely structural
+    /// (token kind, text, whitespace, length, casing).
+    ///
+    /// ALL FOUR arms must hold. Each is forced by a distinct real corpus
+    /// counterexample (`~/Library/Application Support/Dicticus/
+    /// DebugRecordings/cleanup-2026-07-{30,31}.jsonl`, 330-record window):
+    ///
+    /// - R1 (exact `.`): `testAtomicRevert_rightSoLostQuestionMark` — a `?`
+    ///   deleted alone leaves "right So"; `?`/`!`/`,` are never pause
+    ///   splits, only `.` is.
+    /// - R2 (own trailing non-empty and all-whitespace): glued forms
+    ///   `a.m`, `claw.md`, `.claude`, `3.5` all have EMPTY period
+    ///   trailing (no space before the next token) — never a pause split.
+    /// - R3 (previous baseline token is `.word`, `text.count >= 5`):
+    ///   `cleanup-2026-07-30.jsonl:35` — "…Funktion **bzw.** dieser
+    ///   Button…" — an abbreviation dot followed by a lowercase word.
+    ///   Firing here would emit "bzw dieser". Length is a lexicon-free
+    ///   abbreviation guard (abbreviations are overwhelmingly <= 4 chars:
+    ///   bzw, z, B, ca, usw, etc, ggf, Dr, Nr, vgl, u, a, d, h, e, g, i,
+    ///   vs, Mr, St). ACCEPTED COST: a genuine pause-split merge after a
+    ///   word shorter than 5 characters is a missed repair — today's
+    ///   coupled (safe) behavior.
+    /// - R4 (next baseline token is `.word`, first character lowercase):
+    ///   `cleanup-2026-07-31.jsonl:3` ("…Apple Music. **I** hovered…") and
+    ///   `:37` ("…looking for. **So** maybe…") — real sentence boundaries.
+    ///   Whisper capitalises after a period it means; a lowercase
+    ///   continuation is the pause-split signature. ACCEPTED COST: a
+    ///   genuine pause-split merge before a capitalised German noun
+    ///   continuation (German capitalises nouns, not just sentence starts)
+    ///   is also a missed repair — again the safe direction.
+    ///
+    /// R3+R4 together also fully exclude the ellipsis run in
+    /// `cleanup-2026-07-31.jsonl:91` ("another**...**investigation" —
+    /// each dot has a dot neighbour, so neither neighbour is a `.word`);
+    /// no separate ellipsis arm is needed.
+    ///
+    /// Index arithmetic (`baseline[index - 1]` / `baseline[index + 1]`) is
+    /// safe because `EditGuardTokenizer` assigns baseline indices
+    /// sequentially (`baseline[i].index == i` by construction) — the same
+    /// invariant `classifyDelete`'s repetition check above already relies
+    /// on.
+    private static func isPauseSplitPeriod(_ token: Token, baseline: [Token]) -> Bool {
+        // R1: exactly a period — never `?`/`!`/`,`/other punctuation.
+        guard token.text == "." else { return false }
+        // R2: own trailing is non-empty and every character is horizontal
+        // whitespace — excludes glued forms (`a.m`, `claw.md`, `.claude`,
+        // `3.5`) and ellipsis dots (empty trailing between adjacent dots).
+        guard !token.trailing.isEmpty, token.trailing.allSatisfy({ $0.isWhitespace }) else { return false }
+        let idx = token.index
+        // R3: previous baseline token exists, is a word, and is at least
+        // 5 characters (lexicon-free abbreviation guard).
+        guard idx > 0 else { return false }
+        let prev = baseline[idx - 1]
+        guard prev.kind == .word, prev.text.count >= 5 else { return false }
+        // R4: next baseline token exists, is a word, and starts lowercase
+        // (the pause-split signature — Whisper capitalises after a period
+        // it means).
+        guard idx + 1 < baseline.count else { return false }
+        let next = baseline[idx + 1]
+        guard next.kind == .word, let firstChar = next.text.first, firstChar.isLowercase else { return false }
+        return true
     }
 
     // MARK: - move (D-04 — MOVES ARE PERMITTED)
@@ -1282,7 +1370,26 @@ public enum EditGuard {
         guard !groupsToRevert.isEmpty else { return }
         for i in edits.indices {
             let cid = clusterID[i]
-            guard cid != -1, verdicts[i].accepted, groupsToRevert.contains(find(cid)) else { continue }
+            guard cid != -1, verdicts[i].accepted, groupsToRevert.contains(find(cid)),
+                  // Quick task 260801-m8o: a period classified by the
+                  // pause-split-merge predicate is exempt from this flip.
+                  // It is punctuation-only
+                  // and already independently accepted, so it contributes to
+                  // neither `groupHasRejection` nor `groupHasContentMember`
+                  // above — the group's revert eligibility (whether
+                  // `groupsToRevert` contains this group at all) is therefore
+                  // bit-identical to before this exemption existed. Every
+                  // OTHER member of the group still renders its BASELINE
+                  // token when reverted (a rejected substitute renders its
+                  // `from`, a rejected delete/move restores at its baseline
+                  // anchor, a rejected insert is dropped), so exempting only
+                  // the period-delete yields exactly "baseline minus one
+                  // period" — never a mix of baseline and candidate content.
+                  // The tier-1 neither-source checker strips punctuation
+                  // before building word bigrams, so this partial acceptance
+                  // is tier-1-clean by construction, not by measurement.
+                  verdicts[i].acceptClass != AcceptClass.pauseSplitMerge.rawValue
+            else { continue }
             verdicts[i] = ClassifiedEdit(
                 kind: verdicts[i].kind, from: verdicts[i].from, to: verdicts[i].to,
                 accepted: false, acceptClass: nil,
