@@ -1543,7 +1543,34 @@ public enum EditGuard {
                         // remap entry exists (defensive; every rejected
                         // substitute's own slot is always populated).
                         let renderToken = substituteRestoreToken[i] ?? a
-                        output.append(WorkToken(text: renderToken.text, normalized: renderToken.normalized, kind: renderToken.kind, trailing: trailingFor(candidateIndex: i, ownTrailing: b.trailing), sentenceIndex: b.sentenceIndex, baselineCasingAlternative: nil))
+                        // Whitespace-provenance fix (quick task 260801-9n7,
+                        // evidence record 2026-07-29T03:47:35.149Z): this
+                        // branch restores the BASELINE token's `text` (via
+                        // `renderToken`) but was, unconditionally, taking the
+                        // CANDIDATE token's whitespace via `trailingFor`. A
+                        // baseline mark that carried a genuine inter-sentence
+                        // separator (the "." in "...labeled. So...", baseline
+                        // trailing " ") silently inherited a candidate glue
+                        // (the LLM's "labeled—to", trailing "") whenever the
+                        // candidate-derived trailing came back empty — gluing
+                        // two sentences together ("labeled.So"). Falling back
+                        // to the restored token's OWN baseline trailing in
+                        // that situation is source-faithful BY CONSTRUCTION:
+                        // it can never fabricate a separator the baseline
+                        // didn't have, which is exactly what protects
+                        // legitimate punct-glued-to-word source text like
+                        // "a.m"/"z.B"/"(word" (their own baseline trailing is
+                        // ALSO empty, so the fallback is a no-op there).
+                        // Scoped to `.punctuation` only — the sibling restore
+                        // paths (`restorationTargets`, front-of-output) are
+                        // already baseline-anchored and deliberately
+                        // untouched; a restored WORD's candidate-derived
+                        // trailing is not this defect's shape.
+                        let candidateDerivedTrailing = trailingFor(candidateIndex: i, ownTrailing: b.trailing)
+                        let restoredTrailing = (candidateDerivedTrailing.isEmpty && renderToken.kind == .punctuation)
+                            ? renderToken.trailing
+                            : candidateDerivedTrailing
+                        output.append(WorkToken(text: renderToken.text, normalized: renderToken.normalized, kind: renderToken.kind, trailing: restoredTrailing, sentenceIndex: b.sentenceIndex, baselineCasingAlternative: nil))
                     }
                 case .insert:
                     if v.accepted, let b = edit.to {
