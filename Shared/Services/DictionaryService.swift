@@ -357,6 +357,63 @@ class DictionaryService: ObservableObject {
         save()
     }
 
+    /// Result of an in-place entry edit (quick task 260801-ftf).
+    enum EntryEditResult: Equatable {
+        case saved
+        case notFound
+        case collision(String)   // the existing key that would have been clobbered
+        case invalid(String)     // user-facing reason
+    }
+
+    /// Edit an existing entry's original and/or replacement in place — the shared
+    /// service method backing both the macOS row "Edit…" affordance and the iOS
+    /// tappable row (quick task 260801-ftf, backlog: dictionary-entry-editing.md).
+    ///
+    /// Two intentional metadata decisions, both sanctioned by the backlog:
+    /// - `createdAt` is PRESERVED from the pre-edit entry. An edit is not a
+    ///   creation; re-stamping it here would silently reshuffle the "Recent"
+    ///   sort every time a user fixed a typo.
+    /// - `source` is deliberately PROMOTED to `.user`. An edited entry is now
+    ///   user-authored content, and the source-priority sort then surfaces it
+    ///   where the user who just touched it expects to find it.
+    ///
+    /// Known limitation, documented not fixed: renaming an entry whose key
+    /// exists in `DefaultLexicon`/`PersonalLexicon` frees that key, so
+    /// `prepopulateWithDefaults()` re-seeds the old entry on the next launch.
+    /// `DefaultLexicon.entries` is empty in release builds, so this only
+    /// affects dev builds compiled with `PERSONAL_LEXICON`.
+    ///
+    /// Every guard below runs BEFORE any mutation, so no rejected path can
+    /// leave the dictionary half-changed. Reaches persistence only through
+    /// `save()` — never `Self.defaults` directly.
+    @discardableResult
+    func renameEntry(from oldOriginal: String, to newOriginal: String, replacement: String) -> EntryEditResult {
+        // oldOriginal comes from the dictionary (a selected row's id), not a
+        // text field — used verbatim as the lookup key, never trimmed.
+        guard let existing = dictionary[oldOriginal] else { return .notFound }
+
+        let trimmedNew = newOriginal.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedReplacement = replacement.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !trimmedNew.isEmpty else { return .invalid("Original cannot be empty.") }
+        guard !trimmedReplacement.isEmpty else { return .invalid("Replacement cannot be empty.") }
+        guard trimmedNew != trimmedReplacement else { return .invalid("Original and replacement cannot be identical.") }
+
+        // Exact-key collision only: the store is keyed by exact string, so
+        // exact-key collision is precisely the clobber risk. A case-only
+        // rename produces a distinct key and is therefore a legal rename, not
+        // a collision — matching is case-insensitive by default, so this is a
+        // no-op for matching behavior; the UI must not imply otherwise.
+        if trimmedNew != oldOriginal, dictionary[trimmedNew] != nil {
+            return .collision(trimmedNew)
+        }
+
+        dictionary.removeValue(forKey: oldOriginal)
+        dictionary[trimmedNew] = DictionaryMetadata(replacement: trimmedReplacement, createdAt: existing.createdAt, source: .user)
+        save()
+        return .saved
+    }
+
     func removeReplacement(for original: String) {
         dictionary.removeValue(forKey: original)
         save()
