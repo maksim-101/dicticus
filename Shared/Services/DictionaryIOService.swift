@@ -285,6 +285,58 @@ public final class DictionaryIOService {
         return (try? encoder.encode(entries)) ?? Data()
     }
 
+    // MARK: - Import Preview (quick task 260801-ftf)
+
+    /// File-side statistics for the merge-strategy dialog, computed from the
+    /// already-parsed file BEFORE the user picks a strategy — the honest
+    /// numbers the 2026-08-01 near-miss (25-entry CSV one Return-keypress
+    /// away from destroying 166 of 191 entries) required but did not have.
+    struct ImportPreview: Equatable {
+        let fileCount: Int             // unique valid originals in the file
+        let newCount: Int              // of those, absent from the dictionary
+        let conflictCount: Int         // of those, already present
+        let skippedCount: Int          // rows dropped by validation
+        let deletedByReplaceAll: Int   // existing keys absent from the file
+
+        /// Returns a copy with `skippedCount` incremented by `n`, so the
+        /// service can fold in parse-stage warnings without reconstructing
+        /// the struct at the call site.
+        func addingSkipped(_ n: Int) -> ImportPreview {
+            ImportPreview(fileCount: fileCount, newCount: newCount, conflictCount: conflictCount, skippedCount: skippedCount + n, deletedByReplaceAll: deletedByReplaceAll)
+        }
+    }
+
+    /// Pure computation over already-parsed rows — no I/O, no mutation.
+    /// Applies the SAME two drop rules `merge` applies (empty replacement,
+    /// original == replacement), counting the drops into `skippedCount`.
+    /// A file that repeats an original counts once in `fileCount` (the merge
+    /// is last-write-wins per key, so unique keys are the truthful
+    /// contribution). `deletedByReplaceAll` is written as a filter over
+    /// existing keys, not a subtraction, so the number is self-evidently the
+    /// thing it claims to be.
+    func preview(incoming: [CSVImportRow], against existing: [String: DictionaryMetadata]) -> ImportPreview {
+        var survivingOriginals = Set<String>()
+        var skippedCount = 0
+
+        for row in incoming {
+            guard !row.replacement.isEmpty else { skippedCount += 1; continue }
+            guard row.original != row.replacement else { skippedCount += 1; continue }
+            survivingOriginals.insert(row.original)
+        }
+
+        let conflictCount = survivingOriginals.filter { existing[$0] != nil }.count
+        let newCount = survivingOriginals.count - conflictCount
+        let deletedByReplaceAll = existing.keys.filter { !survivingOriginals.contains($0) }.count
+
+        return ImportPreview(
+            fileCount: survivingOriginals.count,
+            newCount: newCount,
+            conflictCount: conflictCount,
+            skippedCount: skippedCount,
+            deletedByReplaceAll: deletedByReplaceAll
+        )
+    }
+
     // MARK: - Merge
 
     /// Merge incoming rows into an existing dictionary using the specified strategy.

@@ -459,6 +459,49 @@ class DictionaryService: ObservableObject {
         }
     }
 
+    /// Thrown by `parseRows` for an unrecognized format string. `errorDescription`
+    /// reproduces the pre-existing `importData` failure text verbatim, so
+    /// extracting the format switch into a shared helper does not change the
+    /// user-visible message.
+    private struct UnsupportedFormatError: LocalizedError {
+        let format: String
+        var errorDescription: String? { "Unsupported format: \(format). Use 'csv' or 'json'." }
+    }
+
+    /// Format-switch + row-validation, shared by `importData` and `previewImport`
+    /// (quick task 260801-ftf) so there is exactly one parse/validate path.
+    /// Returns ALWAYS-VALID rows: csv rows are already stripped by
+    /// `io.parseCSV`; json rows are filtered here with the same two rules
+    /// (empty replacement, original == replacement) `importData` applied
+    /// inline before this extraction. Throws `UnsupportedFormatError` for any
+    /// other format string.
+    private func parseRows(_ data: Data, format: String) throws -> (rows: [CSVImportRow], warnings: [String]) {
+        let io = DictionaryIOService()
+        switch format.lowercased() {
+        case "csv":
+            let result = try io.parseCSV(String(data: data, encoding: .utf8) ?? "")
+            return (result.rows, result.warnings.map { $0.message })
+        case "json":
+            let parsed = try io.parseJSON(data)
+            var validRows: [CSVImportRow] = []
+            var warningMessages: [String] = []
+            for (offset, row) in parsed.enumerated() {
+                if row.replacement.isEmpty {
+                    warningMessages.append("Entry \(offset + 1): empty replacement for '\(row.original)' — skipped")
+                    continue
+                }
+                if row.original == row.replacement {
+                    warningMessages.append("Entry \(offset + 1): original == replacement '\(row.original)' — skipped")
+                    continue
+                }
+                validRows.append(row)
+            }
+            return (validRows, warningMessages)
+        default:
+            throw UnsupportedFormatError(format: format)
+        }
+    }
+
     /// Import a CSV or JSON file into the dictionary using the specified merge strategy.
     ///
     /// Instantiates DictionaryIOService synchronously on the main actor (Finding 8 — safe
@@ -467,31 +510,7 @@ class DictionaryService: ObservableObject {
     func importData(_ data: Data, format: String, strategy: MergeStrategy) -> ImportResult {
         let io = DictionaryIOService()
         do {
-            let incoming: [CSVImportRow]
-            var warningMessages: [String] = []
-            switch format.lowercased() {
-            case "csv":
-                let result = try io.parseCSV(String(data: data, encoding: .utf8) ?? "")
-                incoming = result.rows
-                warningMessages = result.warnings.map { $0.message }
-            case "json":
-                let parsed = try io.parseJSON(data)
-                var validRows: [CSVImportRow] = []
-                for (offset, row) in parsed.enumerated() {
-                    if row.replacement.isEmpty {
-                        warningMessages.append("Entry \(offset + 1): empty replacement for '\(row.original)' — skipped")
-                        continue
-                    }
-                    if row.original == row.replacement {
-                        warningMessages.append("Entry \(offset + 1): original == replacement '\(row.original)' — skipped")
-                        continue
-                    }
-                    validRows.append(row)
-                }
-                incoming = validRows
-            default:
-                return .failure("Unsupported format: \(format). Use 'csv' or 'json'.")
-            }
+            let (incoming, warningMessages) = try parseRows(data, format: format)
             let merged = io.merge(incoming: incoming, into: dictionary, strategy: strategy)
             let addedCount = merged.keys.filter { dictionary[$0] != merged[$0] }.count
             // Valid rows that were not applied are duplicates left unchanged.
@@ -499,6 +518,29 @@ class DictionaryService: ObservableObject {
             dictionary = merged
             save()
             return .success(added: addedCount, kept: keptCount, warnings: warningMessages)
+        } catch {
+            return .failure(error.localizedDescription)
+        }
+    }
+
+    /// Result of a read-only import preview (quick task 260801-ftf): the
+    /// file-side stats shown BEFORE the merge-strategy dialog appears, or the
+    /// parse/format failure. Never mutates `dictionary`, never calls `save()`.
+    enum ImportPreviewResult: Equatable {
+        case preview(DictionaryIOService.ImportPreview)
+        case failure(String)
+    }
+
+    /// Compute the import preview for a file without mutating the dictionary.
+    /// Reuses `parseRows` — the exact same parse/validate path `importData`
+    /// uses — so the preview numbers can never diverge from what an actual
+    /// import would do.
+    func previewImport(_ data: Data, format: String) -> ImportPreviewResult {
+        let io = DictionaryIOService()
+        do {
+            let (rows, warnings) = try parseRows(data, format: format)
+            let preview = io.preview(incoming: rows, against: dictionary).addingSkipped(warnings.count)
+            return .preview(preview)
         } catch {
             return .failure(error.localizedDescription)
         }
