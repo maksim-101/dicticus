@@ -257,8 +257,8 @@ final class EditGuardMergeAtomicityTests: XCTestCase {
     // MARK: - Quick task 260801-9n7: sentence-glue restore-boundary regression
     //
     // Evidence record 2026-07-29T03:47:35.149Z
-    // (260801-9n7-EVIDENCE.json; "Apple support" anonymized to "Pearcom
-    // support" for this public repo): EditGuard correctly REJECTS the LLM's
+    // (260801-9n7-EVIDENCE.json; brand name anonymized shape-preserving for
+    // this public repo): EditGuard correctly REJECTS the LLM's
     // cross-sentence em-dash merge at the "...it's labeled. So it matches..."
     // boundary, but the restored sentence-terminal "." inherits the
     // candidate em-dash's EMPTY trailing instead of its own baseline " "
