@@ -98,6 +98,7 @@
 		71D9176343B9C1E48939E049 /* AppLocalMigrationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49ECB0A9B3580BA591EA8492 /* AppLocalMigrationService.swift */; };
 		77E629F73BA61CF10EF8CAC5 /* SwissNumberFormatterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49F508FA7F203223AB4D05A0 /* SwissNumberFormatterTests.swift */; };
 		7806CA0106275C118F2F688A /* FunctionWords.swift in Sources */ = {isa = PBXBuildFile; fileRef = F278D1B719DF075C135C4B07 /* FunctionWords.swift */; };
+		78DB03EE60CA2A43DBFEFEE5 /* AsrReplayHarnessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 924528FC6CB78FA7E6F697FF /* AsrReplayHarnessTests.swift */; };
 		7C2DE853EFA9D981F406B045 /* LastTranscriptionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC0CAF13337A0AF85CB46BC3 /* LastTranscriptionView.swift */; };
 		7C61B66CB6F5BB972C92FFFC /* TranscriptionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4711E5E2A1A90B0A7DC48F3 /* TranscriptionServiceTests.swift */; };
 		7E664A31767008264DF7089F /* EditGuardCalibrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B859D997214D179829112730 /* EditGuardCalibrationTests.swift */; };
@@ -299,6 +300,7 @@
 		8A7A0948C699E86C7B8C8C16 /* EditGuardDanglingPunctuationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditGuardDanglingPunctuationTests.swift; sourceTree = "<group>"; };
 		8EE4880D43EC5BD1E1CD7F1A /* DiscardProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscardProbe.swift; sourceTree = "<group>"; };
 		90BAB8D1F5509E0EA76D6DB7 /* DicticusTestBootstrap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DicticusTestBootstrap.swift; sourceTree = "<group>"; };
+		924528FC6CB78FA7E6F697FF /* AsrReplayHarnessTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsrReplayHarnessTests.swift; sourceTree = "<group>"; };
 		9307719330E20141175DCB2A /* DictionaryEntryEditTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryEntryEditTests.swift; sourceTree = "<group>"; };
 		9323B1AD9E85950CAD77E332 /* SystemSettingsURLs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemSettingsURLs.swift; sourceTree = "<group>"; };
 		9458B1D730A30CB3CF0F2A07 /* PronounPersonMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PronounPersonMap.swift; sourceTree = "<group>"; };
@@ -524,6 +526,7 @@
 			isa = PBXGroup;
 			children = (
 				A95123FD20501B4871C75668 /* AppLocalMigrationServiceTests.swift */,
+				924528FC6CB78FA7E6F697FF /* AsrReplayHarnessTests.swift */,
 				BD956E2E462A36191625195C /* BrandMatcherGermanPrecisionTests.swift */,
 				99CFDF36F2F09B56AA22DD55 /* BrandMatcherTests.swift */,
 				E6599AE23EF7ABF7DD28B116 /* BrandPhoneticsTests.swift */,
@@ -963,6 +966,7 @@
 			files = (
 				05935452B0BBEE1135ECAEC4 /* AdaptiveVoiceGateTests.swift in Sources */,
 				64AA000669A4808A9BC1CA29 /* AppLocalMigrationServiceTests.swift in Sources */,
+				78DB03EE60CA2A43DBFEFEE5 /* AsrReplayHarnessTests.swift in Sources */,
 				BD87CB32FB9F05A589E884AE /* BrandMatcherGermanPrecisionTests.swift in Sources */,
 				9B88CE1891F4D8BADD684F72 /* BrandMatcherTests.swift in Sources */,
 				1A9715F68BCFABF765FED77B /* BrandPhoneticsTests.swift in Sources */,

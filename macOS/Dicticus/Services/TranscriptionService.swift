@@ -194,10 +194,35 @@ class TranscriptionService: ObservableObject {
         defer { if state == .transcribing { state = .idle } }
 
         let samples = sampleBuffer.drain()
+        let inputSampleRate = audioEngine.inputNode.outputFormat(forBus: 0).sampleRate
 
+        let transcriptionResult = try await transcribe(
+            rawSamples: samples,
+            inputSampleRate: inputSampleRate
+        ).result
+
+        lastResult = transcriptionResult
+        state = .idle
+        return transcriptionResult
+    }
+
+    /// The transcription path proper, from raw captured samples to a result:
+    /// resample → duration guard → AdaptiveVoiceGate → WhisperKit → NoSpeechDiscard
+    /// → script validation → language detection → confidence.
+    ///
+    /// Split out of `stopRecordingAndTranscribe()` (quick task 260802-ass) so archived
+    /// capture WAVs can be replayed through the exact same path the live hotkey uses,
+    /// without an audio engine. The live caller owns `lastResult`/`state`; this function
+    /// is pure with respect to service state so a replay cannot perturb it.
+    ///
+    /// Returns the per-segment `avgLogprob`/`noSpeechProb` alongside the result — the
+    /// live path discards them, the replay harness records them.
+    private func transcribe(
+        rawSamples samples: [Float],
+        inputSampleRate: Double
+    ) async throws -> (result: DicticusTranscriptionResult, avgLogprobs: [Float], noSpeechProbs: [Float]) {
         // Resample to 16kHz mono if hardware sample rate differs.
         // WhisperKit requires 16kHz Float32 mono input.
-        let inputSampleRate = audioEngine.inputNode.outputFormat(forBus: 0).sampleRate
         let resampledSamples: [Float]
         if abs(inputSampleRate - sampleRate) > 1.0 {
             resampledSamples = resampleAudio(samples, from: inputSampleRate, to: sampleRate)
@@ -389,9 +414,7 @@ class TranscriptionService: ObservableObject {
             confidence: confidence
         )
 
-        lastResult = transcriptionResult
-        state = .idle
-        return transcriptionResult
+        return (transcriptionResult, avgLogprobs, allSegments.map(\.noSpeechProb))
     }
 
     // MARK: - Adaptive voice gate support
@@ -661,6 +684,20 @@ extension TranscriptionService {
         } catch {
             return nil
         }
+    }
+
+    /// Replay already-captured samples through the live transcription path.
+    ///
+    /// Used by the archived-WAV replay harness (quick task 260802-ass) to measure ASR
+    /// behaviour across recordings without an audio engine. Because it calls the same
+    /// `transcribe(rawSamples:inputSampleRate:)` the hotkey path calls, the gates
+    /// (duration, AdaptiveVoiceGate, NoSpeechDiscard) apply identically — a replay that
+    /// throws `.silenceOnly` is a faithful reproduction, not a harness artifact.
+    func testTranscribe(
+        samples: [Float],
+        inputSampleRate: Double
+    ) async throws -> (result: DicticusTranscriptionResult, avgLogprobs: [Float], noSpeechProbs: [Float]) {
+        try await transcribe(rawSamples: samples, inputSampleRate: inputSampleRate)
     }
 }
 #endif
