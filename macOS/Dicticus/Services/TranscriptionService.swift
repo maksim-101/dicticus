@@ -217,9 +217,14 @@ class TranscriptionService: ObservableObject {
     ///
     /// Returns the per-segment `avgLogprob`/`noSpeechProb` alongside the result — the
     /// live path discards them, the replay harness records them.
+    /// - Parameter promptText: SPIKE ONLY (260802, speaker-L1 confusion priming). When
+    ///   non-nil it is tokenized into `DecodingOptions.promptTokens`, i.e. Whisper's
+    ///   initial-prompt / previous-context bias. The live dictation path passes nil, so
+    ///   decoding is byte-identical to before this parameter existed.
     private func transcribe(
         rawSamples samples: [Float],
-        inputSampleRate: Double
+        inputSampleRate: Double,
+        promptText: String? = nil
     ) async throws -> (result: DicticusTranscriptionResult, avgLogprobs: [Float], noSpeechProbs: [Float]) {
         // Resample to 16kHz mono if hardware sample rate differs.
         // WhisperKit requires 16kHz Float32 mono input.
@@ -291,10 +296,16 @@ class TranscriptionService: ObservableObject {
         // Whisper's seq2seq decoder does not need the trailing-silence tail-pad Parakeet's
         // TDT decoder required to flush its final token (spike 008 Fix B) — removed per the
         // 41-05 decision (Whisper has no equivalent terminal-punctuation tail-drop failure mode).
+        // Spike 260802: nil on the live path, so `promptTokens` stays nil and the
+        // prefill sequence is unchanged. WhisperKit filters special tokens out of the
+        // prompt itself (TextDecoder.swift:200), so raw `encode(text:)` output is safe.
+        let promptTokens = promptText.flatMap { whisperKit.tokenizer?.encode(text: $0) }
+
         let decodeOptions = DecodingOptions(
             language: nil,
             detectLanguage: true,
             withoutTimestamps: true,
+            promptTokens: promptTokens,
             suppressBlank: true,
             compressionRatioThreshold: 2.4,
             logProbThreshold: -1.0,
@@ -695,9 +706,14 @@ extension TranscriptionService {
     /// throws `.silenceOnly` is a faithful reproduction, not a harness artifact.
     func testTranscribe(
         samples: [Float],
-        inputSampleRate: Double
+        inputSampleRate: Double,
+        promptText: String? = nil
     ) async throws -> (result: DicticusTranscriptionResult, avgLogprobs: [Float], noSpeechProbs: [Float]) {
-        try await transcribe(rawSamples: samples, inputSampleRate: inputSampleRate)
+        try await transcribe(
+            rawSamples: samples,
+            inputSampleRate: inputSampleRate,
+            promptText: promptText
+        )
     }
 }
 #endif

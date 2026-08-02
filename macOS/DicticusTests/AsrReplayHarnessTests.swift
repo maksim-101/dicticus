@@ -71,7 +71,8 @@ final class AsrReplayHarnessTests: XCTestCase {
             do {
                 let out = try await service.testTranscribe(
                     samples: samples,
-                    inputSampleRate: sampleRate
+                    inputSampleRate: sampleRate,
+                    promptText: env["DICTICUS_REPLAY_PROMPT"]
                 )
                 row["text"] = out.result.text
                 row["language"] = out.result.language
