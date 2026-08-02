@@ -34,10 +34,17 @@ final class AsrReplayHarnessTests: XCTestCase {
         }
 
         let dirURL = URL(fileURLWithPath: replayDir)
-        let wavs = try FileManager.default
+        var wavs = try FileManager.default
             .contentsOfDirectory(at: dirURL, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension.lowercased() == "wav" }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
+
+        // Take every Nth file rather than the first N, so a truncated diagnostic run
+        // still spans the whole date range instead of only the earliest day.
+        if let limit = env["DICTICUS_REPLAY_LIMIT"].flatMap(Int.init), limit > 0, wavs.count > limit {
+            let stride = Double(wavs.count) / Double(limit)
+            wavs = (0..<limit).map { wavs[min(wavs.count - 1, Int(Double($0) * stride))] }
+        }
 
         XCTAssertFalse(wavs.isEmpty, "No WAVs found in \(replayDir)")
 
@@ -47,9 +54,22 @@ final class AsrReplayHarnessTests: XCTestCase {
         let handle = try FileHandle(forWritingTo: URL(fileURLWithPath: outPath))
         defer { try? handle.close() }
 
+        let promptText = Self.nonEmpty(env["DICTICUS_REPLAY_PROMPT"])
+        let forceLanguage = Self.nonEmpty(env["DICTICUS_REPLAY_LANG"])
+        let relaxThresholds = env["DICTICUS_REPLAY_RELAX"] == "1"
+        print("replay condition: prompt=\(promptText ?? "<none>") "
+              + "lang=\(forceLanguage ?? "<auto>") relax=\(relaxThresholds)")
+
         for wav in wavs {
             let name = wav.lastPathComponent
-            var row: [String: Any] = ["file": name]
+            // Record the condition on every row so a result file can never be
+            // misattributed to the wrong arm of an A/B.
+            var row: [String: Any] = [
+                "file": name,
+                "cond_prompt": promptText ?? "",
+                "cond_lang": forceLanguage ?? "",
+                "cond_relax": relaxThresholds,
+            ]
             // Filenames are `capture-YYYY-MM-DDTHH-MM-SS.mmmZ.wav`; the day is the
             // grouping key for the per-day trend.
             if name.count > 18 {
@@ -69,10 +89,15 @@ final class AsrReplayHarnessTests: XCTestCase {
             row["peak"] = samples.map { abs($0) }.max() ?? 0
 
             do {
+                // An env var set to "" is present-but-empty. Passing that through as a
+                // language would mean `language: ""` with detectLanguage off, which
+                // silently kills every decode — treat empty as absent.
                 let out = try await service.testTranscribe(
                     samples: samples,
                     inputSampleRate: sampleRate,
-                    promptText: env["DICTICUS_REPLAY_PROMPT"]
+                    promptText: promptText,
+                    forceLanguage: forceLanguage,
+                    relaxThresholds: relaxThresholds
                 )
                 row["text"] = out.result.text
                 row["language"] = out.result.language
@@ -91,6 +116,11 @@ final class AsrReplayHarnessTests: XCTestCase {
     }
 
     // MARK: - Helpers
+
+    private static func nonEmpty(_ s: String?) -> String? {
+        guard let s, !s.isEmpty else { return nil }
+        return s
+    }
 
     private static func write(_ row: [String: Any], to handle: FileHandle) {
         guard let data = try? JSONSerialization.data(withJSONObject: row) else { return }

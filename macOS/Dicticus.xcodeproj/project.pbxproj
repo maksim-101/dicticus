@@ -114,6 +114,7 @@
 		8AEBBFCCD69BB9A401CEFCB9 /* CleanupProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACD25584A55773982F1CBD98 /* CleanupProvider.swift */; };
 		90C3C0F705B6F795EB1DD7FD /* DictionaryDataLossGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CC505406DD81429427683C4 /* DictionaryDataLossGuardTests.swift */; };
 		924D9FB27BB17245B05483F7 /* FilenameMangleProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E2C0EA6797D123F9D1AF767 /* FilenameMangleProbe.swift */; };
+		93700175C092AF15DBAE5DBC /* ContextPromptAbTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B0EEFB9861A57A622427164 /* ContextPromptAbTests.swift */; };
 		988B5D98003087E5FFAAE4E0 /* SettingsRoot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B196D27CC0FD8F6C9126E0 /* SettingsRoot.swift */; };
 		98BF0C12311014E716C6C480 /* EditGuardDanglingPunctuationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A7A0948C699E86C7B8C8C16 /* EditGuardDanglingPunctuationTests.swift */; };
 		98BFCAA6D56789E24714FCC7 /* OutputLevelSampler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C0E5DC74176D430A95986EC /* OutputLevelSampler.swift */; };
@@ -254,6 +255,7 @@
 		49F508FA7F203223AB4D05A0 /* SwissNumberFormatterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwissNumberFormatterTests.swift; sourceTree = "<group>"; };
 		49FEF465F3ABEBBFD0389EB5 /* TextInjectorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextInjectorTests.swift; sourceTree = "<group>"; };
 		4A3E0DD3883D76BF248B7EB8 /* BrandStringMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandStringMetrics.swift; sourceTree = "<group>"; };
+		4B0EEFB9861A57A622427164 /* ContextPromptAbTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextPromptAbTests.swift; sourceTree = "<group>"; };
 		4E55688BE80AC43C78488748 /* InflectionRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InflectionRules.swift; sourceTree = "<group>"; };
 		516F18D70F7720AD0779EA74 /* HotkeyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyManager.swift; sourceTree = "<group>"; };
 		51DD0C4B358C8AFB21749F27 /* Dicticus.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Dicticus.entitlements; sourceTree = "<group>"; };
@@ -534,6 +536,7 @@
 				174AD8DEBAA5EAA8DF8734DB /* CleanupPromptTests.swift */,
 				3DDAA158F46193C40A3A8358 /* CleanupPromptVNextTests.swift */,
 				C30BA4C657A1C41682A689F5 /* CleanupServiceTests.swift */,
+				4B0EEFB9861A57A622427164 /* ContextPromptAbTests.swift */,
 				81A5F07A50992847BD7F6EBB /* DicticusDefaultsTests.swift */,
 				2499A2640576B94D1BA5CD41 /* DicticusTests.swift */,
 				F4A28F83C4DD2A966829E22E /* DictionaryIOServiceTests.swift */,
@@ -977,6 +980,7 @@
 				1B17B2B6DF3165854D50076C /* CleanupPromptVariantTests.swift in Sources */,
 				EFF84B780F9C7013E638D533 /* CleanupServiceTests.swift in Sources */,
 				5EEB3E797170146D6935991B /* ClosedListTests.swift in Sources */,
+				93700175C092AF15DBAE5DBC /* ContextPromptAbTests.swift in Sources */,
 				B3B9E9B8177619B59EE6FC1C /* ContextResolverTests.swift in Sources */,
 				D0721C4F1028A96B44E8FE8A /* DictationContextTests.swift in Sources */,
 				BC46646AC6ACB62C88CE8114 /* DicticusDefaultsTests.swift in Sources */,

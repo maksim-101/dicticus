@@ -221,10 +221,17 @@ class TranscriptionService: ObservableObject {
     ///   non-nil it is tokenized into `DecodingOptions.promptTokens`, i.e. Whisper's
     ///   initial-prompt / previous-context bias. The live dictation path passes nil, so
     ///   decoding is byte-identical to before this parameter existed.
+    /// - Parameter forceLanguage: SPIKE ONLY. Non-nil pins the decode language and turns
+    ///   `detectLanguage` off — used to isolate the `promptTokens` × language-detection
+    ///   interaction. nil on the live path, which keeps auto-detection.
+    /// - Parameter relaxThresholds: SPIKE ONLY. Drops the quality-fallback thresholds so a
+    ///   prompted decode cannot be discarded for scoring below them. false on the live path.
     private func transcribe(
         rawSamples samples: [Float],
         inputSampleRate: Double,
-        promptText: String? = nil
+        promptText: String? = nil,
+        forceLanguage: String? = nil,
+        relaxThresholds: Bool = false
     ) async throws -> (result: DicticusTranscriptionResult, avgLogprobs: [Float], noSpeechProbs: [Float]) {
         // Resample to 16kHz mono if hardware sample rate differs.
         // WhisperKit requires 16kHz Float32 mono input.
@@ -302,14 +309,14 @@ class TranscriptionService: ObservableObject {
         let promptTokens = promptText.flatMap { whisperKit.tokenizer?.encode(text: $0) }
 
         let decodeOptions = DecodingOptions(
-            language: nil,
-            detectLanguage: true,
+            language: forceLanguage,
+            detectLanguage: forceLanguage == nil,
             withoutTimestamps: true,
             promptTokens: promptTokens,
             suppressBlank: true,
-            compressionRatioThreshold: 2.4,
-            logProbThreshold: -1.0,
-            noSpeechThreshold: 0.6,
+            compressionRatioThreshold: relaxThresholds ? nil : 2.4,
+            logProbThreshold: relaxThresholds ? nil : -1.0,
+            noSpeechThreshold: relaxThresholds ? nil : 0.6,
             chunkingStrategy: .vad
         )
         let results = try await whisperKit.transcribe(audioArray: resampledSamples, decodeOptions: decodeOptions)
@@ -707,12 +714,16 @@ extension TranscriptionService {
     func testTranscribe(
         samples: [Float],
         inputSampleRate: Double,
-        promptText: String? = nil
+        promptText: String? = nil,
+        forceLanguage: String? = nil,
+        relaxThresholds: Bool = false
     ) async throws -> (result: DicticusTranscriptionResult, avgLogprobs: [Float], noSpeechProbs: [Float]) {
         try await transcribe(
             rawSamples: samples,
             inputSampleRate: inputSampleRate,
-            promptText: promptText
+            promptText: promptText,
+            forceLanguage: forceLanguage,
+            relaxThresholds: relaxThresholds
         )
     }
 }
