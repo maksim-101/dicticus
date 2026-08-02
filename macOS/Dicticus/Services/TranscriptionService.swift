@@ -217,21 +217,9 @@ class TranscriptionService: ObservableObject {
     ///
     /// Returns the per-segment `avgLogprob`/`noSpeechProb` alongside the result — the
     /// live path discards them, the replay harness records them.
-    /// - Parameter promptText: SPIKE ONLY (260802, speaker-L1 confusion priming). When
-    ///   non-nil it is tokenized into `DecodingOptions.promptTokens`, i.e. Whisper's
-    ///   initial-prompt / previous-context bias. The live dictation path passes nil, so
-    ///   decoding is byte-identical to before this parameter existed.
-    /// - Parameter forceLanguage: SPIKE ONLY. Non-nil pins the decode language and turns
-    ///   `detectLanguage` off — used to isolate the `promptTokens` × language-detection
-    ///   interaction. nil on the live path, which keeps auto-detection.
-    /// - Parameter relaxThresholds: SPIKE ONLY. Drops the quality-fallback thresholds so a
-    ///   prompted decode cannot be discarded for scoring below them. false on the live path.
     private func transcribe(
         rawSamples samples: [Float],
-        inputSampleRate: Double,
-        promptText: String? = nil,
-        forceLanguage: String? = nil,
-        relaxThresholds: Bool = false
+        inputSampleRate: Double
     ) async throws -> (result: DicticusTranscriptionResult, avgLogprobs: [Float], noSpeechProbs: [Float]) {
         // Resample to 16kHz mono if hardware sample rate differs.
         // WhisperKit requires 16kHz Float32 mono input.
@@ -303,20 +291,22 @@ class TranscriptionService: ObservableObject {
         // Whisper's seq2seq decoder does not need the trailing-silence tail-pad Parakeet's
         // TDT decoder required to flush its final token (spike 008 Fix B) — removed per the
         // 41-05 decision (Whisper has no equivalent terminal-punctuation tail-drop failure mode).
-        // Spike 260802: nil on the live path, so `promptTokens` stays nil and the
-        // prefill sequence is unchanged. WhisperKit filters special tokens out of the
-        // prompt itself (TextDecoder.swift:200), so raw `encode(text:)` output is safe.
-        let promptTokens = promptText.flatMap { whisperKit.tokenizer?.encode(text: $0) }
-
+        // Do NOT reintroduce `promptTokens` here. Spike 260802 wired Whisper's
+        // initial-prompt bias to pre-empt the user's German-L1 phoneme confusions and
+        // measured it over 154 archived captures: it breaks ~50% of decodes into
+        // noResult AND fabricates content absent from every baseline transcript. A
+        // 24-file matrix with an in-batch control falsified both alternative causes
+        // (detectLanguage, and the quality-fallback thresholds) — the promptTokens path
+        // itself is the failure, so it is not a tuning problem. See commits 5978e66 /
+        // 85a933c and .planning/quick/260802-ass-*.
         let decodeOptions = DecodingOptions(
-            language: forceLanguage,
-            detectLanguage: forceLanguage == nil,
+            language: nil,
+            detectLanguage: true,
             withoutTimestamps: true,
-            promptTokens: promptTokens,
             suppressBlank: true,
-            compressionRatioThreshold: relaxThresholds ? nil : 2.4,
-            logProbThreshold: relaxThresholds ? nil : -1.0,
-            noSpeechThreshold: relaxThresholds ? nil : 0.6,
+            compressionRatioThreshold: 2.4,
+            logProbThreshold: -1.0,
+            noSpeechThreshold: 0.6,
             chunkingStrategy: .vad
         )
         let results = try await whisperKit.transcribe(audioArray: resampledSamples, decodeOptions: decodeOptions)
@@ -713,18 +703,9 @@ extension TranscriptionService {
     /// throws `.silenceOnly` is a faithful reproduction, not a harness artifact.
     func testTranscribe(
         samples: [Float],
-        inputSampleRate: Double,
-        promptText: String? = nil,
-        forceLanguage: String? = nil,
-        relaxThresholds: Bool = false
+        inputSampleRate: Double
     ) async throws -> (result: DicticusTranscriptionResult, avgLogprobs: [Float], noSpeechProbs: [Float]) {
-        try await transcribe(
-            rawSamples: samples,
-            inputSampleRate: inputSampleRate,
-            promptText: promptText,
-            forceLanguage: forceLanguage,
-            relaxThresholds: relaxThresholds
-        )
+        try await transcribe(rawSamples: samples, inputSampleRate: inputSampleRate)
     }
 }
 #endif

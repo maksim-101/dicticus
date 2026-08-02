@@ -22,6 +22,11 @@ final class AsrReplayHarnessTests: XCTestCase {
 
     @MainActor
     func testReplayArchivedCaptures() async throws {
+        // If this harness ever regains condition knobs, remember that an env var set to
+        // "" is present-but-empty, not absent — that mistake once fed `language: ""` into
+        // the decoder and silently emptied every result, control arm included. Any A/B
+        // here also needs a no-op control in the same batch and the condition recorded on
+        // each row, or a harness that measured nothing will look like a finding.
         let env = ProcessInfo.processInfo.environment
         guard let replayDir = env["DICTICUS_REPLAY_DIR"] else {
             throw XCTSkip("Set DICTICUS_REPLAY_DIR to run the ASR replay harness.")
@@ -54,22 +59,9 @@ final class AsrReplayHarnessTests: XCTestCase {
         let handle = try FileHandle(forWritingTo: URL(fileURLWithPath: outPath))
         defer { try? handle.close() }
 
-        let promptText = Self.nonEmpty(env["DICTICUS_REPLAY_PROMPT"])
-        let forceLanguage = Self.nonEmpty(env["DICTICUS_REPLAY_LANG"])
-        let relaxThresholds = env["DICTICUS_REPLAY_RELAX"] == "1"
-        print("replay condition: prompt=\(promptText ?? "<none>") "
-              + "lang=\(forceLanguage ?? "<auto>") relax=\(relaxThresholds)")
-
         for wav in wavs {
             let name = wav.lastPathComponent
-            // Record the condition on every row so a result file can never be
-            // misattributed to the wrong arm of an A/B.
-            var row: [String: Any] = [
-                "file": name,
-                "cond_prompt": promptText ?? "",
-                "cond_lang": forceLanguage ?? "",
-                "cond_relax": relaxThresholds,
-            ]
+            var row: [String: Any] = ["file": name]
             // Filenames are `capture-YYYY-MM-DDTHH-MM-SS.mmmZ.wav`; the day is the
             // grouping key for the per-day trend.
             if name.count > 18 {
@@ -89,15 +81,9 @@ final class AsrReplayHarnessTests: XCTestCase {
             row["peak"] = samples.map { abs($0) }.max() ?? 0
 
             do {
-                // An env var set to "" is present-but-empty. Passing that through as a
-                // language would mean `language: ""` with detectLanguage off, which
-                // silently kills every decode — treat empty as absent.
                 let out = try await service.testTranscribe(
                     samples: samples,
-                    inputSampleRate: sampleRate,
-                    promptText: promptText,
-                    forceLanguage: forceLanguage,
-                    relaxThresholds: relaxThresholds
+                    inputSampleRate: sampleRate
                 )
                 row["text"] = out.result.text
                 row["language"] = out.result.language
@@ -116,11 +102,6 @@ final class AsrReplayHarnessTests: XCTestCase {
     }
 
     // MARK: - Helpers
-
-    private static func nonEmpty(_ s: String?) -> String? {
-        guard let s, !s.isEmpty else { return nil }
-        return s
-    }
 
     private static func write(_ row: [String: Any], to handle: FileHandle) {
         guard let data = try? JSONSerialization.data(withJSONObject: row) else { return }
