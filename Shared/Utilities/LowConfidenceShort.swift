@@ -2,11 +2,23 @@ import Foundation
 
 /// SPIKE-PROVISIONAL predicate for catastrophically garbled short dictations
 /// (quick task 260805-qx7). Both constants below are sourced from a hand-found
-/// 4-record sample (Aug 2-5 debug logs: durations 2.3-3.3s, mean avg_log_prob
-/// -0.39...-0.47) and are NOT validated against a labeled corpus until
-/// `.planning/quick/260805-qx7-confidence-warning-spike-low-confidence-/SPIKE.md`
-/// says so — check that file before trusting these values or building any
-/// user-facing feature on top of them.
+/// 4-record sample and were measured against a 191-record blind-labeled corpus
+/// in `.planning/quick/260805-qx7-confidence-warning-spike-low-confidence-/SPIKE.md`
+/// — READ THAT FILE before trusting these values or building any user-facing
+/// feature on top of them.
+///
+/// Measured result (SPIKE.md, do not re-derive without reading it first): NOT
+/// SHIPPABLE as a user-facing signal today. No (duration, threshold) cell in
+/// the tested grid achieves zero false positives — the dominant offender is a
+/// confident ASR mishearing of a brand name ("Fable 5" -> "Favo-Phi", mean
+/// avg_log_prob -0.64, comfortably past every threshold tested) that no
+/// threshold in this constant's plausible range can exclude without also
+/// losing most of the already-low recall (28.6% at the shipped default).
+/// These two constants (5.0s / -0.35) are kept as-is because the grid found no
+/// better alternative in the tested range, NOT because they were validated —
+/// see SPIKE.md section 6 for the full recommendation and what additional
+/// evidence would settle it. This remains a DEBUG_RECORDER-only diagnostic
+/// signal; nothing user-facing is gated on it.
 ///
 /// Kept pure over `[Float]` (no WhisperKit import) so callers pass
 /// `allSegments.map(\.avgLogprob)` and the predicate is directly unit-testable
