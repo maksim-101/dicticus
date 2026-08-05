@@ -18,6 +18,14 @@ final class MediaControllerTests: XCTestCase {
     /// At/below the silence threshold — "digital silence, nothing playing".
     private static let silentRMS = 0.0
 
+    /// Verify-side resample above the 1e-4 absolute floor but below 25% of
+    /// `playingRMS` (0.5 * 0.25 = 0.125) — a fade-out tail, not a still-playing verdict.
+    private static let fadeOutBelowRatioRMS = 0.05
+
+    /// Verify-side resample at 40% of `playingRMS` — just above the 25% still-playing
+    /// bar. Paired with `fadeOutBelowRatioRMS` so the two tests read as a boundary.
+    private static let justAboveRatioRMS = 0.2
+
     // MARK: - S-running: RMS above threshold, toggle succeeds
 
     func testRunningGuardTrueToggleSucceeds_SendsExactlyOneToggleAndLatches() {
@@ -282,6 +290,275 @@ final class MediaControllerTests: XCTestCase {
 
         XCTAssertEqual(toggleCallCount, 2, "resume after a fallback must send NO resume toggle — the undo toggle already restored state")
         XCTAssertEqual(muteWriteCalls, [true, false], "resume after a fallback must unmute exactly once")
+    }
+
+    /// Stopped verdict: press toggles, verification resamples digital silence — no
+    /// undo toggle, no mute; release must still send its OWN resume toggle (the
+    /// press-side latch was never cleared by a stopped verdict).
+    func testVerifyStopped_NoUndoToggleNoMute_ResumeSendsSecondToggle() async {
+        var toggleCallCount = 0
+        var muteWriteCallCount = 0
+        var rmsCallCount = 0
+
+        let controller = MediaController.makeForTesting(
+            tier1RunningPlayers: { [] },
+            outputRMS: {
+                rmsCallCount += 1
+                return rmsCallCount == 1 ? Self.playingRMS : Self.silentRMS
+            },
+            mediaRemoteToggle: {
+                toggleCallCount += 1
+                return true
+            },
+            isOutputMuted: { false },
+            setOutputMuted: { _ in
+                muteWriteCallCount += 1
+                return true
+            }
+        )
+
+        controller.pauseMediaIfPlaying()
+        await controller.pendingVerifyTask?.value
+
+        XCTAssertEqual(toggleCallCount, 1, "a stopped verdict must never send an undo toggle")
+        XCTAssertEqual(muteWriteCallCount, 0, "a stopped verdict must never write a mute")
+
+        controller.resumeMediaIfPaused()
+        XCTAssertEqual(toggleCallCount, 2, "release must still send its own resume toggle — the press-side latch was untouched by a stopped verdict")
+        XCTAssertEqual(muteWriteCallCount, 0, "resume after a stopped verdict must never unmute — nothing was muted")
+    }
+
+    /// Fade-out below the still-playing ratio: verify RMS clears the absolute
+    /// `silenceThreshold` floor but stays under 25% of press RMS — treated as
+    /// stopped, not still-playing.
+    func testVerifyFadeOutBelowRatio_TreatedAsStopped() async {
+        var toggleCallCount = 0
+        var muteWriteCallCount = 0
+        var rmsCallCount = 0
+
+        let controller = MediaController.makeForTesting(
+            tier1RunningPlayers: { [] },
+            outputRMS: {
+                rmsCallCount += 1
+                return rmsCallCount == 1 ? Self.playingRMS : Self.fadeOutBelowRatioRMS
+            },
+            mediaRemoteToggle: {
+                toggleCallCount += 1
+                return true
+            },
+            isOutputMuted: { false },
+            setOutputMuted: { _ in
+                muteWriteCallCount += 1
+                return true
+            }
+        )
+
+        controller.pauseMediaIfPlaying()
+        await controller.pendingVerifyTask?.value
+
+        XCTAssertEqual(toggleCallCount, 1, "a fade-out tail below the 25%-of-press ratio must never send an undo toggle")
+        XCTAssertEqual(muteWriteCallCount, 0, "a fade-out tail below the 25%-of-press ratio must never write a mute")
+    }
+
+    /// Just above the still-playing ratio: verify RMS at 40% of press RMS clears the
+    /// bar — treated as still-playing, undo toggle + mute fire.
+    func testVerifyJustAboveRatio_TreatedAsStillPlaying() async {
+        var toggleCallCount = 0
+        var muteWriteCallCount = 0
+        var rmsCallCount = 0
+
+        let controller = MediaController.makeForTesting(
+            tier1RunningPlayers: { [] },
+            outputRMS: {
+                rmsCallCount += 1
+                return rmsCallCount == 1 ? Self.playingRMS : Self.justAboveRatioRMS
+            },
+            mediaRemoteToggle: {
+                toggleCallCount += 1
+                return true
+            },
+            isOutputMuted: { false },
+            setOutputMuted: { _ in
+                muteWriteCallCount += 1
+                return true
+            }
+        )
+
+        controller.pauseMediaIfPlaying()
+        await controller.pendingVerifyTask?.value
+
+        XCTAssertEqual(toggleCallCount, 2, "40% of press RMS clears the still-playing bar and must send the undo toggle")
+        XCTAssertEqual(muteWriteCallCount, 1, "40% of press RMS clears the still-playing bar and must write the mute")
+    }
+
+    /// Unmeasurable verify sample (tap unavailable/denied/failed/timeout) is treated
+    /// identically to a stopped verdict — never act on a sample we couldn't take.
+    func testVerifyUnmeasurable_TreatedAsStopped() async {
+        var toggleCallCount = 0
+        var muteWriteCallCount = 0
+        var rmsCallCount = 0
+
+        let controller = MediaController.makeForTesting(
+            tier1RunningPlayers: { [] },
+            outputRMS: {
+                rmsCallCount += 1
+                return rmsCallCount == 1 ? Self.playingRMS : nil
+            },
+            mediaRemoteToggle: {
+                toggleCallCount += 1
+                return true
+            },
+            isOutputMuted: { false },
+            setOutputMuted: { _ in
+                muteWriteCallCount += 1
+                return true
+            }
+        )
+
+        controller.pauseMediaIfPlaying()
+        await controller.pendingVerifyTask?.value
+
+        XCTAssertEqual(toggleCallCount, 1, "an unmeasurable verify sample must never send an undo toggle")
+        XCTAssertEqual(muteWriteCallCount, 0, "an unmeasurable verify sample must never write a mute")
+    }
+
+    /// A release that arrives before verification completes cancels it: no undo
+    /// toggle, no mute — the release's own resume toggle is the only second send.
+    func testEarlyRelease_CancelsVerificationBeforeSideEffects() {
+        var toggleCallCount = 0
+        var muteWriteCallCount = 0
+        var rmsCallCount = 0
+
+        let controller = MediaController.makeForTesting(
+            tier1RunningPlayers: { [] },
+            outputRMS: {
+                rmsCallCount += 1
+                return Self.playingRMS
+            },
+            mediaRemoteToggle: {
+                toggleCallCount += 1
+                return true
+            },
+            isOutputMuted: { false },
+            setOutputMuted: { _ in
+                muteWriteCallCount += 1
+                return true
+            }
+        )
+
+        controller.pauseMediaIfPlaying()
+        controller.resumeMediaIfPaused()
+
+        XCTAssertNil(controller.pendingVerifyTask, "resume must clear the pending verify task synchronously")
+        XCTAssertEqual(toggleCallCount, 2, "press + resume toggle only — an early release must cancel verification before it can send its own undo toggle")
+        XCTAssertEqual(muteWriteCallCount, 0, "an early release must cancel verification before it can write a mute")
+    }
+
+    /// The undo send itself fails: no mute write (never mute on an unconfirmed undo),
+    /// the press-side latch is retained, and release still unwinds the ORIGINAL press
+    /// toggle — a third send, not a no-op.
+    func testUndoSendFails_NoMuteWrite_LatchRetained_ReleaseStillSendsToggle() async {
+        var toggleCallCount = 0
+        var muteWriteCallCount = 0
+        var rmsCallCount = 0
+
+        let controller = MediaController.makeForTesting(
+            tier1RunningPlayers: { [] },
+            outputRMS: {
+                rmsCallCount += 1
+                return Self.playingRMS
+            },
+            mediaRemoteToggle: {
+                toggleCallCount += 1
+                // Press (call 1) succeeds; the undo attempt (call 2) fails.
+                return toggleCallCount == 1
+            },
+            isOutputMuted: { false },
+            setOutputMuted: { _ in
+                muteWriteCallCount += 1
+                return true
+            }
+        )
+
+        controller.pauseMediaIfPlaying()
+        await controller.pendingVerifyTask?.value
+
+        XCTAssertEqual(toggleCallCount, 2, "press toggle plus the one failed undo attempt")
+        XCTAssertEqual(muteWriteCallCount, 0, "an undo-send failure must never fall through to a mute — that would strand a mute release can't unwind")
+
+        controller.resumeMediaIfPaused()
+        XCTAssertEqual(toggleCallCount, 3, "release must still unwind the ORIGINAL press toggle since the undo failed and the latch was retained")
+    }
+
+    /// Still-playing verdict when the user has already muted output: the undo toggle
+    /// still fires, but `setOutputMuted` is never called (the existing "only latch
+    /// output WE muted" contract), and release does not unmute the user's own mute.
+    func testStillPlayingWithUserAlreadyMuted_UndoToggleSent_MuteNeverWritten_ReleaseDoesNotUnmute() async {
+        var toggleCallCount = 0
+        var muteWriteCallCount = 0
+        var rmsCallCount = 0
+
+        let controller = MediaController.makeForTesting(
+            tier1RunningPlayers: { [] },
+            outputRMS: {
+                rmsCallCount += 1
+                return Self.playingRMS
+            },
+            mediaRemoteToggle: {
+                toggleCallCount += 1
+                return true
+            },
+            isOutputMuted: { true },
+            setOutputMuted: { _ in
+                muteWriteCallCount += 1
+                return true
+            }
+        )
+
+        controller.pauseMediaIfPlaying()
+        await controller.pendingVerifyTask?.value
+
+        XCTAssertEqual(toggleCallCount, 2, "still-playing verdict must send the undo toggle even when the user already muted output")
+        XCTAssertEqual(muteWriteCallCount, 0, "must never write a mute the user already applied — the existing 'only latch output WE muted' contract")
+
+        controller.resumeMediaIfPaused()
+        XCTAssertEqual(muteWriteCallCount, 0, "release must not unmute since verification never latched didMuteOutput — the user's own mute stays untouched")
+        XCTAssertEqual(toggleCallCount, 2, "release must not send a resume toggle either — the undo toggle already cleared the press-side latch")
+    }
+
+    /// No verification is ever scheduled when tier-1 already paused a player, when
+    /// the RMS gate said silent, or when the press toggle degraded straight to the
+    /// mute last-resort — `pendingVerifyTask` stays nil in all three cases.
+    func testNoVerificationScheduled_WhenTier1Paused_WhenSilent_WhenToggleDegraded() {
+        let tier1Controller = MediaController.makeForTesting(
+            tier1RunningPlayers: { ["Music"] },
+            outputRMS: { Self.playingRMS },
+            mediaRemoteToggle: { true },
+            isOutputMuted: { false },
+            setOutputMuted: { _ in true }
+        )
+        tier1Controller.pauseMediaIfPlaying()
+        XCTAssertNil(tier1Controller.pendingVerifyTask, "tier-1 pausing a player must never schedule tier-2b verification")
+
+        let silentController = MediaController.makeForTesting(
+            tier1RunningPlayers: { [] },
+            outputRMS: { Self.silentRMS },
+            mediaRemoteToggle: { true },
+            isOutputMuted: { false },
+            setOutputMuted: { _ in true }
+        )
+        silentController.pauseMediaIfPlaying()
+        XCTAssertNil(silentController.pendingVerifyTask, "a silent RMS gate must never schedule tier-2b verification")
+
+        let degradedController = MediaController.makeForTesting(
+            tier1RunningPlayers: { [] },
+            outputRMS: { Self.playingRMS },
+            mediaRemoteToggle: { false },
+            isOutputMuted: { false },
+            setOutputMuted: { _ in true }
+        )
+        degradedController.pauseMediaIfPlaying()
+        XCTAssertNil(degradedController.pendingVerifyTask, "a degraded press toggle falling through to the mute last-resort must never schedule tier-2b verification")
     }
 
     // MARK: - Canary: every seam in this file is a mock, never a real-media closure
