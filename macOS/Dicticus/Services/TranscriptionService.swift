@@ -358,7 +358,11 @@ class TranscriptionService: ObservableObject {
                     startSeconds: $0.start,
                     endSeconds: $0.end
                 )
-            }
+            },
+            lowConfidenceShort: LowConfidenceShort.flag(
+                durationSeconds: durationSeconds,
+                avgLogProbs: allSegments.map(\.avgLogprob)
+            )
         )
         #endif
 

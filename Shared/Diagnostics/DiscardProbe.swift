@@ -113,7 +113,8 @@ public actor DiscardProbe {
         vadMaxFrameEnergy: Float? = nil,
         gateNoiseFloor: Float? = nil,
         gateThreshold: Float? = nil,
-        segments: [SegmentInfo]? = nil
+        segments: [SegmentInfo]? = nil,
+        lowConfidenceShort: Bool? = nil
     ) {
         ensureDirectory()
         purgeIfNeeded()
@@ -134,6 +135,7 @@ public actor DiscardProbe {
         if let vadMaxFrameEnergy { line["vad_max_frame_energy"] = vadMaxFrameEnergy }
         if let gateNoiseFloor { line["gate_noise_floor"] = gateNoiseFloor }
         if let gateThreshold { line["gate_threshold"] = gateThreshold }
+        if let lowConfidenceShort { line["low_confidence_short"] = lowConfidenceShort }
         if let segments {
             line["segment_count"] = segments.count
             line["segments"] = segments.map { seg -> [String: Any] in
