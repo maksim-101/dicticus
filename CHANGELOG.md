@@ -6,6 +6,12 @@ Dicticus is a fully local, on-device dictation app (ASR via FluidAudio/Parakeet 
 
 ---
 
+## Unreleased
+
+- **Starter packs expanded** — added brand and tech dictation corrections to the bundled starter packs (Dictionary → Starter Packs), macOS + iOS.
+
+---
+
 ## 1.0.1 — Repo rename + cleanup fix — 2026-08-01
 
 - **Project home renamed** to `github.com/maksim-101/dicticus` (was `dicticus-macos` — the repo hosts both the macOS and iOS apps). The Sparkle update feed moved to `maksim-101.github.io/dicticus/appcast.xml`; 1.0.0 installs carry the old feed URL and need this one manual update.

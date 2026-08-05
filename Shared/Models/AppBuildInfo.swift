@@ -26,6 +26,7 @@ enum AppBuildInfo {
     }
 
     static let recentChanges: [String] = [
+        "Added: expanded brand and tech dictation corrections in Dictionary → Starter Packs",
         "Fixed: AI cleanup no longer glues two sentences together (\"labeled.So\") when it rejects an over-eager sentence merge",
         "Changed: project home is now github.com/maksim-101/dicticus — the update feed moved with it",
     ]

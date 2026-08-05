@@ -145,3 +145,179 @@ final class DictionaryImportPreviewTests: XCTestCase {
         XCTAssertEqual(DictionaryService.shared.dictionary, before)
     }
 }
+
+// MARK: - Task 260805-pc5: ASR-mishearing starter-pack batch
+
+/// Locks the 12 public ASR-mishearing corrections added to the bundled brands/tech
+/// starter packs (D-02/D-03), and — just as important — proves the 5 D-05 exclusions
+/// stay inert. Drives the real `DictionaryService.shared` singleton and the real app
+/// bundle (via `importStarterPack`), so a bundle-read miss (which returns
+/// `.success(added: 0)`) cannot make every assertion below pass vacuously — the
+/// non-vacuity floor at the end guards against exactly that.
+///
+/// This dictionary has a 3-incident data-loss history and a test suite was one of the
+/// wipers (2026-07-24), so the isolation gate below is copied verbatim from
+/// `DictionaryEntryEditTests` — never construct a real `UserDefaults` suite here.
+@MainActor
+final class DictionaryStarterPackAsrBatchTests: XCTestCase {
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        try XCTSkipUnless(
+            DicticusTestBootstrap.didBootstrap,
+            "DicticusTestBootstrap did not run — refusing to touch DictionaryService.shared, which would write to the real user dictionary"
+        )
+        DictionaryService.shared.removeAll()
+        DictionaryService.shared.isCaseSensitive = false
+    }
+
+    // MARK: - Negative: D-05 exclusions must be provably inert
+
+    /// "HEY→agy" is a personal entry (D-05) never added to the bundled packs.
+    /// Starting from a removeAll()ed dictionary with only the packs imported,
+    /// genuine "Hey," must survive byte-identical.
+    func testExcludedHeyNeverRewrittenToAgy() {
+        importBothPacks()
+        let sentence = "Hey, are you still there?"
+        XCTAssertEqual(DictionaryService.shared.apply(to: sentence), sentence)
+    }
+
+    /// "commutes→commits" is excluded (D-05, real-word key). "commits" itself is
+    /// never a dictionary key — only a replacement value (Kamitsu,commits) — so a
+    /// sentence dictating the real word "commits" must survive byte-identical.
+    func testExcludedCommutesNeverRewritesCommits() {
+        importBothPacks()
+        let sentence = "Let's review the commits from today."
+        XCTAssertEqual(DictionaryService.shared.apply(to: sentence), sentence)
+    }
+
+    // MARK: - Negative: no over-firing
+
+    /// "Sable 5,Fable 5" must only fire on the exact two-word phrase — "Sable"
+    /// without the trailing digit must be left alone.
+    func testSableWithoutDigitNotOverfired() {
+        importBothPacks()
+        let sentence = "The sable coat was warm."
+        XCTAssertEqual(DictionaryService.shared.apply(to: sentence), sentence)
+    }
+
+    // MARK: - Positive: D-02 brands pack additions
+
+    func testTavileTavaliTavoliAllResolveToTavily() {
+        importBothPacks()
+        XCTAssertEqual(
+            DictionaryService.shared.apply(to: "The tool is called Tavile."),
+            "The tool is called Tavily."
+        )
+        XCTAssertEqual(
+            DictionaryService.shared.apply(to: "The tool is called Tavali."),
+            "The tool is called Tavily."
+        )
+        XCTAssertEqual(
+            DictionaryService.shared.apply(to: "The tool is called Tavoli."),
+            "The tool is called Tavily."
+        )
+    }
+
+    func testJalifinAndChellyfinResolveToJellyfin() {
+        importBothPacks()
+        XCTAssertEqual(
+            DictionaryService.shared.apply(to: "I stream shows from Jalifin."),
+            "I stream shows from Jellyfin."
+        )
+        XCTAssertEqual(
+            DictionaryService.shared.apply(to: "I stream shows from chellyfin."),
+            "I stream shows from Jellyfin."
+        )
+    }
+
+    /// Case-insensitivity: "Chellyfin" (capitalized) resolves the same as
+    /// "chellyfin" (the pack's literal key casing).
+    func testChellyfinCapitalizedResolvesCaseInsensitively() {
+        importBothPacks()
+        XCTAssertEqual(
+            DictionaryService.shared.apply(to: "I stream shows from Chellyfin."),
+            "I stream shows from Jellyfin."
+        )
+    }
+
+    func testClaudAiAndClodAiResolveToClaudeAi() {
+        importBothPacks()
+        XCTAssertEqual(
+            DictionaryService.shared.apply(to: "Open claud.ai in the browser."),
+            "Open claude.ai in the browser."
+        )
+        XCTAssertEqual(
+            DictionaryService.shared.apply(to: "Open clod.ai in the browser."),
+            "Open claude.ai in the browser."
+        )
+    }
+
+    func testSable5AndPhil5ResolveToFable5() {
+        importBothPacks()
+        XCTAssertEqual(
+            DictionaryService.shared.apply(to: "I'm using Sable 5 today."),
+            "I'm using Fable 5 today."
+        )
+        XCTAssertEqual(
+            DictionaryService.shared.apply(to: "I'm using Phil 5 today."),
+            "I'm using Fable 5 today."
+        )
+    }
+
+    func testStixicusResolvesToDicticus() {
+        importBothPacks()
+        XCTAssertEqual(
+            DictionaryService.shared.apply(to: "Open Stixicus and dictate."),
+            "Open Dicticus and dictate."
+        )
+    }
+
+    // MARK: - Positive: D-03 tech pack additions
+
+    func testKamitsuResolvesToCommits() {
+        importBothPacks()
+        XCTAssertEqual(
+            DictionaryService.shared.apply(to: "Push the Kamitsu now."),
+            "Push the commits now."
+        )
+    }
+
+    func testStarpokResolvesToStopHook() {
+        importBothPacks()
+        XCTAssertEqual(
+            DictionaryService.shared.apply(to: "Run the starpok before pushing."),
+            "Run the stop hook before pushing."
+        )
+    }
+
+    // MARK: - Non-vacuity floor
+
+    /// Without this, a bundle-read miss returns `.success(added: 0)` for both
+    /// packs and every assertion above would pass vacuously over an empty
+    /// dictionary. Both real packs together carry well over 70 valid rows.
+    func testBothPacksActuallyImportedNonVacuously() {
+        importBothPacks()
+        XCTAssertGreaterThanOrEqual(DictionaryService.shared.dictionary.count, 70)
+        XCTAssertTrue(DictionaryService.shared.isStarterPackImported(.brands))
+        XCTAssertTrue(DictionaryService.shared.isStarterPackImported(.tech))
+    }
+
+    // MARK: - Helper
+
+    /// Imports only the brands and tech packs (never the general pack or seeded
+    /// defaults), so every expected string above is deterministic — no other
+    /// entry can interfere with the assertions.
+    private func importBothPacks() {
+        let brandsResult = DictionaryService.shared.importStarterPack(.brands)
+        guard case .success = brandsResult else {
+            XCTFail("importStarterPack(.brands) must return .success, got \(brandsResult)")
+            return
+        }
+        let techResult = DictionaryService.shared.importStarterPack(.tech)
+        guard case .success = techResult else {
+            XCTFail("importStarterPack(.tech) must return .success, got \(techResult)")
+            return
+        }
+    }
+}
