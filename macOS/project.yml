@@ -65,8 +65,8 @@ targets:
         # the root cause of "the CLI isolation recipe silently stopped applying":
         # the recipe never controlled the real installed Info.plist to begin with.
         CFBundleIdentifier: "$(PRODUCT_BUNDLE_IDENTIFIER)"
-        CFBundleVersion: "8"
-        CFBundleShortVersionString: "1.0.1"
+        CFBundleVersion: "9"
+        CFBundleShortVersionString: "1.0.2"
         SUFeedURL: "https://maksim-101.github.io/dicticus/appcast.xml"
         SUPublicEDKey: "svsiIi/mzzxOO1K9AJ7yAXboJb+U0wDoLCoLM1hEqjc="
         SUEnableAutomaticChecks: YES

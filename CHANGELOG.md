@@ -6,9 +6,10 @@ Dicticus is a fully local, on-device dictation app (ASR via FluidAudio/Parakeet 
 
 ---
 
-## Unreleased
+## 1.0.2 — Starter packs + media-pause fix — 2026-08-05
 
 - **Starter packs expanded** — added brand and tech dictation corrections to the bundled starter packs (Dictionary → Starter Packs), macOS + iOS.
+- **Fixed: media pause could un-pause the wrong app** (macOS) — when the playing audio came from an app that doesn't register with macOS's now-playing system (e.g. bare-bones IPTV players), the pause-while-dictating toggle could land on a different, paused app and start it. The toggle now verifies that audio actually stopped; if it didn't, it restores the other app and mutes the output for the rest of the dictation instead.
 
 ---
 

@@ -26,9 +26,9 @@ enum AppBuildInfo {
     }
 
     static let recentChanges: [String] = [
+        "Fixed: pause-media-while-dictating no longer un-pauses an unrelated app when the playing audio comes from a player macOS can't pause — it now mutes the output instead",
         "Added: expanded brand and tech dictation corrections in Dictionary → Starter Packs",
         "Fixed: AI cleanup no longer glues two sentences together (\"labeled.So\") when it rejects an over-eager sentence merge",
-        "Changed: project home is now github.com/maksim-101/dicticus — the update feed moved with it",
     ]
 
     static let releasesURL = URL(string: "https://github.com/maksim-101/dicticus/releases")!

@@ -15,6 +15,7 @@ A fully local dictation app for macOS and iOS. Hold a key or trigger a shortcut,
 - **AI cleanup mode** — Grammar, punctuation, word-order, and filler-word correction via Qwen3.5-4B (llama.cpp), on both macOS and iOS. Optional and opt-in — triggered by its own shortcut, with a deterministic fidelity guard that blocks the model from rewriting what you actually dictated.
 - **Spoken punctuation** — Say "comma", "new line", etc. and it's inserted deterministically before cleanup.
 - **Auto language detection** — German and English, no manual switching.
+- **Media auto-pause** (macOS) — playing media (Music, Spotify, browser video) is paused, or muted when it can't be paused, while you dictate, and resumes on release.
 - **Local History & Search** — Browse and search your past transcriptions with FTS5.
 - **Custom Dictionary** — Define your own replacements for technical terms or names; import/export as CSV/JSON and add bundled starter packs.
 
