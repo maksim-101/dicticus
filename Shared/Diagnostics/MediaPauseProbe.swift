@@ -167,6 +167,43 @@ public actor MediaPauseProbe {
         appendJsonl(line)
     }
 
+    /// Record one `runTier2bVerification(...)` decision point (260805-suy).
+    ///
+    /// `outcome` is one of `"stopped"`, `"still_playing"`, `"unmeasurable"`,
+    /// `"cancelled"`. Every parameter after `outcome` is optional/defaulted so this
+    /// method is purely additive alongside `recordPause`/`recordResume`. Nil optionals
+    /// are omitted from the JSONL line, exactly as `recordPause` does.
+    public func recordTier2bVerify(
+        pressRMS: Double,
+        verifyRMS: Double? = nil,
+        verifyTapStatus: String? = nil,
+        outcome: String,
+        undoToggleSent: Bool? = nil,
+        fallbackMuteAttempted: Bool = false,
+        fallbackMuteResult: Bool? = nil,
+        isOutputMutedResult: Bool? = nil,
+        didMuteOutput: Bool = false
+    ) {
+        ensureDirectory()
+        purgeIfNeeded()
+
+        var line: [String: Any] = [
+            "ts": Self.iso8601Timestamp(),
+            "event": "tier2b_verify",
+            "tier2b_press_rms": pressRMS,
+            "tier2b_verify_outcome": outcome,
+            "tier2b_fallback_mute_attempted": fallbackMuteAttempted,
+            "did_mute_output": didMuteOutput
+        ]
+        if let verifyRMS { line["tier2b_verify_rms"] = verifyRMS }
+        if let verifyTapStatus { line["tier2b_verify_tap_status"] = verifyTapStatus }
+        if let undoToggleSent { line["tier2b_undo_toggle_sent"] = undoToggleSent }
+        if let fallbackMuteResult { line["tier2b_fallback_mute_result"] = fallbackMuteResult }
+        if let isOutputMutedResult { line["is_output_muted_result"] = isOutputMutedResult }
+
+        appendJsonl(line)
+    }
+
     /// Record the HotkeyManager call site — dispatched or skipped, plus the current
     /// `pauseMediaDuringDictation` setting value. Distinguishes "never called" (toggle
     /// off) from "called and failed" (all tiers no-op).

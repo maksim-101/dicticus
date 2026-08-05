@@ -238,6 +238,52 @@ final class MediaControllerTests: XCTestCase {
         XCTAssertEqual(muteWriteCallCount, 0, "a nil (tap-unavailable) sample must never write a mute — conservative degrade")
     }
 
+    // MARK: - Tier-2b verify-and-fallback (260805-suy)
+
+    /// Pure decision table for `MediaController.tier2bVerdict(pressRMS:postRMS:)` —
+    /// no controller instance, no seams, just the boundary cases from the plan.
+    func testTier2bVerdict_PureDecisionTable() {
+        XCTAssertEqual(MediaController.tier2bVerdict(pressRMS: 0.5, postRMS: 0.5), .stillPlaying,
+                        "post-toggle RMS equal to press RMS must verdict still-playing")
+        XCTAssertEqual(MediaController.tier2bVerdict(pressRMS: 0.5, postRMS: 0.0), .stopped,
+                        "digital silence after the toggle must verdict stopped")
+        XCTAssertEqual(MediaController.tier2bVerdict(pressRMS: 0.5, postRMS: nil), .unmeasurable,
+                        "a nil (tap-unavailable) resample must verdict unmeasurable")
+    }
+
+    /// End-to-end still-playing path: press toggles, verification resamples the same
+    /// RMS, sends the undo toggle, mutes; release then unmutes and sends NO third
+    /// toggle (the undo toggle already restored the third-party app's state).
+    func testVerifyStillPlaying_SendsUndoToggleAndMutes_ResumeUnmutesWithoutToggle() async {
+        var toggleCallCount = 0
+        var muteWriteCalls: [Bool] = []
+
+        let controller = MediaController.makeForTesting(
+            tier1RunningPlayers: { [] },
+            outputRMS: { Self.playingRMS },
+            mediaRemoteToggle: {
+                toggleCallCount += 1
+                return true
+            },
+            isOutputMuted: { false },
+            setOutputMuted: { value in
+                muteWriteCalls.append(value)
+                return true
+            }
+        )
+
+        controller.pauseMediaIfPlaying()
+        await controller.pendingVerifyTask?.value
+
+        XCTAssertEqual(toggleCallCount, 2, "still-playing verdict must send exactly two toggles: press + undo")
+        XCTAssertEqual(muteWriteCalls, [true], "still-playing verdict must mute exactly once")
+
+        controller.resumeMediaIfPaused()
+
+        XCTAssertEqual(toggleCallCount, 2, "resume after a fallback must send NO resume toggle — the undo toggle already restored state")
+        XCTAssertEqual(muteWriteCalls, [true, false], "resume after a fallback must unmute exactly once")
+    }
+
     // MARK: - Canary: every seam in this file is a mock, never a real-media closure
 
     func testCanary_AllSeamsAreMocksNeverRealMedia() {

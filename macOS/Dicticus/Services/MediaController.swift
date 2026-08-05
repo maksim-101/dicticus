@@ -78,6 +78,21 @@ final class MediaController {
     /// every press.
     private var didWarnMediaRemote = false
 
+    /// Settling window between the tier-2b press-side toggle and the post-toggle
+    /// verification resample (260805-suy) — long enough for a genuinely-stopped
+    /// player's audio to actually drain before we resample. `0.3` in production;
+    /// the `makeForTesting` factory defaults it to `0` so tests are deterministic
+    /// and fast (no real sleep).
+    private let verifyDelaySeconds: TimeInterval
+
+    /// Task handle for the async post-toggle verification (260805-suy).
+    /// `resumeMediaIfPaused()` cancels this FIRST, before touching any other state,
+    /// so a release that arrives before verification completes can never trigger a
+    /// post-release undo toggle or a stranded mute. Read access is deliberately
+    /// `internal` (not `private`) — the test target uses `@testable import` to await
+    /// it directly; only this type can assign it (`private(set)`).
+    private(set) var pendingVerifyTask: Task<Void, Never>?
+
     // MARK: - Test seams (tier-2b + tier-1, `makeForTesting` only)
 
     /// When non-nil, substitutes the entire ScriptingBridge tier-1 scan: any player
@@ -109,6 +124,7 @@ final class MediaController {
         mediaRemoteToggleOverride = nil
         isOutputMutedOverride = nil
         setOutputMutedOverride = nil
+        verifyDelaySeconds = 0.3
     }
 
     private init(
@@ -116,13 +132,15 @@ final class MediaController {
         outputRMS: @escaping () -> Double?,
         mediaRemoteToggle: @escaping () -> Bool,
         isOutputMuted: @escaping () -> Bool?,
-        setOutputMuted: @escaping (Bool) -> Bool
+        setOutputMuted: @escaping (Bool) -> Bool,
+        verifyDelaySeconds: TimeInterval
     ) {
         tier1RunningPlayersOverride = tier1RunningPlayers
         outputRMSOverride = outputRMS
         mediaRemoteToggleOverride = mediaRemoteToggle
         isOutputMutedOverride = isOutputMuted
         setOutputMutedOverride = setOutputMuted
+        self.verifyDelaySeconds = verifyDelaySeconds
     }
 
     #if DEBUG
@@ -136,14 +154,16 @@ final class MediaController {
         outputRMS: @escaping () -> Double? = { nil },
         mediaRemoteToggle: @escaping () -> Bool = { false },
         isOutputMuted: @escaping () -> Bool? = { false },
-        setOutputMuted: @escaping (Bool) -> Bool = { _ in false }
+        setOutputMuted: @escaping (Bool) -> Bool = { _ in false },
+        verifyDelaySeconds: TimeInterval = 0
     ) -> MediaController {
         MediaController(
             tier1RunningPlayers: tier1RunningPlayers,
             outputRMS: outputRMS,
             mediaRemoteToggle: mediaRemoteToggle,
             isOutputMuted: isOutputMuted,
-            setOutputMuted: setOutputMuted
+            setOutputMuted: setOutputMuted,
+            verifyDelaySeconds: verifyDelaySeconds
         )
     }
     #endif
@@ -252,7 +272,7 @@ final class MediaController {
     /// the tier-2b toggle AND the tier-2 mute stay OFF for this press — the
     /// paused-YouTube-resumes bug fix. Chosen conservative-low pending on-device
     /// threshold calibration from real `tier2b_rms` log evidence.
-    private static let silenceThreshold = 1e-4
+    nonisolated private static let silenceThreshold = 1e-4
 
     /// Sample the system output level via the RMS test seam (if installed) or the
     /// real `OutputLevelSampler` process tap. Replaces the dead
@@ -265,6 +285,156 @@ final class MediaController {
             return (rms, rms != nil ? "sampled" : "unavailable")
         }
         return OutputLevelSampler().sample()
+    }
+
+    /// Async variant used only by the tier-2b post-toggle verification
+    /// (260805-suy) — the blocking ~100-250ms CoreAudio sample must never run on
+    /// the MainActor mid-dictation. When a test override is installed it is
+    /// resolved synchronously right here on the MainActor (tests never reach
+    /// CoreAudio); otherwise the real `OutputLevelSampler` runs on a detached
+    /// background task.
+    private func sampleOutputLevelAsync() async -> (rms: Double?, status: String) {
+        if let override = outputRMSOverride {
+            let rms = override()
+            return (rms, rms != nil ? "sampled" : "unavailable")
+        }
+        return await Task.detached(priority: .userInitiated) {
+            OutputLevelSampler().sample()
+        }.value
+    }
+
+    /// The three outcomes of the tier-2b post-toggle verification resample
+    /// (260805-suy). Internal (not private) so `MediaControllerTests` can assert on
+    /// `tier2bVerdict(...)` directly as a pure boundary table.
+    enum Tier2bVerdict: Equatable {
+        case stopped
+        case stillPlaying
+        case unmeasurable
+    }
+
+    /// Relative-to-press ratio used by the verify-side "still playing" bar
+    /// (260805-suy) — deliberately NOT the bare `silenceThreshold`. See the
+    /// "Why a relative ratio" note in `260805-suy-PLAN.md`: on the verify side a
+    /// false "still playing" is strictly worse than today (it would un-pause media
+    /// we correctly paused, then mute on top), so the bar tracks how loud THIS
+    /// press was, not an absolute floor tuned for the press-side gate.
+    nonisolated private static let verifyStillPlayingRatio = 0.25
+
+    /// Pure decision: did the post-toggle resample show the audio is still playing?
+    /// No I/O, reads no instance state — this is the whole tier-2b verify decision,
+    /// directly unit-testable as a boundary table.
+    ///
+    /// `postRMS == nil` (tap unavailable/denied/failed/timeout) -> `.unmeasurable`,
+    /// treated identically to `.stopped` by the caller (never act on an unmeasurable
+    /// sample). Otherwise still-playing iff `postRMS` exceeds both the absolute
+    /// `silenceThreshold` floor AND `verifyStillPlayingRatio` of the press-side RMS.
+    nonisolated static func tier2bVerdict(pressRMS: Double, postRMS: Double?) -> Tier2bVerdict {
+        guard let postRMS else { return .unmeasurable }
+        if postRMS > max(silenceThreshold, pressRMS * verifyStillPlayingRatio) {
+            return .stillPlaying
+        }
+        return .stopped
+    }
+
+    /// Post-toggle verification for the tier-2b press-side send (260805-suy). Runs
+    /// asynchronously AFTER `pauseMediaIfPlaying()` has already returned — it never
+    /// delays recording start or text processing. Re-checks `Task.isCancelled` and
+    /// `didToggleMediaRemote` after every `await` because `resumeMediaIfPaused()` can
+    /// race this task to completion; either check failing means the hold already
+    /// ended and this verification must do nothing further.
+    private func runTier2bVerification(pressRMS: Double) async {
+        try? await Task.sleep(nanoseconds: UInt64(verifyDelaySeconds * 1_000_000_000))
+        guard !Task.isCancelled, didToggleMediaRemote else {
+            #if DEBUG_RECORDER
+            logTier2bVerify(pressRMS: pressRMS, verifyRMS: nil, verifyTapStatus: nil,
+                             outcome: "cancelled", undoToggleSent: nil,
+                             fallbackMuteAttempted: false, fallbackMuteResult: nil,
+                             isOutputMutedResult: nil)
+            #endif
+            return
+        }
+
+        let (postRMS, tapStatus) = await sampleOutputLevelAsync()
+
+        guard !Task.isCancelled, didToggleMediaRemote else {
+            #if DEBUG_RECORDER
+            logTier2bVerify(pressRMS: pressRMS, verifyRMS: postRMS, verifyTapStatus: tapStatus,
+                             outcome: "cancelled", undoToggleSent: nil,
+                             fallbackMuteAttempted: false, fallbackMuteResult: nil,
+                             isOutputMutedResult: nil)
+            #endif
+            return
+        }
+
+        switch Self.tier2bVerdict(pressRMS: pressRMS, postRMS: postRMS) {
+        case .stopped:
+            #if DEBUG_RECORDER
+            logTier2bVerify(pressRMS: pressRMS, verifyRMS: postRMS, verifyTapStatus: tapStatus,
+                             outcome: "stopped", undoToggleSent: nil,
+                             fallbackMuteAttempted: false, fallbackMuteResult: nil,
+                             isOutputMutedResult: nil)
+            #endif
+            return
+
+        case .unmeasurable:
+            #if DEBUG_RECORDER
+            logTier2bVerify(pressRMS: pressRMS, verifyRMS: postRMS, verifyTapStatus: tapStatus,
+                             outcome: "unmeasurable", undoToggleSent: nil,
+                             fallbackMuteAttempted: false, fallbackMuteResult: nil,
+                             isOutputMutedResult: nil)
+            #endif
+            return
+
+        case .stillPlaying:
+            // Undo the collateral toggle first. If the send itself fails, leave the
+            // press latch set exactly as it was — release still unwinds the press
+            // toggle exactly as today, and no mute can be stranded.
+            let undoSent = sendMediaRemoteToggle()
+            guard undoSent else {
+                #if DEBUG_RECORDER
+                logTier2bVerify(pressRMS: pressRMS, verifyRMS: postRMS, verifyTapStatus: tapStatus,
+                                 outcome: "still_playing", undoToggleSent: false,
+                                 fallbackMuteAttempted: false, fallbackMuteResult: nil,
+                                 isOutputMutedResult: nil)
+                #endif
+                return
+            }
+            didToggleMediaRemote = false
+
+            // Mute fallback: same "only latch output WE muted" contract as the
+            // press-side tier-2 last resort.
+            guard let muted = isOutputMuted() else {
+                handleMuteFailure()
+                #if DEBUG_RECORDER
+                logTier2bVerify(pressRMS: pressRMS, verifyRMS: postRMS, verifyTapStatus: tapStatus,
+                                 outcome: "still_playing", undoToggleSent: true,
+                                 fallbackMuteAttempted: false, fallbackMuteResult: nil,
+                                 isOutputMutedResult: nil)
+                #endif
+                return
+            }
+            guard !muted else {
+                #if DEBUG_RECORDER
+                logTier2bVerify(pressRMS: pressRMS, verifyRMS: postRMS, verifyTapStatus: tapStatus,
+                                 outcome: "still_playing", undoToggleSent: true,
+                                 fallbackMuteAttempted: false, fallbackMuteResult: nil,
+                                 isOutputMutedResult: muted)
+                #endif
+                return
+            }
+            let muteWriteSucceeded = setOutputMuted(true)
+            if muteWriteSucceeded {
+                didMuteOutput = true
+            } else {
+                handleMuteFailure()
+            }
+            #if DEBUG_RECORDER
+            logTier2bVerify(pressRMS: pressRMS, verifyRMS: postRMS, verifyTapStatus: tapStatus,
+                             outcome: "still_playing", undoToggleSent: true,
+                             fallbackMuteAttempted: true, fallbackMuteResult: muteWriteSucceeded,
+                             isOutputMutedResult: muted)
+            #endif
+        }
     }
 
     /// True when the real MediaRemote bridge resolved a send function (dlopen +
@@ -303,6 +473,8 @@ final class MediaController {
     /// Must be called AFTER `startRecording()` succeeds so rejected presses (model not
     /// ready, busy, mode mismatch, sub-threshold) never reach this call.
     func pauseMediaIfPlaying() {
+        pendingVerifyTask?.cancel()
+        pendingVerifyTask = nil
         pausedApp = nil
         #if DEBUG_RECORDER
         var playerOutcomes: [MediaPauseProbe.PlayerOutcome] = []
@@ -405,6 +577,13 @@ final class MediaController {
                       tier2bGuardResult: true, tier2bToggleAttempted: true, tier2bToggleSent: true,
                       tier2bDlsymDegrade: false, tier2bRMS: measuredRMS, tier2bTapStatus: tapStatus)
             #endif
+            // Post-toggle verify-and-fallback (260805-suy): measuredRMS is guaranteed
+            // non-nil here — `isPlaying` above required it to exceed silenceThreshold.
+            if let pressRMS = measuredRMS {
+                pendingVerifyTask = Task { [weak self] in
+                    await self?.runTier2bVerification(pressRMS: pressRMS)
+                }
+            }
             return
         }
         // Toggle degraded (dlsym/send failed) — fall through to the mute fallback,
@@ -458,6 +637,9 @@ final class MediaController {
     /// exclusive per hold. Tier-2b MUST be checked before tier-2 (mute) so a latched
     /// MediaRemote toggle always resumes via a second toggle, never via an unmute.
     func resumeMediaIfPaused() {
+        pendingVerifyTask?.cancel()
+        pendingVerifyTask = nil
+
         if let player = pausedApp {
             pausedApp = nil
             let result = runAS("tell application \"\(player.name)\" to play")
@@ -558,6 +740,37 @@ final class MediaController {
                 didToggleMediaRemote: didToggle,
                 tier2bRMS: tier2bRMS,
                 tier2bTapStatus: tier2bTapStatus
+            )
+        }
+    }
+
+    /// Log one `runTier2bVerification(...)` decision point. Captures `didMuteOutput`
+    /// on the MainActor before dispatching, mirroring `logPause`/`logResume`; the
+    /// dispatched `Task` is intentionally unstructured (not a child task) so a
+    /// `cancelled` outcome — recorded precisely when `runTier2bVerification`'s own
+    /// task has been cancelled — still gets logged rather than being cancelled itself.
+    private func logTier2bVerify(
+        pressRMS: Double,
+        verifyRMS: Double?,
+        verifyTapStatus: String?,
+        outcome: String,
+        undoToggleSent: Bool?,
+        fallbackMuteAttempted: Bool,
+        fallbackMuteResult: Bool?,
+        isOutputMutedResult: Bool?
+    ) {
+        let didMute = didMuteOutput
+        Task {
+            await MediaPauseProbe.shared.recordTier2bVerify(
+                pressRMS: pressRMS,
+                verifyRMS: verifyRMS,
+                verifyTapStatus: verifyTapStatus,
+                outcome: outcome,
+                undoToggleSent: undoToggleSent,
+                fallbackMuteAttempted: fallbackMuteAttempted,
+                fallbackMuteResult: fallbackMuteResult,
+                isOutputMutedResult: isOutputMutedResult,
+                didMuteOutput: didMute
             )
         }
     }
