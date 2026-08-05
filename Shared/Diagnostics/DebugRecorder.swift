@@ -43,6 +43,15 @@ public struct DebugCleanupRecord: Codable, Sendable {
     /// Phase 38 Plan 01 (D-10, CTXFMT-01): the raw value of the
     /// `DictationContext` resolved for this run. `nil` on pre-Phase-38 JSONL.
     public let resolved_context: String?
+    /// Quick task 260805-qme: every rewrite `BrandMatcher` made at Step 1b,
+    /// so a fuzzy/phonetic brand rewrite is attributable in the JSONL instead
+    /// of showing up as an unexplained raw→shipped divergence with empty
+    /// `dictionary_replacements`. Optional (not required) following the same
+    /// backward-compat idiom as `GateEntry.edits`/`detected_bundle_id` (Phase
+    /// 44 Plan 11 / Phase 38): pre-existing JSONL on disk predates this field
+    /// and must keep decoding without throwing, and every existing
+    /// labeled-argument construction site must keep compiling unmodified.
+    public let brand_rewrites: [BrandRewriteEntry]?
 
     // Phase 27 WR-02: custom decoder tolerates pre-Phase-27 JSONL where the
     // dictionary_replacements / dictionary_blocked keys are absent. Both
@@ -54,7 +63,7 @@ public struct DebugCleanupRecord: Codable, Sendable {
         case ts, session_id, lang, lang_used, mode, model, sampler, steps
         case dictionary_context_keys, dictionary_replacements, dictionary_blocked
         case anomaly, emission_counter, prompt_version
-        case detected_bundle_id, resolved_context
+        case detected_bundle_id, resolved_context, brand_rewrites
     }
 
     public init(
@@ -73,7 +82,8 @@ public struct DebugCleanupRecord: Codable, Sendable {
         emission_counter: Int,
         prompt_version: String = "v19d",
         detected_bundle_id: String? = nil,
-        resolved_context: String? = nil
+        resolved_context: String? = nil,
+        brand_rewrites: [BrandRewriteEntry]? = nil
     ) {
         self.ts = ts
         self.session_id = session_id
@@ -91,6 +101,7 @@ public struct DebugCleanupRecord: Codable, Sendable {
         self.prompt_version = prompt_version
         self.detected_bundle_id = detected_bundle_id
         self.resolved_context = resolved_context
+        self.brand_rewrites = brand_rewrites
     }
 
     public init(from decoder: Decoder) throws {
@@ -114,6 +125,8 @@ public struct DebugCleanupRecord: Codable, Sendable {
         // Phase 38 Plan 01: tolerant decode for pre-Phase-38 JSONL — both default to nil when absent.
         self.detected_bundle_id = try c.decodeIfPresent(String.self, forKey: .detected_bundle_id) ?? nil
         self.resolved_context = try c.decodeIfPresent(String.self, forKey: .resolved_context) ?? nil
+        // Quick task 260805-qme: tolerant decode for pre-260805 JSONL — nil when absent.
+        self.brand_rewrites = try c.decodeIfPresent([BrandRewriteEntry].self, forKey: .brand_rewrites) ?? nil
     }
 
     public struct ModelInfo: Codable, Sendable {
@@ -257,6 +270,26 @@ public struct DebugCleanupRecord: Codable, Sendable {
             self.from = from
             self.to = to
             self.ratio = ratio
+        }
+    }
+
+    /// Quick task 260805-qme: one rewrite `BrandMatcher` made at Step 1b —
+    /// the misheard surface window and the canonical it was mapped to, plus
+    /// the orthographic scores that decided the match. Field names `from`/
+    /// `to` deliberately mirror `DictionaryReplacementEntry` so one jq shape
+    /// reads both replacement sources. `jw`/`dl` are copied straight off
+    /// `BrandMatcher.Rewrite` — no new metadata is computed here.
+    public struct BrandRewriteEntry: Codable, Sendable {
+        public let from: String
+        public let to: String
+        public let jw: Double
+        public let dl: Int
+
+        public init(from: String, to: String, jw: Double, dl: Int) {
+            self.from = from
+            self.to = to
+            self.jw = jw
+            self.dl = dl
         }
     }
 }

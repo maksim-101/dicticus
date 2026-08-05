@@ -132,7 +132,16 @@ class TextProcessingService: ObservableObject {
         // on mode). Recovers misheard distinctive brand tokens the exact-match
         // dictionary misses; common-word brand homophones stay with the
         // dictionary's anchored entries (the hybrid split). BMATCH-03.
-        processedText = brandMatcher.apply(to: processedText, language: language)
+        // Quick task 260805-qme: calls the reporting variant so its rewrites are
+        // attributable in the debug JSONL — `apply(to:language:)` is defined as
+        // literally `applyReportingRewrites(...).output`, so this is byte-identical
+        // on the text path (mirrors the Step 1 applyWithTrace precedent above);
+        // the rewrites array was already being built and discarded on every call.
+        let brandResult = brandMatcher.applyReportingRewrites(to: processedText, language: language)
+        processedText = brandResult.output
+        #if DEBUG_RECORDER
+        let dbgBrandRewrites = brandResult.rewrites
+        #endif
 
         // Step 1.5: Acronym fragment collapse + spoken-letter lexicon
         processedText = ITNUtility.collapseAcronymRun(to: processedText)
@@ -539,7 +548,10 @@ class TextProcessingService: ObservableObject {
             // when mode == .aiCleanup. Emitting the raw resolved context unconditionally
             // made a plain-mode record in a curated .code app claim "resolved_context":"code"
             // even though that context had zero effect on the record's text.
-            resolved_context: (mode == .aiCleanup ? context : .default).rawValue   // Phase 38 Plan 01 (D-10)
+            resolved_context: (mode == .aiCleanup ? context : .default).rawValue,   // Phase 38 Plan 01 (D-10)
+            // Quick task 260805-qme: empty array (not nil) distinguishes "matcher
+            // ran, changed nothing" from a historical record predating this field.
+            brand_rewrites: dbgBrandRewrites.map { DebugCleanupRecord.BrandRewriteEntry(from: $0.surface, to: $0.canon, jw: $0.jw, dl: $0.dl) }
         )
         await DebugRecorder.shared.record(record)
         #endif
