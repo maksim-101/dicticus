@@ -76,7 +76,8 @@ final class AsrReplayHarnessTests: XCTestCase {
                 continue
             }
 
-            row["duration"] = Double(samples.count) / sampleRate
+            let duration = Double(samples.count) / sampleRate
+            row["duration"] = duration
             row["rms"] = Self.rms(samples)
             row["peak"] = samples.map { abs($0) }.max() ?? 0
 
@@ -90,6 +91,13 @@ final class AsrReplayHarnessTests: XCTestCase {
                 row["confidence"] = out.result.confidence
                 row["avg_logprobs"] = out.avgLogprobs
                 row["no_speech_probs"] = out.noSpeechProbs
+                // Quick task 260805-qx7: exercise the shipped predicate on this row's own
+                // duration + avg_logprobs, making the replay a real runtime cross-check of
+                // avg_log_prob stability rather than a synthetic re-derivation.
+                row["low_confidence_short"] = LowConfidenceShort.flag(
+                    durationSeconds: Float(duration),
+                    avgLogProbs: out.avgLogprobs
+                )
             } catch {
                 // Gate rejections (tooShort / silenceOnly / noResult) are real outcomes
                 // of the live path, so they are recorded rather than treated as failures.
