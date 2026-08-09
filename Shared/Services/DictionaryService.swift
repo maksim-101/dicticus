@@ -711,10 +711,55 @@ class DictionaryService: ObservableObject {
         // miss is preferable to a stage-1 corruption no downstream guard
         // can see. Subsumes the prior no-spaces condition (a space is
         // neither a letter nor a number).
+        // Defect E (260809-g7h): a casing-only entry (key ≡ replacement
+        // modulo case, e.g. "Screenshot" -> "screenshot" — the two strings
+        // DIFFER, but only in case) is a casing-normalization entry, not a
+        // repair. As a fuzzy CANDIDATE it acts as an inflection-eating
+        // shadow — a plural is within ratio of its own singular
+        // ("screenshots" -> "screenshot" via key "Screenshot"). The
+        // exact-match pass above still applies these entries verbatim, so
+        // user-visible casing behaviour is unchanged; this filter only
+        // removes them from fuzzy candidacy.
+        //
+        // Deliberately does NOT exclude a TRUE identity entry (key and
+        // replacement byte-identical, e.g. "Tailscale" -> "Tailscale",
+        // "BarBaz1" -> "BarBaz1") — these are a pre-existing, widely-used
+        // pattern (DictionaryServiceTests) for seeding a canonical spelling
+        // as its OWN fuzzy-correction anchor so a nearby mishearing
+        // ("Tailscele") still resolves to it. Excluding those broke that
+        // path outright; the shadow-eating failure mode is specific to a
+        // GENUINE case difference between key and replacement.
         let candidateKeys = dictionary.keys
             .filter { $0.count >= 6 && $0.allSatisfy(Self.isFuzzyTokenChar) }
+            .filter { key in
+                guard let replacement = dictionary[key]?.replacement, replacement != key else { return true }
+                let normKey = key.lowercased().precomposedStringWithCanonicalMapping
+                let normReplacement = replacement.lowercased().precomposedStringWithCanonicalMapping
+                return normKey != normReplacement
+            }
             .sorted()
         if candidateKeys.isEmpty { return (text, [], []) }
+
+        // Defect D (260809-g7h): canonical-collision veto. A token that IS
+        // one of the user's own dictionary canonicals is by definition
+        // correctly heard — any fuzzy candidate matching it is a collision
+        // between two canonicals, never a repair (traced case: "AdGuard"
+        // was rewritten to "Cellguard" via key "SalGuard" at ratio exactly
+        // 0.250). Built from EVERY entry (not just `candidateKeys`, which is
+        // already filtered down) so a canonical protected only by a
+        // punctuation-bearing or casing-only sibling key still protects.
+        // Splitting multi-word replacements into their constituent words
+        // matters: a user whose dictionary only has a multi-word
+        // replacement ("AdGuard Home") would otherwise be unprotected for
+        // the single-word canonical it contains ("AdGuard").
+        var protectedCanonicals = Set<String>()
+        for (key, metadata) in dictionary {
+            protectedCanonicals.insert(Self.sanitizeForFuzzyComparison(key))
+            protectedCanonicals.insert(Self.sanitizeForFuzzyComparison(metadata.replacement))
+            for word in metadata.replacement.split(separator: " ") {
+                protectedCanonicals.insert(Self.sanitizeForFuzzyComparison(String(word)))
+            }
+        }
 
         var replacements: [Replacement] = []
         var blocked: [BlockedMatch] = []
@@ -729,7 +774,7 @@ class DictionaryService: ObservableObject {
                 current.append(ch)
             } else {
                 if !current.isEmpty {
-                    let r = fuzzyReplaceTokenWithTrace(current, candidates: candidateKeys)
+                    let r = fuzzyReplaceTokenWithTrace(current, candidates: candidateKeys, protected: protectedCanonicals)
                     result.append(r.0)
                     if let rep = r.1 { replacements.append(rep) }
                     if let blk = r.2 { blocked.append(blk) }
@@ -739,7 +784,7 @@ class DictionaryService: ObservableObject {
             }
         }
         if !current.isEmpty {
-            let r = fuzzyReplaceTokenWithTrace(current, candidates: candidateKeys)
+            let r = fuzzyReplaceTokenWithTrace(current, candidates: candidateKeys, protected: protectedCanonicals)
             result.append(r.0)
             if let rep = r.1 { replacements.append(rep) }
             if let blk = r.2 { blocked.append(blk) }
@@ -747,12 +792,22 @@ class DictionaryService: ObservableObject {
         return (result, replacements, blocked)
     }
 
+    /// Lowercased, NFC-normalized, and stripped of characters the fuzzy-pass
+    /// tokenizer (`isFuzzyTokenChar`) can never emit — the shared sanitizer
+    /// for the Defect D protected-canonical set, so a punctuation- or
+    /// space-bearing key/replacement compares correctly against a token that
+    /// only ever contains letters/numbers.
+    private static func sanitizeForFuzzyComparison(_ s: String) -> String {
+        let lowered = s.lowercased().precomposedStringWithCanonicalMapping
+        return String(lowered.filter(Self.isFuzzyTokenChar))
+    }
+
     /// Phase 27 D-01 fuzzy-pass guard. Returns the (possibly replaced) token
     /// plus an optional `Replacement` (when a candidate fires) or an optional
     /// `BlockedMatch` (when a candidate would have hit pre-guard but is now
     /// rejected by either Guard A or Guard B). At most one of the optionals is
     /// non-nil per call.
-    private func fuzzyReplaceTokenWithTrace(_ token: String, candidates: [String]) -> (String, Replacement?, BlockedMatch?) {
+    private func fuzzyReplaceTokenWithTrace(_ token: String, candidates: [String], protected: Set<String>) -> (String, Replacement?, BlockedMatch?) {
         guard token.count >= 6 else { return (token, nil, nil) }
         // Phase 27 WR-03: NFC-normalize before allowlist lookup. The allowlist
         // is loaded NFC (loadCommonWords), and ASR may emit NFD-decomposed
@@ -764,6 +819,13 @@ class DictionaryService: ObservableObject {
         // Guard A (D-01a, D-04): allowlist veto. Common English/German words
         // never become fuzzy candidates regardless of distance.
         if commonWords.contains(lowered) {
+            return (token, nil, nil)
+        }
+
+        // Defect D (260809-g7h): canonical-collision veto. `token` only ever
+        // contains letters/numbers (the tokenizer emits nothing else), so it
+        // is already directly comparable to the sanitized protected set.
+        if protected.contains(lowered) {
             return (token, nil, nil)
         }
 
