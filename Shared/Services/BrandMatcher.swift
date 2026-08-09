@@ -189,6 +189,24 @@ final class BrandMatcher {
                     continue
                 }
 
+                // Defect-C inflection guard (260809-g7h): a near-exact single
+                // token that is the canonical PLUS a pure inflection suffix
+                // ("LLMs" over canonical "LLM") loses its inflection when
+                // rewritten to the bare canonical. Skip the rewrite when the
+                // normalized window is strictly longer than the normalized
+                // canonical and equals it plus one of s/es/ed/ing exactly
+                // (the apostrophe form is already covered because `normalize`
+                // drops apostrophes). Identity rewrites (window == canonical)
+                // are unaffected — the length check requires strictly longer.
+                let wnorm = normalize(window)
+                let cnorm = normalize(m.canon)
+                if wnorm.count > cnorm.count, wnorm.hasPrefix(cnorm) {
+                    let suffix = String(wnorm.dropFirst(cnorm.count))
+                    if ["s", "es", "ed", "ing"].contains(suffix) {
+                        continue
+                    }
+                }
+
                 let lead = leadingNonCore(windowWords.first!)
                 let trail = trailingNonCore(windowWords.last!)
                 out += lead + m.canon + trail
@@ -241,8 +259,18 @@ final class BrandMatcher {
             let dl = BrandStringMetrics.damerauLevenshtein(na, nb)
             let phon = !tmeta.isEmpty && tmeta == entry.meta
             let orthoOk = jw >= BrandMatcher.jwThreshold && dl <= BrandMatcher.maxEditDistance
-            let phonOk = phon && (jw >= BrandMatcher.phoneticJWFloor
-                                  || dl <= max(3, tnorm.count / 2))
+            // Defect A2 (260809-g7h): a phonetic key for a SHORT canonical
+            // collides with far too much ordinary text — a 4-letter token
+            // matched a 3-letter canonical at jw 0.575 ("uuid" -> "UAT").
+            // Bound the phonetic-only accept by canonical length. Do NOT
+            // implement this by tightening `dl <= max(3, tnorm.count / 2)`
+            // — that bound is load-bearing for a real true positive
+            // ("Towry" -> "Tauri", jw 0.64, dl 3 on a 5-char token). Leave
+            // the orthographic channel untouched so short canonicals stay
+            // reachable by a genuine near-exact spelling.
+            let phonOk = phon && nb.count >= BrandMatcher.minDistinctiveChars
+                                && (jw >= BrandMatcher.phoneticJWFloor
+                                    || dl <= max(3, tnorm.count / 2))
             // require_phonetic = true (spike default): accept on a strong
             // orthographic match WITH phonetic agreement (or a very-strong ortho
             // match alone), OR on a phonetic match with bounded distance.
@@ -289,6 +317,29 @@ final class BrandMatcher {
             if n.count > suf.count, n.hasSuffix(suf) {
                 let stem = String(n.dropLast(suf.count))
                 if combinedLexicon.contains(stem) { return true }
+            }
+        }
+        // Defect A1 (260809-g7h): `depunct` only trims EDGE punctuation, so a
+        // contraction's interior apostrophe survives into `n` ("we've"),
+        // which misses the lexicon (word lists carry the stem, not the
+        // apostrophe form) and is therefore wrongly treated as distinctive —
+        // eligible for fuzzy brand rewriting ("we've" -> "Wi-Fi"). Strip the
+        // apostrophe (both straight U+0027 and curly U+2019) and re-check;
+        // when the ORIGINAL token actually contained an apostrophe, also
+        // back off the common contraction suffixes over the stripped
+        // variant. Gated on apostrophe presence so a bare token ending in
+        // d/m/nt/s (no contraction) cannot be reclassified as common by
+        // these suffixes.
+        let hasApostrophe = n.contains("'") || n.contains("\u{2019}")
+        let stripped = n.replacingOccurrences(of: "'", with: "")
+            .replacingOccurrences(of: "\u{2019}", with: "")
+        if combinedLexicon.contains(stripped) { return true }
+        if hasApostrophe {
+            for suf in ["ve", "re", "ll", "nt", "d", "m", "s"] {
+                if stripped.count > suf.count, stripped.hasSuffix(suf) {
+                    let stem = String(stripped.dropLast(suf.count))
+                    if combinedLexicon.contains(stem) { return true }
+                }
             }
         }
         return false
