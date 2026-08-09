@@ -172,6 +172,23 @@ final class BrandMatcher {
                     && normalize(window).count >= BrandMatcher.minDistinctiveChars
                 guard distinctive || nearExact else { continue }
 
+                // Defect-B swallow guard (260809-g7h): a 2-token window is only a
+                // genuine COMPOUND match ("cell guard" -> Cellguard, "Swift bar" ->
+                // SwiftBar) if neither word alone already IS the brand. When one
+                // window word alone already scores near-exact against the SAME
+                // canonical the 2-token match matched, the second word is not part
+                // of the brand at all — it's an ordinary neighbour ("TrueNAS, I",
+                // "1Password is", "ChatGPT." + next sentence) that the wider window
+                // is about to delete. `continue` here so the loop falls through to
+                // the 1-token window at the NEXT position, which rewrites only the
+                // brand token and leaves the neighbour (and its punctuation/sentence
+                // boundary) untouched. Deliberately NOT "both tokens non-common" —
+                // "cell", "guard", "ad", "bar", "swift" are all common words, and
+                // that rule would destroy every legitimate compound.
+                if w == 2, windowWords.contains(where: { isSingleWordNearExact($0, canonical: m.canon) }) {
+                    continue
+                }
+
                 let lead = leadingNonCore(windowWords.first!)
                 let trail = trailingNonCore(windowWords.last!)
                 out += lead + m.canon + trail
@@ -239,6 +256,19 @@ final class BrandMatcher {
         }
         guard let b = best else { return nil }
         return (b.canon, b.jw, b.dl)
+    }
+
+    /// True when `word` ALONE (normalized) already scores near-exact against
+    /// `canonical` (normalized) — the Defect-B swallow-guard discriminator.
+    /// Guards against empty normalized strings (a bare-punctuation "word" or a
+    /// symbol-stripped canonical must never vacuously score near-exact).
+    private func isSingleWordNearExact(_ word: String, canonical: String) -> Bool {
+        let a = normalize(word)
+        let b = normalize(canonical)
+        guard !a.isEmpty, !b.isEmpty else { return false }
+        let jw = BrandStringMetrics.jaroWinkler(a, b)
+        let dl = BrandStringMetrics.damerauLevenshtein(a, b)
+        return jw >= BrandMatcher.nearExactJW && dl <= BrandMatcher.nearExactDL
     }
 
     // MARK: - Lexicon guard (ported from is_common)
