@@ -61,6 +61,7 @@
 		46B52C3C05E290F9EF02A653 /* ModelDownloadServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E09C1D66A0C3F4875FA7680F /* ModelDownloadServiceTests.swift */; };
 		4B4081C423AE17064FC2B6B4 /* ReasoningLeakTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 17D1BB9DFF0AB047BBF9D391 /* ReasoningLeakTests.swift */; };
 		4CBBF3AFC8E2A483A8A2AAD5 /* DictionaryIOService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8836157317484A1BE5D5E388 /* DictionaryIOService.swift */; };
+		4CBE55084F9F6D6CA47E3123 /* BrandSwallowGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D772BFA3688DE28C9416B564 /* BrandSwallowGuardTests.swift */; };
 		4CCD2B5B31FFBD03C2010FEA /* SwissHelvetisms.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0251735010FF2B17E0BCF8CC /* SwissHelvetisms.swift */; };
 		4E8963527065DC1D3A1511EB /* EditGuardTokenizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F80DDF0ECF58FEA139E28FDF /* EditGuardTokenizerTests.swift */; };
 		4EBD2D2867D12C548A2E7593 /* ModelWarmupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44EEB61470B43106AF1E43A7 /* ModelWarmupService.swift */; };
@@ -361,6 +362,7 @@
 		D6167EA14528CB86BCBC7583 /* GermanPosProbeFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GermanPosProbeFixtures.swift; sourceTree = "<group>"; };
 		D667692C5EE7BB68CC659EE0 /* CleanupCopyMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CleanupCopyMode.swift; sourceTree = "<group>"; };
 		D6CF6C951598DD95DF8012E2 /* ITNUtilityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ITNUtilityTests.swift; sourceTree = "<group>"; };
+		D772BFA3688DE28C9416B564 /* BrandSwallowGuardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandSwallowGuardTests.swift; sourceTree = "<group>"; };
 		D9B65C32CBE35451FCB1E073 /* EditGuardTokenizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditGuardTokenizer.swift; sourceTree = "<group>"; };
 		DCA28F8F142CE72EB85279C5 /* starter-pack-tech.csv */ = {isa = PBXFileReference; path = "starter-pack-tech.csv"; sourceTree = "<group>"; };
 		DFFEAB556B3C35592C49E77D /* LowConfidenceShort.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LowConfidenceShort.swift; sourceTree = "<group>"; };
@@ -663,6 +665,7 @@
 			children = (
 				17E54A92A52A67E113DEF487 /* AdaptiveVoiceGateTests.swift */,
 				7B1585188DD9D4E01B161960 /* BrandRewriteTraceTests.swift */,
+				D772BFA3688DE28C9416B564 /* BrandSwallowGuardTests.swift */,
 				C93EA94198EFE7ABD237D816 /* CleanupContextLimitTests.swift */,
 				FAC9E0CB8C6339113702C44B /* CleanupPromptVariantTests.swift */,
 				A20BFF7DF7FDD1646B1F5B20 /* ClosedListTests.swift */,
@@ -810,7 +813,7 @@
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
 					196278924188207EC2516968 = {
-						DevelopmentTeam = VTWHBCCP36;
+						DevelopmentTeam = "${DEVELOPER_TEAM_ID}";
 						ProvisioningStyle = Manual;
 					};
 				};
@@ -984,6 +987,7 @@
 				9B88CE1891F4D8BADD684F72 /* BrandMatcherTests.swift in Sources */,
 				1A9715F68BCFABF765FED77B /* BrandPhoneticsTests.swift in Sources */,
 				720D11906315EB64D0578B51 /* BrandRewriteTraceTests.swift in Sources */,
+				4CBE55084F9F6D6CA47E3123 /* BrandSwallowGuardTests.swift in Sources */,
 				639A284A6F1648C78B7F6676 /* CapitalizationTests.swift in Sources */,
 				5294B5D3B95DE8EF6E05278B /* CleanupContextLimitTests.swift in Sources */,
 				C88A581C1776F2B4EFC2C57C /* CleanupPromptTests.swift in Sources */,
@@ -1070,7 +1074,7 @@
 				CODE_SIGN_IDENTITY = "Developer ID Application";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
-				DEVELOPMENT_TEAM = VTWHBCCP36;
+				DEVELOPMENT_TEAM = "${DEVELOPER_TEAM_ID}";
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -1096,7 +1100,7 @@
 				CODE_SIGN_IDENTITY = "Developer ID Application";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
-				DEVELOPMENT_TEAM = VTWHBCCP36;
+				DEVELOPMENT_TEAM = "${DEVELOPER_TEAM_ID}";
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -1205,7 +1209,7 @@
 				CODE_SIGN_IDENTITY = "Developer ID Application";
 				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
-				DEVELOPMENT_TEAM = VTWHBCCP36;
+				DEVELOPMENT_TEAM = "${DEVELOPER_TEAM_ID}";
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = NO;
