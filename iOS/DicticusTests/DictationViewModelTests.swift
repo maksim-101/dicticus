@@ -64,8 +64,22 @@ private final class FakeTranscriptionProvider: TranscriptionProviding {
     var resultConfidence: Float = 0.9
     var errorToThrow: Error?
 
+    /// Optional per-call override queue (46-03): when non-empty, each call to
+    /// `transcribe(wavURL:)` consumes the NEXT element instead of the fixed
+    /// `resultText`/`errorToThrow` above — lets one fake drive a multi-recording
+    /// drain where each row must produce distinguishable output (arrival-order
+    /// assertions) or a specific row must fail while the others succeed. Empty by
+    /// default so every pre-46-03 test using the fixed-value fields is unaffected.
+    var responseQueue: [Result<DicticusTranscriptionResult, Error>] = []
+
     func transcribe(wavURL: URL) async throws -> DicticusTranscriptionResult {
         callCount += 1
+        if !responseQueue.isEmpty {
+            switch responseQueue.removeFirst() {
+            case .success(let result): return result
+            case .failure(let error): throw error
+            }
+        }
         if let errorToThrow { throw errorToThrow }
         return DicticusTranscriptionResult(text: resultText, language: resultLanguage, confidence: resultConfidence)
     }
@@ -1395,5 +1409,281 @@ final class DictationViewModelTests: XCTestCase {
         XCTAssertEqual(fakeRecorder.startCallCount, 0,
                        "Icon launch (no pendingDictation) must never start a recording (D-03)")
         XCTAssertEqual(vm.state, .idle)
+    }
+
+    // MARK: - Phase 46-03: arrival-order queue drain, hold-on-failure, retry (D-09/D-10/D-11)
+
+    /// Queues two recordings while no transcriber exists (a tiny sleep between
+    /// guarantees distinct `createdAt` timestamps for a deterministic arrival
+    /// order), then drains with a fake whose per-call responses are
+    /// distinguishable, and asserts the resulting History entries match the
+    /// expected ORDERED array — not membership.
+    func testDrainDeliversTwoQueuedRecordingsInArrivalOrder() async throws {
+        let vm = DictationViewModel()
+        let tempContainer = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let testHistory = HistoryService.makeForTesting(containerURLProvider: { tempContainer })
+        let testStore = PendingRecordingStore.makeForTesting(historyService: testHistory)
+        vm.historyService = testHistory
+        vm.pendingStore = testStore
+        vm.audioRecorder = FakeAudioRecorder()
+        vm.isBackgroundedProvider = { false }
+
+        vm.state = .recording
+        await vm.stopDictation()
+        try? await Task.sleep(for: .seconds(0.01))
+        vm.state = .recording
+        await vm.stopDictation()
+        XCTAssertEqual(testStore.pendingRecordings.count, 2, "Precondition: two rows queued")
+
+        let fakeTranscriber = FakeTranscriptionProvider()
+        fakeTranscriber.responseQueue = [
+            .success(DicticusTranscriptionResult(text: "first spoken", language: "en", confidence: 0.9)),
+            .success(DicticusTranscriptionResult(text: "second spoken", language: "en", confidence: 0.9)),
+        ]
+        vm.transcriptionService = fakeTranscriber
+
+        await vm.drainPendingRecordingsIfNeeded()
+
+        XCTAssertEqual(fakeTranscriber.callCount, 2, "Both queued rows must be transcribed")
+        let orderedTexts = testHistory.entries.sorted(by: { $0.createdAt < $1.createdAt }).map(\.text)
+        XCTAssertEqual(orderedTexts, ["First spoken", "Second spoken"],
+                       "History entries must match the two fakes in ARRIVAL order, compared as an ordered array")
+        XCTAssertEqual(testStore.pendingRecordings.count, 0, "Both rows must be resolved")
+
+        // Cleanup
+        for entry in testHistory.entries { if let id = entry.id { testHistory.delete(id: id) } }
+        try? FileManager.default.removeItem(at: tempContainer)
+    }
+
+    /// A drain whose second recording's transcription throws must leave the first
+    /// delivered (WAV gone, History entry present) and the second held (WAV still
+    /// on disk, row `.failed` with a non-nil `failureReason`) — a failure on one row
+    /// must not abort or lose the rest of the queue.
+    func testDrainSecondFailureLeavesFirstDeliveredAndSecondHeldWithFile() async throws {
+        let vm = DictationViewModel()
+        let tempContainer = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let testHistory = HistoryService.makeForTesting(containerURLProvider: { tempContainer })
+        let testStore = PendingRecordingStore.makeForTesting(historyService: testHistory)
+        vm.historyService = testHistory
+        vm.pendingStore = testStore
+        vm.audioRecorder = FakeAudioRecorder()
+        vm.isBackgroundedProvider = { false }
+
+        vm.state = .recording
+        await vm.stopDictation()
+        try? await Task.sleep(for: .seconds(0.01))
+        vm.state = .recording
+        await vm.stopDictation()
+        XCTAssertEqual(testStore.pendingRecordings.count, 2, "Precondition: two rows queued")
+        let orderedRows = testStore.pendingRecordings.sorted(by: { $0.createdAt < $1.createdAt })
+        let firstURL = try testStore.fileURL(for: orderedRows[0])
+        let secondURL = try testStore.fileURL(for: orderedRows[1])
+
+        let fakeTranscriber = FakeTranscriptionProvider()
+        fakeTranscriber.responseQueue = [
+            .success(DicticusTranscriptionResult(text: "delivered ok", language: "en", confidence: 0.9)),
+            .failure(TranscriptionError.noResult),
+        ]
+        vm.transcriptionService = fakeTranscriber
+
+        await vm.drainPendingRecordingsIfNeeded()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: firstURL.path),
+                       "First recording's WAV must be gone — it was delivered")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: secondURL.path),
+                      "Second recording's WAV must still exist — it was held, not discarded")
+        let remaining = testStore.pendingRecordings
+        XCTAssertEqual(remaining.count, 1)
+        XCTAssertEqual(remaining.first?.status, PendingRecordingStatus.failed.rawValue)
+        XCTAssertNotNil(remaining.first?.failureReason)
+
+        // Cleanup
+        for entry in testHistory.entries { if let id = entry.id { testHistory.delete(id: id) } }
+        for row in testStore.pendingRecordings { testStore.delete(row) }
+        try? FileManager.default.removeItem(at: tempContainer)
+    }
+
+    /// `retryPendingRecording(_:)` on a failed row, with a now-succeeding
+    /// transcriber, must produce a History entry and leave the store empty and the
+    /// file gone.
+    func testRetryPendingRecordingProducesHistoryEntryAndEmptiesStore() async throws {
+        let vm = DictationViewModel()
+        let tempContainer = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let testHistory = HistoryService.makeForTesting(containerURLProvider: { tempContainer })
+        let testStore = PendingRecordingStore.makeForTesting(historyService: testHistory)
+        vm.historyService = testHistory
+        vm.pendingStore = testStore
+        vm.audioRecorder = FakeAudioRecorder()
+        vm.isBackgroundedProvider = { false }
+
+        vm.state = .recording
+        await vm.stopDictation()
+        let failingTranscriber = FakeTranscriptionProvider()
+        failingTranscriber.errorToThrow = TranscriptionError.noResult
+        vm.transcriptionService = failingTranscriber
+        await vm.drainPendingRecordingsIfNeeded()
+
+        let failedRow = try XCTUnwrap(testStore.pendingRecordings.first)
+        XCTAssertEqual(failedRow.status, PendingRecordingStatus.failed.rawValue, "Precondition: row is failed")
+        let fileURL = try testStore.fileURL(for: failedRow)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path), "Precondition: WAV still held")
+
+        let succeedingTranscriber = FakeTranscriptionProvider()
+        succeedingTranscriber.resultText = "recovered on retry"
+        vm.transcriptionService = succeedingTranscriber
+
+        await vm.retryPendingRecording(failedRow)
+
+        XCTAssertEqual(testHistory.entries.count, 1)
+        XCTAssertEqual(testHistory.entries.first?.text, "Recovered on retry")
+        XCTAssertEqual(testStore.pendingRecordings.count, 0, "Store must be empty after a successful retry")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path), "WAV must be gone after a successful retry")
+
+        // Cleanup
+        for entry in testHistory.entries { if let id = entry.id { testHistory.delete(id: id) } }
+        try? FileManager.default.removeItem(at: tempContainer)
+    }
+
+    /// Disposition table half 1: `.tooShort` discards the row and the bytes — a
+    /// determination there was nothing to transcribe, not a failure to hold.
+    func testTooShortOutcomeDiscardsRowAndFile() async throws {
+        let vm = DictationViewModel()
+        let tempContainer = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let testHistory = HistoryService.makeForTesting(containerURLProvider: { tempContainer })
+        let testStore = PendingRecordingStore.makeForTesting(historyService: testHistory)
+        vm.historyService = testHistory
+        vm.pendingStore = testStore
+        vm.audioRecorder = FakeAudioRecorder()
+        vm.isBackgroundedProvider = { false }
+
+        vm.state = .recording
+        await vm.stopDictation()
+        let row = try XCTUnwrap(testStore.pendingRecordings.first)
+        let fileURL = try testStore.fileURL(for: row)
+
+        let fakeTranscriber = FakeTranscriptionProvider()
+        fakeTranscriber.errorToThrow = TranscriptionError.tooShort
+        vm.transcriptionService = fakeTranscriber
+
+        await vm.drainPendingRecordingsIfNeeded()
+
+        XCTAssertEqual(testStore.pendingRecordings.count, 0, ".tooShort must discard the row")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path), ".tooShort must discard the file")
+
+        try? FileManager.default.removeItem(at: tempContainer)
+    }
+
+    /// Disposition table half 2: `.noResult` holds one row — the file may contain
+    /// something the user said and the attempt simply failed to extract it.
+    func testNoResultOutcomeHoldsRowAndFile() async throws {
+        let vm = DictationViewModel()
+        let tempContainer = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let testHistory = HistoryService.makeForTesting(containerURLProvider: { tempContainer })
+        let testStore = PendingRecordingStore.makeForTesting(historyService: testHistory)
+        vm.historyService = testHistory
+        vm.pendingStore = testStore
+        vm.audioRecorder = FakeAudioRecorder()
+        vm.isBackgroundedProvider = { false }
+
+        vm.state = .recording
+        await vm.stopDictation()
+        let row = try XCTUnwrap(testStore.pendingRecordings.first)
+        let fileURL = try testStore.fileURL(for: row)
+
+        let fakeTranscriber = FakeTranscriptionProvider()
+        fakeTranscriber.errorToThrow = TranscriptionError.noResult
+        vm.transcriptionService = fakeTranscriber
+
+        await vm.drainPendingRecordingsIfNeeded()
+
+        XCTAssertEqual(testStore.pendingRecordings.count, 1, ".noResult must hold — leave exactly one row")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path), ".noResult must NOT discard the file")
+        XCTAssertEqual(testStore.pendingRecordings.first?.status, PendingRecordingStatus.failed.rawValue)
+        XCTAssertNotNil(testStore.pendingRecordings.first?.failureReason)
+
+        // Cleanup
+        for r in testStore.pendingRecordings { testStore.delete(r) }
+        try? FileManager.default.removeItem(at: tempContainer)
+    }
+
+    /// Direct unit test of the disposition-mapping function itself, independent of
+    /// the async drain pipeline — every case in the table.
+    func testFailureDispositionMapping() {
+        XCTAssertEqual(DictationViewModel.failureDisposition(for: TranscriptionError.tooShort), .discard)
+        XCTAssertEqual(DictationViewModel.failureDisposition(for: TranscriptionError.silenceOnly), .discard)
+        XCTAssertEqual(DictationViewModel.failureDisposition(for: TranscriptionError.noResult),
+                       .hold(reason: "Could not understand audio."))
+        XCTAssertEqual(DictationViewModel.failureDisposition(for: TranscriptionError.unexpectedLanguage),
+                       .hold(reason: "Unsupported language detected."))
+        XCTAssertEqual(DictationViewModel.failureDisposition(for: TranscriptionError.modelNotReady),
+                       .hold(reason: "Model not ready."))
+        XCTAssertEqual(DictationViewModel.failureDisposition(for: TranscriptionError.busy),
+                       .hold(reason: "System busy."))
+        XCTAssertEqual(DictationViewModel.failureDisposition(for: TranscriptionError.notRecording),
+                       .hold(reason: "Not recording."))
+        struct SomeOtherError: Error, LocalizedError {
+            var errorDescription: String? { "unreadable file" }
+        }
+        XCTAssertEqual(DictationViewModel.failureDisposition(for: SomeOtherError()),
+                       .hold(reason: "unreadable file"),
+                       "Any other thrown error (I/O, decode, unreadable file) must hold, using its localized description")
+    }
+
+    /// A backgrounded drain of a two-recording batch must never touch the
+    /// clipboard, and must post EXACTLY ONE notification for the whole batch (not
+    /// one per recording), with a body that contains neither transcript's text.
+    func testBackgroundedDrainOfTwoRecordingsPostsOneBatchedNotificationNoClipboard() async throws {
+        let vm = DictationViewModel()
+        let tempContainer = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let testHistory = HistoryService.makeForTesting(containerURLProvider: { tempContainer })
+        let testStore = PendingRecordingStore.makeForTesting(historyService: testHistory)
+        vm.historyService = testHistory
+        vm.pendingStore = testStore
+        vm.audioRecorder = FakeAudioRecorder()
+        vm.isBackgroundedProvider = { false }  // queue while "foreground" — backgrounding only matters at drain time
+
+        vm.state = .recording
+        await vm.stopDictation()
+        try? await Task.sleep(for: .seconds(0.01))
+        vm.state = .recording
+        await vm.stopDictation()
+        XCTAssertEqual(testStore.pendingRecordings.count, 2, "Precondition: two rows queued")
+
+        var clipboardWritten = false
+        vm.clipboardWriter = { _ in clipboardWritten = true }
+        var notificationCount = 0
+        var lastBody: String?
+        vm.notificationPoster = { _, body in
+            notificationCount += 1
+            lastBody = body
+        }
+
+        vm.isBackgroundedProvider = { true }  // now background for the drain itself
+        let fakeTranscriber = FakeTranscriptionProvider()
+        fakeTranscriber.responseQueue = [
+            .success(DicticusTranscriptionResult(text: "alpha secret content", language: "en", confidence: 0.9)),
+            .success(DicticusTranscriptionResult(text: "beta secret content", language: "en", confidence: 0.9)),
+        ]
+        vm.transcriptionService = fakeTranscriber
+
+        await vm.drainPendingRecordingsIfNeeded()
+
+        XCTAssertFalse(clipboardWritten, "A backgrounded drain must never write to the clipboard")
+        XCTAssertEqual(notificationCount, 1, "Exactly one notification must be posted for a two-recording batch")
+        let body = try XCTUnwrap(lastBody)
+        XCTAssertFalse(body.lowercased().contains("alpha") || body.lowercased().contains("beta"),
+                       "Notification body must not contain either transcript's text (T-36-08)")
+
+        // Cleanup
+        DicticusIPCBridge.defaults?.removeObject(forKey: DicticusIPCBridge.Key.pendingTranscriptUUIDs)
+        DicticusIPCBridge.defaults?.removeObject(forKey: DicticusIPCBridge.Key.pendingTranscriptUUID)
+        for entry in testHistory.entries { if let id = entry.id { testHistory.delete(id: id) } }
+        try? FileManager.default.removeItem(at: tempContainer)
     }
 }

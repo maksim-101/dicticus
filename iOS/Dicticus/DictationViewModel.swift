@@ -464,81 +464,163 @@ class DictationViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Pending-recording drain (Phase 46-02, D-05)
+    // MARK: - Pending-recording drain (Phase 46-02/46-03, D-05/D-09/D-10/D-11)
 
-    /// Transcribes the oldest queued `PendingRecording` (a recording captured before
-    /// the ASR model was ready) once a transcriber becomes available. Called after
-    /// `warmupService.isReady` publishes true and on every normal idle foreground.
+    /// D-10/D-11: maps a failed transcription attempt to what happens to its audio.
+    /// A named, directly-testable function rather than an inline switch, per
+    /// 46-03-PLAN.md's "make it a named function ... so it is directly testable."
+    ///
+    /// | Outcome | Disposition | Why |
+    /// |---|---|---|
+    /// | `.tooShort` | discard | a sub-threshold clip is a determination there is nothing to transcribe |
+    /// | `.silenceOnly` | discard | the gates concluded there is no speech — holding it would fill the queue with nothing said |
+    /// | `.noResult`/`.unexpectedLanguage`/`.modelNotReady`/`.busy`/`.notRecording` | hold | something said may be in there and the attempt failed to get it out |
+    /// | any other thrown error (I/O, decode, unreadable file) | hold | same — a WAV that won't open is held, not deleted; the user decides |
+    enum RecordingFailureDisposition: Equatable {
+        case discard
+        case hold(reason: String)
+    }
+
+    static func failureDisposition(for error: Error) -> RecordingFailureDisposition {
+        guard let transcriptionError = error as? TranscriptionError else {
+            return .hold(reason: error.localizedDescription)
+        }
+        switch transcriptionError {
+        case .tooShort, .silenceOnly:
+            return .discard
+        case .noResult:
+            return .hold(reason: "Could not understand audio.")
+        case .unexpectedLanguage:
+            return .hold(reason: "Unsupported language detected.")
+        case .modelNotReady:
+            return .hold(reason: "Model not ready.")
+        case .busy:
+            return .hold(reason: "System busy.")
+        case .notRecording:
+            return .hold(reason: "Not recording.")
+        }
+    }
+
+    /// Re-entrancy guard so two near-simultaneous triggers (e.g. `isReady` flipping
+    /// AND a foreground return in the same instant) cannot both drain concurrently.
+    private var isDrainingPendingRecordings = false
+
+    /// Drains the FULL arrival-ordered queue of `PendingRecording`s (a recording
+    /// captured before the ASR model was ready, or several stacked during one
+    /// warm-up — D-09) once a transcriber is available. Called after
+    /// `warmupService.isReady` publishes true, on every normal idle foreground, and
+    /// from `retryPendingRecording(_:)`.
     ///
     /// Carries the same race-avoidance guard shape already applied twice to this
-    /// codebase: `guard state == .idle` (as `deliverPendingTranscriptsIfNeeded()` does)
-    /// and a `pendingDictation` App-Group re-check (as the `isLlmReady` handler in
-    /// `DicticusApp.swift` does) — without both, a recording that arrives while this
-    /// drain is mid-flight would reopen the WR-03 / Finding-1 double-start race.
-    ///
-    /// This plan drains one recording per call (the oldest queued row); the queue
-    /// (D-09) and retry/failed-state handling (D-10/D-11) are 46-03's job.
+    /// codebase before this: `guard state == .idle` (as
+    /// `deliverPendingTranscriptsIfNeeded()` does) and a `pendingDictation` App-Group
+    /// re-check (as the `isLlmReady` handler in `DicticusApp.swift` does) — without
+    /// both, a recording that arrives while this drain is mid-flight would reopen the
+    /// WR-03 / Finding-1 double-start race.
     func drainPendingRecordingsIfNeeded() async {
         guard state == .idle else { return }
         guard let transcriptionService else { return }
+        guard !isDrainingPendingRecordings else { return }
 
         let pendingDictation = DicticusIPCBridge.defaults?.bool(forKey: "pendingDictation") ?? false
         guard !pendingDictation else { return }
 
-        guard let oldest = pendingStore.pendingRecordings.first else { return }
-        guard let fileURL = try? pendingStore.fileURL(for: oldest) else { return }
+        isDrainingPendingRecordings = true
+        defer { isDrainingPendingRecordings = false }
 
+        await drainQueue(using: transcriptionService)
+    }
+
+    /// Entry point for the UI's Retry action (D-11, built by a later plan). Resets a
+    /// failed row to `.queued` and immediately attempts a drain. Safe to call when no
+    /// transcriber exists yet — `drainPendingRecordingsIfNeeded()`'s own guard makes
+    /// that a no-op, leaving the row queued and waiting, matching the copy
+    /// `46-UI-SPEC` promises ("we'll try again automatically once the model
+    /// reloads").
+    func retryPendingRecording(_ recording: PendingRecording) async {
+        guard state == .idle else { return }
+        pendingStore.requeue(recording)
+        await drainPendingRecordingsIfNeeded()
+    }
+
+    /// Mirrors `deliverPendingTranscriptsIfNeeded()`'s "read the full batch, process
+    /// each independently, don't abort on one failure" idiom: a failure on one row
+    /// leaves the rest of the queue intact for the next trigger, rather than aborting
+    /// the whole drain.
+    private func drainQueue(using transcriptionService: any TranscriptionProviding) async {
         let isBackgrounded = isBackgroundedProvider()
+        var deliveredWhileBackgrounded: [TranscriptionEntry] = []
 
-        do {
-            let result = try await transcriptionService.transcribe(wavURL: fileURL)
+        for row in pendingStore.queuedInArrivalOrder {
+            guard let fileURL = try? pendingStore.fileURL(for: row) else { continue }
+            pendingStore.markTranscribing(row)
 
-            // Mirrors stopDictation()'s background/foreground split exactly, so the
-            // LLM never re-enters a default path: backgrounded is always forced to
-            // .plain (GPU forbidden in background); foregrounded follows the same
-            // toggle+readiness selection as every other delivery path.
-            let mode: DictationMode
-            let cleanupProvider: CleanupProvider?
-            if isBackgrounded {
-                mode = .plain
-                cleanupProvider = nil
-            } else {
-                let wantsAiCleanup = (UserDefaults(suiteName: "group.com.dicticus") ?? .standard).bool(forKey: "aiCleanupEnabled")
-                let llmReady = cleanupService?.isLoaded ?? false
-                mode = Self.selectMode(wantsAiCleanup: wantsAiCleanup, llmReady: llmReady)
-                cleanupProvider = cleanupService
-            }
+            do {
+                let result = try await transcriptionService.transcribe(wavURL: fileURL)
 
-            // TextProcessingService.process() saves the TranscriptionEntry itself
-            // (Step 4 of the pipeline) — never call HistoryService here directly, or
-            // every drained recording would double-write.
-            let processor = TextProcessingService(cleanupService: cleanupProvider,
-                                                   historyService: self.historyService)
-            _ = await processor.process(
-                text: result.text,
-                language: result.language,
-                mode: mode,
-                confidence: Double(result.confidence)
-            )
+                // Mirrors stopDictation()'s background/foreground split exactly, so
+                // the LLM never re-enters a default path: backgrounded is always
+                // forced to .plain (GPU forbidden in background); foregrounded
+                // follows the same toggle+readiness selection as every other
+                // delivery path.
+                let mode: DictationMode
+                let cleanupProvider: CleanupProvider?
+                if isBackgrounded {
+                    mode = .plain
+                    cleanupProvider = nil
+                } else {
+                    let wantsAiCleanup = (UserDefaults(suiteName: "group.com.dicticus") ?? .standard).bool(forKey: "aiCleanupEnabled")
+                    let llmReady = cleanupService?.isLoaded ?? false
+                    mode = Self.selectMode(wantsAiCleanup: wantsAiCleanup, llmReady: llmReady)
+                    cleanupProvider = cleanupService
+                }
 
-            if isBackgrounded {
-                if let uuid = self.historyService.entries.first?.uuid {
+                // TextProcessingService.process() saves the TranscriptionEntry itself
+                // (Step 4 of the pipeline) — never call HistoryService here directly,
+                // or every drained recording would double-write.
+                let processor = TextProcessingService(cleanupService: cleanupProvider,
+                                                       historyService: self.historyService)
+                _ = await processor.process(
+                    text: result.text,
+                    language: result.language,
+                    mode: mode,
+                    confidence: Double(result.confidence)
+                )
+
+                if isBackgrounded, let entry = self.historyService.entries.first {
+                    deliveredWhileBackgrounded.append(entry)
                     let defaults = DicticusIPCBridge.defaults
                     var list = defaults?.stringArray(forKey: DicticusIPCBridge.Key.pendingTranscriptUUIDs) ?? []
-                    list.append(uuid.uuidString)
+                    list.append(entry.uuid.uuidString)
                     defaults?.set(list, forKey: DicticusIPCBridge.Key.pendingTranscriptUUIDs)
-                    defaults?.set(uuid.uuidString, forKey: DicticusIPCBridge.Key.pendingTranscriptUUID)
+                    defaults?.set(entry.uuid.uuidString, forKey: DicticusIPCBridge.Key.pendingTranscriptUUID)
                 }
-                // No transcript text in the notification body (T-36-08 / security).
+
+                // Resolved — removes the WAV bytes and the row (D-02).
+                pendingStore.delete(row)
+            } catch {
+                switch Self.failureDisposition(for: error) {
+                case .discard:
+                    pendingStore.delete(row)
+                case .hold(let reason):
+                    pendingStore.markFailed(row, reason: reason)
+                }
+            }
+        }
+
+        // Batched notification (planner's discretion per 46-CONTEXT.md): exactly one
+        // notification per drain pass that delivered at least one transcript while
+        // backgrounded, not one per recording. No transcript text in the body under
+        // any circumstances (T-36-08 / security) — the count-only body for N>1
+        // extends that same constraint to the new batched case.
+        if isBackgrounded, !deliveredWhileBackgrounded.isEmpty {
+            if deliveredWhileBackgrounded.count == 1 {
                 await notificationPoster("Dictation ready",
                                          "Recording stopped — your transcript is waiting. Tap to open Dicticus.")
+            } else {
+                await notificationPoster("Dictation ready",
+                                         "\(deliveredWhileBackgrounded.count) transcripts are ready. Tap to open Dicticus.")
             }
-
-            // Resolved — removes the WAV bytes and the row (D-02).
-            pendingStore.delete(oldest)
-        } catch {
-            // Transcription failed — leave the row queued (D-10 hold). 46-03 adds
-            // markFailed()/retry(); for this plan the row simply stays queued.
         }
     }
 
