@@ -5,6 +5,7 @@ struct ContentView: View {
     @EnvironmentObject var warmupService: IOSModelWarmupService
     @EnvironmentObject var historyService: HistoryService
     @EnvironmentObject var dictionaryService: DictionaryService
+    @EnvironmentObject var pendingStore: PendingRecordingStore
 
     @Environment(\.horizontalSizeClass) var sizeClass
     @State private var selectedTab = 0
@@ -27,13 +28,15 @@ struct ContentView: View {
                         Label("History", systemImage: "clock")
                             .foregroundColor(selectedTab == 2 ? .accentColor : .primary)
                     }
+                    .badge(pendingStore.pendingCount)
                 }
                 .navigationTitle("Dicticus")
             } detail: {
                 if selectedTab == 0 {
-                    DictationView()
+                    DictationView(onOpenPendingQueue: { selectedTab = 2 })
                         .environmentObject(viewModel)
                         .environmentObject(warmupService)
+                        .environmentObject(pendingStore)
                 } else if selectedTab == 1 {
                     NavigationStack {
                         DictionaryManagementView()
@@ -42,6 +45,8 @@ struct ContentView: View {
                 } else {
                     HistoryView()
                         .environmentObject(historyService)
+                        .environmentObject(pendingStore)
+                        .environmentObject(viewModel)
                 }
             }
             .task {
@@ -55,9 +60,10 @@ struct ContentView: View {
         } else {
             // iPhone layout
             TabView(selection: $selectedTab) {
-                DictationView()
+                DictationView(onOpenPendingQueue: { selectedTab = 2 })
                     .environmentObject(viewModel)
                     .environmentObject(warmupService)
+                    .environmentObject(pendingStore)
                     .tabItem {
                         Label("Dictate", systemImage: "mic")
                     }
@@ -74,10 +80,13 @@ struct ContentView: View {
 
                 HistoryView()
                     .environmentObject(historyService)
+                    .environmentObject(pendingStore)
+                    .environmentObject(viewModel)
                     .tabItem {
                         Label("History", systemImage: "clock")
                     }
                     .tag(2)
+                    .badge(pendingStore.pendingCount)
             }
             .task {
                 viewModel.setupNotificationObserver()
@@ -97,4 +106,5 @@ struct ContentView: View {
         .environmentObject(IOSModelWarmupService())
         .environmentObject(HistoryService.shared)
         .environmentObject(DictionaryService.shared)
+        .environmentObject(PendingRecordingStore.shared)
 }

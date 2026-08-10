@@ -3,8 +3,15 @@ import SwiftUI
 struct DictationView: View {
     @EnvironmentObject var viewModel: DictationViewModel
     @EnvironmentObject var warmupService: IOSModelWarmupService
+    @EnvironmentObject var pendingStore: PendingRecordingStore
     @State private var showingSettings = false
     @State private var selectedBatchEntry: TranscriptionEntry?
+
+    /// Chip tap target — defaults to a no-op so existing previews and any other
+    /// construction site keep compiling. `ContentView` wires this to select the
+    /// History tab (scroll-to-top is sufficient navigation per the UI-SPEC — no
+    /// modal, no deep link).
+    var onOpenPendingQueue: () -> Void = {}
 
     var body: some View {
         NavigationStack {
@@ -56,6 +63,12 @@ struct DictationView: View {
                     }
                 }
                 .animation(.easeInOut(duration: 0.25), value: warmupStage)
+
+                // Sits below the warm-up banner (or alone, once the model is ready
+                // and only the queue is nonempty) — renders nothing at count zero,
+                // per PendingQueueChip.label(for:).
+                PendingQueueChip(count: pendingStore.pendingCount, onTap: onOpenPendingQueue)
+                    .padding(.horizontal, 24)
 
                 if let result = viewModel.lastResult {
                     VStack(alignment: .leading, spacing: 8) {
@@ -223,6 +236,7 @@ struct DictationView: View {
     DictationView()
         .environmentObject(DictationViewModel())
         .environmentObject(IOSModelWarmupService())
+        .environmentObject(PendingRecordingStore.shared)
 }
 
 #Preview("Batch delivery — 3 new") {
@@ -245,6 +259,7 @@ struct DictationView: View {
     return DictationView()
         .environmentObject(vm)
         .environmentObject(IOSModelWarmupService())
+        .environmentObject(PendingRecordingStore.shared)
 }
 
 #Preview("Warm-up — downloading") {
@@ -255,6 +270,7 @@ struct DictationView: View {
     return DictationView()
         .environmentObject(DictationViewModel())
         .environmentObject(ws)
+        .environmentObject(PendingRecordingStore.shared)
 }
 
 #Preview("Warm-up — loading") {
@@ -264,6 +280,7 @@ struct DictationView: View {
     return DictationView()
         .environmentObject(DictationViewModel())
         .environmentObject(ws)
+        .environmentObject(PendingRecordingStore.shared)
 }
 
 #Preview("Warm-up — model missing") {
@@ -274,6 +291,7 @@ struct DictationView: View {
     return DictationView()
         .environmentObject(DictationViewModel())
         .environmentObject(ws)
+        .environmentObject(PendingRecordingStore.shared)
 }
 
 #Preview("Warm-up — failed") {
@@ -283,4 +301,5 @@ struct DictationView: View {
     return DictationView()
         .environmentObject(DictationViewModel())
         .environmentObject(ws)
+        .environmentObject(PendingRecordingStore.shared)
 }
