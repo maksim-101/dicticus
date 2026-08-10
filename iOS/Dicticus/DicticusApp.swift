@@ -67,6 +67,7 @@ struct DicticusApp: App {
                     .environmentObject(dictionaryService)
                     .environmentObject(historyService)
                     .environmentObject(viewModel)
+                    .environmentObject(PendingRecordingStore.shared)
                     .onOpenURL { url in
                         if url.scheme == "dicticus" && url.host == "dictate" {
                             // WR-03: only set the App Group flag — do NOT also post .startDictation.

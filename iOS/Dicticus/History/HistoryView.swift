@@ -2,11 +2,26 @@ import SwiftUI
 
 struct HistoryView: View {
     @EnvironmentObject var historyService: HistoryService
+    @EnvironmentObject var pendingStore: PendingRecordingStore
     @State private var searchText = ""
 
     var body: some View {
         NavigationStack {
             List {
+                // Rendered only when non-empty — zero pending recordings means no
+                // section and no header at all (E3 empty). The existing "No History"
+                // ContentUnavailableView below already covers the true zero-data
+                // case, so a second empty state here would be noise. Pending rows
+                // never participate in the chronological section's swipe-to-delete —
+                // these are two different deletions with two different meanings.
+                if !pendingStore.pendingRecordings.isEmpty {
+                    Section("Pending") {
+                        ForEach(pendingStore.pendingRecordings) { recording in
+                            PendingRecordingRow(recording: recording)
+                        }
+                    }
+                }
+
                 if historyService.entries.isEmpty {
                     ContentUnavailableView(
                         "No History",
@@ -129,4 +144,6 @@ struct HistoryRow: View {
 #Preview {
     HistoryView()
         .environmentObject(HistoryService.shared)
+        .environmentObject(PendingRecordingStore.shared)
+        .environmentObject(DictationViewModel())
 }
