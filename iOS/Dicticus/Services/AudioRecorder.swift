@@ -89,6 +89,30 @@ final class RecordingFileWriter: @unchecked Sendable {
     }
 }
 
+/// Tracks the auto-stop silence window across tap callbacks. File-scope (not nested
+/// in `installTap`) so `AudioRecorder.processTapBuffer` — and its tests — can
+/// construct a fresh one without driving `AVAudioEngine`.
+final class SilenceTracker: @unchecked Sendable {
+    var startTime = Date()
+    var lastSoundTime = Date()
+    var didTrigger = false
+}
+
+/// One-shot gate so the D-04 haptic fires exactly once per recording, on the first
+/// buffer the tap actually delivers. File-scope so `AudioRecorderTests` can assert
+/// the exactly-once/zero-before-any-buffer behavior directly.
+final class FirstBufferGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var fired = false
+    func fireIfNeeded() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if fired { return false }
+        fired = true
+        return true
+    }
+}
+
 /// Records the microphone straight to a WAV file on disk, with zero ASR/model
 /// dependency — deliberately not importing WhisperKit or NaturalLanguage. This is the
 /// structural cut Phase 46 exists to make: recording can start, run, and finish
@@ -216,6 +240,8 @@ final class AudioRecorder: AudioRecording {
     /// Install audio tap in a nonisolated context so the closure has no actor affinity.
     /// Mirrors the pre-46-02 `IOSTranscriptionService.installTap` auto-stop logic
     /// verbatim — only the destination (writer, not an in-memory buffer) changed.
+    /// The per-buffer body is extracted into `processTapBuffer` (below) so it is
+    /// directly testable with synthesized buffers, without driving `AVAudioEngine`.
     nonisolated private static func installTap(
         on inputNode: AVAudioInputNode,
         format: AVAudioFormat,
@@ -227,53 +253,70 @@ final class AudioRecorder: AudioRecording {
         onSilence: @escaping @Sendable () -> Void,
         onFirstBuffer: @escaping @Sendable () -> Void
     ) {
-        final class SilenceTracker: @unchecked Sendable {
-            var startTime = Date()
-            var lastSoundTime = Date()
-            var didTrigger = false
-        }
-        final class FirstBufferGate: @unchecked Sendable {
-            private let lock = NSLock()
-            private var fired = false
-            func fireIfNeeded() -> Bool {
-                lock.lock()
-                defer { lock.unlock() }
-                if fired { return false }
-                fired = true
-                return true
-            }
-        }
         let tracker = SilenceTracker()
         let firstBufferGate = FirstBufferGate()
 
         inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) {
             pcmBuffer, _ in
-            writer.append(pcmBuffer)
+            processTapBuffer(
+                pcmBuffer,
+                writer: writer,
+                tracker: tracker,
+                firstBufferGate: firstBufferGate,
+                autoStopEnabled: autoStopEnabled,
+                silenceThreshold: silenceThreshold,
+                silenceDuration: silenceDuration,
+                gracePeriod: gracePeriod,
+                onSilence: onSilence,
+                onFirstBuffer: onFirstBuffer
+            )
+        }
+    }
 
-            if firstBufferGate.fireIfNeeded() {
-                onFirstBuffer()
-            }
+    /// Processes exactly one tap-delivered buffer: appends it to the writer, fires
+    /// `onFirstBuffer` exactly once per recording (D-04 — the haptic must mark the
+    /// real start of capture, not intent-fire time), and evaluates the auto-stop
+    /// silence tracker. `nonisolated` and side-effect-scoped to its arguments (no
+    /// AudioRecorder/actor state) so it is callable directly from tests with
+    /// synthesized `AVAudioPCMBuffer`s and fresh `SilenceTracker`/`FirstBufferGate`
+    /// instances — the load-bearing seam for the D-04 haptic-timing assertion.
+    nonisolated static func processTapBuffer(
+        _ pcmBuffer: AVAudioPCMBuffer,
+        writer: RecordingFileWriter,
+        tracker: SilenceTracker,
+        firstBufferGate: FirstBufferGate,
+        autoStopEnabled: Bool,
+        silenceThreshold: Float,
+        silenceDuration: Double,
+        gracePeriod: Double,
+        onSilence: () -> Void,
+        onFirstBuffer: () -> Void
+    ) {
+        writer.append(pcmBuffer)
 
-            guard autoStopEnabled, let channelData = pcmBuffer.floatChannelData?[0] else { return }
-            let frameCount = Int(pcmBuffer.frameLength)
-            guard frameCount > 0 else { return }
+        if firstBufferGate.fireIfNeeded() {
+            onFirstBuffer()
+        }
 
-            let now = Date()
-            let elapsedTotal = now.timeIntervalSince(tracker.startTime)
+        guard autoStopEnabled, let channelData = pcmBuffer.floatChannelData?[0] else { return }
+        let frameCount = Int(pcmBuffer.frameLength)
+        guard frameCount > 0 else { return }
 
-            // Simple RMS calculation to detect "sound"
-            var sum: Float = 0
-            for i in 0..<frameCount { let sample = channelData[i]; sum += sample * sample }
-            let rms = sqrt(sum / Float(frameCount))
+        let now = Date()
+        let elapsedTotal = now.timeIntervalSince(tracker.startTime)
 
-            if rms > silenceThreshold {
-                tracker.lastSoundTime = now
-            } else if !tracker.didTrigger && elapsedTotal > gracePeriod {
-                let silenceElapsed = now.timeIntervalSince(tracker.lastSoundTime)
-                if silenceElapsed >= silenceDuration {
-                    tracker.didTrigger = true
-                    onSilence()
-                }
+        // Simple RMS calculation to detect "sound"
+        var sum: Float = 0
+        for i in 0..<frameCount { let sample = channelData[i]; sum += sample * sample }
+        let rms = sqrt(sum / Float(frameCount))
+
+        if rms > silenceThreshold {
+            tracker.lastSoundTime = now
+        } else if !tracker.didTrigger && elapsedTotal > gracePeriod {
+            let silenceElapsed = now.timeIntervalSince(tracker.lastSoundTime)
+            if silenceElapsed >= silenceDuration {
+                tracker.didTrigger = true
+                onSilence()
             }
         }
     }
