@@ -14,7 +14,7 @@ struct DictationView: View {
                 Image(systemName: iconName)
                     .font(.system(size: 64))
                     .foregroundStyle(viewModel.state == .recording ? .red : .primary)
-                    .symbolEffect(.pulse, isActive: warmupService.isWarming || viewModel.state == .transcribing)
+                    .symbolEffect(.pulse, isActive: viewModel.state == .transcribing)
                     .accessibilityLabel(iconName == "mic" ? "Microphone" : "Recording status")
                     .accessibilityAddTraits(.isImage)
 
@@ -28,39 +28,34 @@ struct DictationView: View {
 
                 Button(action: handleButton) {
                     Text(buttonLabel)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
                         .frame(minWidth: 160)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(viewModel.state == .recording ? .red : .accentColor)
-                .disabled(warmupService.isWarming || viewModel.state == .transcribing || viewModel.state == .preparingLiveActivity)
+                .disabled(viewModel.state == .transcribing || viewModel.state == .preparingLiveActivity)
                 .accessibilityLabel(buttonLabel)
-                .accessibilityHint(modelMissing ? "Downloads the ASR model" : viewModel.state == .recording ? "Stops recording and transcribes" : "Starts a new dictation")
+                .accessibilityHint(modelMissing ? "Starts recording and downloads the speech model in the background" : viewModel.state == .recording ? "Stops recording and transcribes" : "Starts a new dictation")
 
-                // Show what warmup is actually doing, on EVERY launch — not just during a
-                // download. The status text (`downloadStatus`) is now stage-accurate ("Loading
-                // speech model…" when the model is already on disk, "Downloading…" on first run),
-                // so it no longer flashes a fake "Downloading" screen on cold launch (IOS-ONB-01).
-                // WhisperKit's download-progress callback is a documented no-op today, so show a
-                // determinate bar only when real progress arrives, otherwise an indeterminate
-                // spinner — honest about not having a percentage rather than a bar stuck at 0.
-                if warmupService.isWarming {
-                    VStack(spacing: 8) {
-                        if warmupService.downloadProgress > 0 {
-                            ProgressView(value: warmupService.downloadProgress, total: 1.0)
-                                .progressViewStyle(.linear)
-                        } else {
-                            ProgressView()
-                                .progressViewStyle(.circular)
-                        }
-                        Text(warmupService.downloadStatus)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
-                            .lineLimit(2)
-                            .minimumScaleFactor(0.8)
+                // Non-blocking warm-up status: the mic button above is never gated by
+                // any of this (46-UI-SPEC governing principle) — this card is purely
+                // informational, rendered beside the button, and disappears entirely
+                // once the model is ready (WarmupBannerStage.resolve returns nil).
+                Group {
+                    if let stage = warmupStage {
+                        WarmupStatusBanner(
+                            stage: stage,
+                            downloadProgress: warmupService.downloadProgress,
+                            warmupStartedAt: warmupService.warmupStartedAt,
+                            error: warmupService.error,
+                            onDownloadNow: { warmupService.warmup(force: true) },
+                            onRetry: { warmupService.retry() }
+                        )
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                     }
-                    .padding(.horizontal)
                 }
+                .animation(.easeInOut(duration: 0.25), value: warmupStage)
 
                 if let result = viewModel.lastResult {
                     VStack(alignment: .leading, spacing: 8) {
@@ -134,13 +129,6 @@ struct DictationView: View {
                         .padding(.horizontal)
                 }
 
-                if warmupService.error != nil && !warmupService.isWarming {
-                    Button("Retry Download") {
-                        warmupService.retry()
-                    }
-                    .buttonStyle(.bordered)
-                }
-
                 Spacer()
             }
             .padding()
@@ -168,15 +156,25 @@ struct DictationView: View {
     }
 
     /// Whether the model needs to be downloaded before dictation can start.
+    /// Purely informational now (46-UI-SPEC governing principle) — never gates the
+    /// mic button, only feeds `warmupStage` (the banner) and the accessibility hint.
     private var modelMissing: Bool {
         !warmupService.hasModels && !warmupService.isWarming && !warmupService.isReady
     }
 
+    /// The `WarmupStatusBanner`'s stage, or nil to render nothing. Warm-up state is
+    /// described in exactly this one place in the UI — `statusLabel`/`iconName` below
+    /// no longer branch on it at all.
+    private var warmupStage: WarmupBannerStage? {
+        WarmupBannerStage.resolve(
+            hasModels: warmupService.hasModels,
+            isWarming: warmupService.isWarming,
+            isReady: warmupService.isReady,
+            error: warmupService.error
+        )
+    }
+
     private var iconName: String {
-        // Present-model warmup keeps the normal mic so the home screen doesn't look
-        // like a download is in progress (IOS-ONB-01).
-        if warmupService.isWarming { return warmupService.hasModels ? "mic" : "arrow.down.circle" }
-        if modelMissing { return "arrow.down.to.line" }
         switch viewModel.state {
         case .idle:                  return "mic"
         case .preparingLiveActivity: return "mic"
@@ -186,13 +184,6 @@ struct DictationView: View {
     }
 
     private var statusLabel: String {
-        if warmupService.isWarming {
-            // Stable headline; the stage-accurate detail (download vs load, size) is the caption
-            // line below (warmupService.downloadStatus), so this no longer carries a wrong size.
-            return "Getting Dicticus ready\u{2026}"
-        }
-        if let error = warmupService.error { return error }
-        if modelMissing { return "ASR model not downloaded" }
         switch viewModel.state {
         case .idle:
             if viewModel.isShortcutLaunch && viewModel.lastResult != nil {
@@ -206,14 +197,17 @@ struct DictationView: View {
     }
 
     private var buttonLabel: String {
-        if modelMissing { return "Download Model" }
-        return viewModel.state == .recording ? "Stop" : "Start Dictation"
+        viewModel.state == .recording ? "Stop" : "Start Dictation"
     }
 
     private func handleButton() {
         if modelMissing {
-            warmupService.retry()
-            return
+            // D-05: the tap below still records (and enqueues) regardless — this
+            // just also kicks off the download so a queued recording isn't left
+            // waiting on a download nobody separately triggered via the banner's
+            // own "Download Now" action. warmup(force:) is a no-op if a
+            // download/load is already in flight or the model is already ready.
+            warmupService.warmup(force: true)
         }
         Task {
             if viewModel.state == .idle {
@@ -251,4 +245,42 @@ struct DictationView: View {
     return DictationView()
         .environmentObject(vm)
         .environmentObject(IOSModelWarmupService())
+}
+
+#Preview("Warm-up — downloading") {
+    let ws = IOSModelWarmupService()
+    ws.hasModels = false
+    ws.isWarming = true
+    ws.downloadProgress = 0.42
+    return DictationView()
+        .environmentObject(DictationViewModel())
+        .environmentObject(ws)
+}
+
+#Preview("Warm-up — loading") {
+    let ws = IOSModelWarmupService()
+    ws.hasModels = true
+    ws.isWarming = true
+    return DictationView()
+        .environmentObject(DictationViewModel())
+        .environmentObject(ws)
+}
+
+#Preview("Warm-up — model missing") {
+    let ws = IOSModelWarmupService()
+    ws.hasModels = false
+    ws.isWarming = false
+    ws.isReady = false
+    return DictationView()
+        .environmentObject(DictationViewModel())
+        .environmentObject(ws)
+}
+
+#Preview("Warm-up — failed") {
+    let ws = IOSModelWarmupService()
+    ws.isWarming = false
+    ws.error = "Model load failed: The network connection was lost."
+    return DictationView()
+        .environmentObject(DictationViewModel())
+        .environmentObject(ws)
 }
