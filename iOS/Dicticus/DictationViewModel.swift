@@ -112,6 +112,17 @@ class DictationViewModel: ObservableObject {
     // Test seam: injectable HistoryService. Defaults to .shared; tests inject makeForTesting.
     var historyService: HistoryService = .shared
 
+    /// Test seam for the microphone permission request. Defaults to the real system
+    /// API. Phase 46-02 removed the `transcriptionService != nil` guard that used to
+    /// return `startDictation()` early — so this call is now reached on every
+    /// invocation, including from tests. In a headless Simulator test run,
+    /// `AVAudioApplication.requestRecordPermission()` has no window to present a TCC
+    /// prompt against and blocks indefinitely (confirmed empirically), so tests MUST
+    /// inject this seam rather than exercise the real API.
+    var permissionRequester: () async -> Bool = {
+        await AVAudioApplication.requestRecordPermission()
+    }
+
     nonisolated(unsafe) private var currentActivity: Activity<DictationAttributes>?
     // WR-04: notificationObservers is accessed only from @MainActor context; no need for
     // nonisolated(unsafe) (which would disable Swift's concurrency check for this property
@@ -132,7 +143,7 @@ class DictationViewModel: ObservableObject {
         // what made a jetsammed app's Shortcut dead (see 46-CONTEXT.md D-01..D-03).
 
         // STEP 1: Request microphone permission
-        let permissionGranted = await AVAudioApplication.requestRecordPermission()
+        let permissionGranted = await permissionRequester()
         guard permissionGranted else {
             self.error = "Microphone access denied. Enable in Settings > Privacy > Microphone."
             return
