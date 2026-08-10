@@ -1,6 +1,7 @@
 import XCTest
 @testable import Dicticus
 
+@MainActor
 final class WarmupStatusBannerTests: XCTestCase {
 
     // MARK: - Named behavior tests (per 46-04-PLAN.md <behavior>)
@@ -135,5 +136,71 @@ final class WarmupStatusBannerTests: XCTestCase {
                 line: c.line
             )
         }
+    }
+
+    // MARK: - Exact copy per stage (46-UI-SPEC.md Copywriting Contract — must not drift silently)
+    //
+    // Constructs a `WarmupStatusBanner` value directly and reads its `headline`/
+    // `bodyText`/`iconName` properties — no rendering, per the plan's "do not attempt
+    // to snapshot-render the view" instruction. This is the regression net the
+    // coordinator asked for after the loading-stage copy revision (260810 UAT
+    // follow-up, candidate A): a future edit that silently reintroduces jargon or
+    // drifts from the locked contract fails here, not in a human's read-through.
+
+    private func makeBanner(
+        stage: WarmupBannerStage,
+        downloadProgress: Double = 0,
+        warmupStartedAt: Date? = nil,
+        error: String? = nil
+    ) -> WarmupStatusBanner {
+        WarmupStatusBanner(
+            stage: stage,
+            downloadProgress: downloadProgress,
+            warmupStartedAt: warmupStartedAt,
+            error: error,
+            onDownloadNow: {},
+            onRetry: {}
+        )
+    }
+
+    func test_copy_downloading_exact() {
+        let banner = makeBanner(stage: .downloading)
+        XCTAssertEqual(banner.headline, "Downloading speech model\u{2026}")
+        XCTAssertEqual(
+            banner.bodyText,
+            "One-time download, about 626 MB. You can start recording anytime — we'll transcribe once it's ready."
+        )
+        XCTAssertEqual(banner.iconName, "arrow.down.circle")
+    }
+
+    func test_copy_loading_exact() {
+        // Candidate A (permission-first) — user-selected 2026-08-10, supersedes the
+        // original "Waking up the transcription engine…" jargon-headline copy.
+        let banner = makeBanner(stage: .loading)
+        XCTAssertEqual(banner.headline, "Go ahead — you can start recording")
+        XCTAssertEqual(
+            banner.bodyText,
+            "Dicticus is getting ready in the background, which takes a few seconds. It'll catch up with what you've said as soon as it's done."
+        )
+        XCTAssertEqual(banner.iconName, "gearshape.2")
+    }
+
+    func test_copy_modelMissing_exact() {
+        let banner = makeBanner(stage: .modelMissing)
+        XCTAssertEqual(banner.headline, "Speech model not downloaded")
+        XCTAssertEqual(banner.bodyText, "Recordings will wait until you download it.")
+        XCTAssertEqual(banner.iconName, "tray.and.arrow.down")
+    }
+
+    func test_copy_failed_exact_echoesErrorVerbatim() {
+        let banner = makeBanner(stage: .failed, error: "Model load failed: The network connection was lost.")
+        XCTAssertEqual(banner.headline, "Couldn't load the speech model")
+        XCTAssertEqual(banner.bodyText, "Model load failed: The network connection was lost.")
+        XCTAssertEqual(banner.iconName, "exclamationmark.triangle.fill")
+    }
+
+    func test_copy_failed_nilError_fallsBackToUnknownError() {
+        let banner = makeBanner(stage: .failed, error: nil)
+        XCTAssertEqual(banner.bodyText, "Unknown error.")
     }
 }

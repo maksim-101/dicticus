@@ -125,21 +125,26 @@ struct WarmupStatusBanner: View {
         }
     }
 
-    private var headline: String {
+    /// Internal (not `private`) so `WarmupStatusBannerTests` can assert the exact
+    /// copy per stage by constructing a `WarmupStatusBanner` value directly and
+    /// reading this property — no rendering required, and the strings cannot drift
+    /// from the locked `46-UI-SPEC.md` Copywriting Contract without a test noticing.
+    var headline: String {
         switch stage {
         case .downloading:   return "Downloading speech model\u{2026}"
-        case .loading:       return "Waking up the transcription engine\u{2026}"
+        case .loading:       return "Go ahead — you can start recording"
         case .modelMissing:  return "Speech model not downloaded"
         case .failed:        return "Couldn't load the speech model"
         }
     }
 
-    private var bodyText: String {
+    /// See `headline` — same testability rationale.
+    var bodyText: String {
         switch stage {
         case .downloading:
             return "One-time download, about 626 MB. You can start recording anytime — we'll transcribe once it's ready."
         case .loading:
-            return "This happens once per launch. Go ahead and start recording — we'll catch up."
+            return "Dicticus is getting ready in the background, which takes a few seconds. It'll catch up with what you've said as soon as it's done."
         case .modelMissing:
             return "Recordings will wait until you download it."
         case .failed:
@@ -147,7 +152,8 @@ struct WarmupStatusBanner: View {
         }
     }
 
-    private var iconName: String {
+    /// See `headline` — same testability rationale (SF Symbol name, easy to assert exactly).
+    var iconName: String {
         switch stage {
         case .downloading:   return "arrow.down.circle"
         case .loading:       return "gearshape.2"
