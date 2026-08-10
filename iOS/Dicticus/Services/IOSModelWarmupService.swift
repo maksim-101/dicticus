@@ -80,6 +80,13 @@ class IOSModelWarmupService: ObservableObject {
 
     @Published var isWarming = false
     @Published var isReady = false
+    /// When the current warm-up run began. Drives the `WarmupStatusBanner`'s "loading"
+    /// stage elapsed-time readout (`Text(startedAt, style: .timer)`) — the honest
+    /// substitute for a determinate bar on a stage whose progress genuinely cannot be
+    /// measured (D-07). Set at the same point `isWarming` becomes true; cleared on
+    /// every path back to `isWarming == false` (success, cancel, failure) so a stale
+    /// timer never survives into the next warm-up attempt.
+    @Published private(set) var warmupStartedAt: Date?
     // IOS-ONB-01: Initialize synchronously from the filesystem so the first
     // SwiftUI frame already reflects true model presence. The previous `= false`
     // literal caused a one-frame flash on cold launch when models were present:
@@ -195,6 +202,7 @@ class IOSModelWarmupService: ObservableObject {
         guard hasModels || force else { return }
         guard !isWarming && !isReady else { return }
         isWarming = true
+        warmupStartedAt = Date()
         error = nil
         downloadProgress = 0.0
         // Honest stage text: on a fresh install this is a large one-time download; on every
@@ -248,6 +256,7 @@ class IOSModelWarmupService: ObservableObject {
                     self?.downloadStatus = "Ready"
                     self?.whisperKit = wk
                     self?.isWarming = false
+                    self?.warmupStartedAt = nil
                     self?.isReady = true
                     self?.hasModels = true
                     self?.watchdogTask?.cancel()
@@ -341,6 +350,7 @@ class IOSModelWarmupService: ObservableObject {
                 warmupLog.error("warmup cancelled")
                 await MainActor.run {
                     self?.isWarming = false
+                    self?.warmupStartedAt = nil
                     self?.error = "Model load timed out or was cancelled."
                     self?.watchdogTask?.cancel()
                     self?.watchdogTask = nil
@@ -349,6 +359,7 @@ class IOSModelWarmupService: ObservableObject {
                 warmupLog.error("warmup failed: \(error.localizedDescription, privacy: .public)")
                 await MainActor.run {
                     self?.isWarming = false
+                    self?.warmupStartedAt = nil
                     self?.error = "Model load failed: \(error.localizedDescription)"
                     self?.watchdogTask?.cancel()
                     self?.watchdogTask = nil
@@ -370,6 +381,7 @@ class IOSModelWarmupService: ObservableObject {
         warmupTask?.cancel()
         warmupTask = nil
         isWarming = false
+        warmupStartedAt = nil
     }
 
     /// Reset error state and retry warmup. Explicit user action — passes
