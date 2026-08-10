@@ -140,9 +140,32 @@ final class AudioRecorder: AudioRecording {
     /// Settable seam so the D-04 haptic-timing assertion is testable without haptic
     /// hardware. Fires exactly once per recording, on the first buffer the tap
     /// actually delivers — never at intent-fire or button-tap time.
+    ///
+    /// 46-03 device-UAT (Section C, resolved 2026-08-10): the haptic DOES fire on
+    /// every real invocation path with the app foreground — confirmed by the user
+    /// ("It's there. It's not very prominent, but the haptic is noticeable") and by
+    /// `appState=active` logged via `MemoryProbe` at fire time across all attempts.
+    /// Both original hypotheses (missing `.prepare()`, app-not-foreground) are dead;
+    /// the original "I didn't feel any specific haptic" report was a perception miss
+    /// on a weak `.medium` impact, not a missing call. `.heavy` (not `.rigid`) is
+    /// chosen because the deficiency was raw prominence, not character — `.rigid`
+    /// optimizes for a sharp/precise feel rather than intensity, and D-04's whole
+    /// purpose (confirm the mic just opened) needs a signal that registers, not one
+    /// that's merely distinctively shaped.
     var hapticTrigger: @MainActor @Sendable () -> Void = {
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
     }
+
+    /// 46-03 device-UAT instrumentation (Section C re-investigation, "no haptic
+    /// felt at all"): best-effort description of how this recording was invoked,
+    /// set by `DictationViewModel.startDictation(fromShortcut:)` immediately
+    /// before calling `startRecording()`. Deliberately a plain stored property on
+    /// the concrete class, not the `AudioRecording` protocol — so no test double
+    /// needs to change for a diagnostic that exists purely to discriminate H-A
+    /// (missing `.prepare()`) from H-B (app not foreground when it fires) from
+    /// H-C (System Haptics/Silent/Low-Power-suppressed on the device). See
+    /// `46-DEVICE-TEST-PROCEDURE.md` Section C.
+    var lastInvocationContext: String = "unknown"
 
     /// Resolves (and creates, if needed) the app-private directory pending recordings
     /// are written to. Deliberately NOT the App Group container — the widget and
@@ -200,6 +223,7 @@ final class AudioRecorder: AudioRecording {
         currentFileURL = destinationURL
 
         let localHapticTrigger = hapticTrigger
+        let localInvocationContext = lastInvocationContext
 
         Self.installTap(
             on: inputNode,
@@ -217,6 +241,25 @@ final class AudioRecorder: AudioRecording {
             onFirstBuffer: {
                 Task { @MainActor in
                     localHapticTrigger()
+                    // 46-03 device-UAT instrumentation (Section C): capture the
+                    // decisive datum — app state at the EXACT instant the haptic
+                    // fires — via the already-established memprobe.jsonl sink
+                    // (-memProbe 1 launch arg; no-op and zero overhead otherwise).
+                    // Discriminates H-A (missing .prepare()) from H-B (app not
+                    // foreground when a Shortcut/Action-Button/URL-scheme
+                    // invocation fires it) from H-C (device Settings). See
+                    // 46-DEVICE-TEST-PROCEDURE.md Section C.
+                    let stateDescription: String
+                    switch UIApplication.shared.applicationState {
+                    case .active: stateDescription = "active"
+                    case .inactive: stateDescription = "inactive"
+                    case .background: stateDescription = "background"
+                    @unknown default: stateDescription = "unknown"
+                    }
+                    await MemoryProbe.shared.mark(
+                        "haptic_fired",
+                        note: "appState=\(stateDescription) invocation=\(localInvocationContext)"
+                    )
                 }
             }
         )
