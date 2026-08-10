@@ -77,6 +77,12 @@ struct DicticusApp: App {
                             // Relying solely on the flag means the single scenePhase path owns
                             // the start, with the 500ms sleep giving the audio session time to settle.
                             DicticusIPCBridge.defaults?.set(true, forKey: "pendingDictation")
+                            // 46-03: staleness stamp so a process death before
+                            // checkPendingIntent() consumes this flag cannot
+                            // spontaneously start a recording on a later,
+                            // unrelated relaunch — see
+                            // DictationViewModel.pendingDictationStalenessSeconds.
+                            DicticusIPCBridge.defaults?.set(Date().timeIntervalSince1970, forKey: "pendingDictationSetAt")
                         }
                     }
                     .sheet(isPresented: $showingOnboardingTour, onDismiss: {

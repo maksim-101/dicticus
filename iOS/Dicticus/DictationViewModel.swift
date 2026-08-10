@@ -39,6 +39,18 @@ class DictationViewModel: ObservableObject {
     var capFinalizeSeconds: Double = 300  // 5:00 — auto-finalize
     var capWarningSeconds: Double = 270   // 4:30 — pre-cap warning
 
+    /// 46-03 device-UAT finding: a `pendingDictation` flag set by `DictateIntent`/
+    /// the URL-scheme handler is cleared ONLY by `checkPendingIntent()` — if the
+    /// process dies between the flag being set and that consumption, the flag
+    /// survives (App Group `UserDefaults` persist to disk immediately) and is
+    /// picked up by any LATER, completely unrelated relaunch, silently starting a
+    /// recording the user never asked for on that launch (observed on-device:
+    /// "without me clicking anything, it started recording... during warm-up").
+    /// A flag older than this is treated as abandoned and cleared WITHOUT
+    /// starting a recording — mirrors the existing `recordingStartedAt`
+    /// staleness idiom. Injectable so unit tests can use tiny/negative values.
+    var pendingDictationStalenessSeconds: Double = 10
+
 
     // Set by DicticusApp once warmup completes (property injection). Phase 46-02:
     // recording no longer depends on this being non-nil — see startDictation().
@@ -160,6 +172,13 @@ class DictationViewModel: ObservableObject {
             DicticusIPCBridge.defaults?.set(Date().timeIntervalSince1970,
                                             forKey: DicticusIPCBridge.Key.recordingStartedAt)
             try startLiveActivity()
+            // 46-03 device-UAT instrumentation (Section C): best-effort context for
+            // the haptic_fired memprobe mark, below the AudioRecording protocol so
+            // no test double changes — fromShortcut is already the AudioRecordingIntent
+            // (Shortcut/Action Button) vs URL-scheme-or-manual discriminator, since
+            // only DictateIntent sets the isShortcutLaunch App-Group flag this reads.
+            (audioRecorder as? AudioRecorder)?.lastInvocationContext =
+                fromShortcut ? "audioRecordingIntent(Shortcut-or-ActionButton)" : "urlScheme-or-manual"
             _ = try audioRecorder.startRecording()
             startCapTimers()
             await requestNotificationAuthorizationIfNeeded()
@@ -814,14 +833,28 @@ class DictationViewModel: ObservableObject {
     func checkPendingIntent() {
         let shared = DicticusIPCBridge.defaults
         let hasPending = shared?.bool(forKey: "pendingDictation") == true
-        if hasPending {
+        guard hasPending else { return }
+
+        // Staleness check (46-03): a flag with no timestamp, or one older than
+        // pendingDictationStalenessSeconds, is treated as abandoned by a process
+        // that died before consuming it — cleared here WITHOUT starting a
+        // recording. See pendingDictationStalenessSeconds' doc comment.
+        let setAt = shared?.double(forKey: "pendingDictationSetAt") ?? 0
+        let age = Date().timeIntervalSince1970 - setAt
+        guard setAt > 0, age >= 0, age < pendingDictationStalenessSeconds else {
             shared?.set(false, forKey: "pendingDictation")
-            let shortcut = shared?.bool(forKey: "isShortcutLaunch") ?? false
             shared?.set(false, forKey: "isShortcutLaunch")
-            Task {
-                try? await Task.sleep(nanoseconds: 500_000_000)
-                await self.startDictation(fromShortcut: shortcut)
-            }
+            shared?.removeObject(forKey: "pendingDictationSetAt")
+            return
+        }
+
+        shared?.set(false, forKey: "pendingDictation")
+        let shortcut = shared?.bool(forKey: "isShortcutLaunch") ?? false
+        shared?.set(false, forKey: "isShortcutLaunch")
+        shared?.removeObject(forKey: "pendingDictationSetAt")
+        Task {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            await self.startDictation(fromShortcut: shortcut)
         }
     }
 

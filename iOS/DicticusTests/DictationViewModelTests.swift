@@ -1686,4 +1686,87 @@ final class DictationViewModelTests: XCTestCase {
         for entry in testHistory.entries { if let id = entry.id { testHistory.delete(id: id) } }
         try? FileManager.default.removeItem(at: tempContainer)
     }
+
+    // MARK: - Phase 46-03: stale pendingDictation must never spontaneously open the mic
+    //
+    // Device-UAT finding (2026-08-10, force-quit-then-relaunch session): "without me
+    // clicking anything, it started recording and then stopped by itself... during
+    // warm-up." Root cause: `pendingDictation=true` is set by `DictateIntent.perform()`/
+    // the URL-scheme handler and cleared ONLY by `checkPendingIntent()` — a process
+    // killed between the write and that consumption leaves the flag set indefinitely
+    // in App Group `UserDefaults` (which persist to disk immediately), and ANY later,
+    // completely unrelated relaunch would silently start a recording. Reproduced here
+    // directly (deterministic) rather than racing a device-timing window narrower than
+    // devicectl's automation granularity.
+
+    /// A `pendingDictation=true` flag with NO staleness timestamp at all (the exact
+    /// shape a pre-fix write, or a flag from a process that died before ever writing
+    /// the timestamp, would leave behind) must be cleared without starting a recording.
+    func testMissingTimestampPendingDictationDoesNotSpontaneouslyStartRecording() async throws {
+        let vm = DictationViewModel()
+        let fakeRecorder = FakeAudioRecorder()
+        vm.audioRecorder = fakeRecorder
+        vm.permissionRequester = { true }
+
+        DicticusIPCBridge.defaults?.set(true, forKey: "pendingDictation")
+        DicticusIPCBridge.defaults?.set(true, forKey: "isShortcutLaunch")
+        DicticusIPCBridge.defaults?.removeObject(forKey: "pendingDictationSetAt")  // explicitly absent
+
+        vm.checkPendingIntent()
+        try? await Task.sleep(for: .seconds(0.6))  // past the 500ms deferred-start delay
+
+        XCTAssertEqual(fakeRecorder.startCallCount, 0,
+                       "A pendingDictation flag with no staleness timestamp must NOT spontaneously start a recording")
+        XCTAssertFalse(DicticusIPCBridge.defaults?.bool(forKey: "pendingDictation") ?? true,
+                       "The stale flag must still be cleared, just without starting a recording")
+
+        DicticusIPCBridge.defaults?.removeObject(forKey: "isShortcutLaunch")
+    }
+
+    /// A `pendingDictation=true` flag whose timestamp is older than
+    /// `pendingDictationStalenessSeconds` — the exact shape a flag surviving a real
+    /// force-quit-then-much-later-relaunch would have — must also be cleared without
+    /// starting a recording.
+    func testOldTimestampPendingDictationDoesNotSpontaneouslyStartRecording() async throws {
+        let vm = DictationViewModel()
+        let fakeRecorder = FakeAudioRecorder()
+        vm.audioRecorder = fakeRecorder
+        vm.permissionRequester = { true }
+        vm.pendingDictationStalenessSeconds = 10
+
+        DicticusIPCBridge.defaults?.set(true, forKey: "pendingDictation")
+        DicticusIPCBridge.defaults?.set(true, forKey: "isShortcutLaunch")
+        DicticusIPCBridge.defaults?.set(Date().timeIntervalSince1970 - 60, forKey: "pendingDictationSetAt")  // 60s old, past the 10s threshold
+
+        vm.checkPendingIntent()
+        try? await Task.sleep(for: .seconds(0.6))
+
+        XCTAssertEqual(fakeRecorder.startCallCount, 0,
+                       "A pendingDictation flag older than pendingDictationStalenessSeconds must NOT spontaneously start a recording")
+
+        DicticusIPCBridge.defaults?.removeObject(forKey: "isShortcutLaunch")
+    }
+
+    /// Regression guard: a FRESHLY-set `pendingDictation=true` flag must still start a
+    /// recording normally — the staleness fix must not reopen D-01/D-03's "an
+    /// invocation must never do nothing" guarantee for the legitimate case.
+    func testFreshPendingDictationStillStartsRecordingNormally() async throws {
+        let vm = DictationViewModel()
+        let fakeRecorder = FakeAudioRecorder()
+        vm.audioRecorder = fakeRecorder
+        vm.permissionRequester = { true }
+        vm.pendingDictationStalenessSeconds = 10
+
+        DicticusIPCBridge.defaults?.set(true, forKey: "pendingDictation")
+        DicticusIPCBridge.defaults?.set(true, forKey: "isShortcutLaunch")
+        DicticusIPCBridge.defaults?.set(Date().timeIntervalSince1970, forKey: "pendingDictationSetAt")  // fresh
+
+        vm.checkPendingIntent()
+        try? await Task.sleep(for: .seconds(0.6))
+
+        XCTAssertGreaterThan(fakeRecorder.startCallCount, 0,
+                             "A freshly-set pendingDictation flag must still start a recording — D-01/D-03's never-dead guarantee")
+        XCTAssertFalse(DicticusIPCBridge.defaults?.bool(forKey: "pendingDictation") ?? true,
+                       "The flag must be cleared after a legitimate consumption too")
+    }
 }
