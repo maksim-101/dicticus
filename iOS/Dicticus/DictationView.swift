@@ -189,7 +189,7 @@ struct DictationView: View {
             if viewModel.isShortcutLaunch && viewModel.lastResult != nil {
                 return "Copied to clipboard"
             }
-            return "Ready"
+            return "Ready to record"
         case .preparingLiveActivity: return "Starting\u{2026}"
         case .recording:             return "Recording\u{2026}"
         case .transcribing:          return "Transcribing\u{2026}"
