@@ -121,6 +121,12 @@ class HistoryService: ObservableObject {
 
     @Published private(set) var entries: [TranscriptionEntry] = []
 
+    /// Exposes the shared connection pool so `PendingRecordingStore` (Phase 46-02) can
+    /// register its own GRDB migration/table against the same database rather than
+    /// opening a second pool with a duplicated storage-resolution algorithm. One pool
+    /// means one migrator; a second database could disagree with History after a crash.
+    internal var databasePool: DatabasePool { dbPool }
+
     /// Default initializer used by the `shared` singleton — resolves the App Group
     /// container via the standard FileManager API.
     private convenience init() {
@@ -211,7 +217,25 @@ class HistoryService: ObservableObject {
                 END;
                 """)
         }
-        
+
+        // Phase 46-02 (D-01/D-09/D-10): durable pending-recording queue. Strictly
+        // additive — do NOT imitate the two DROP TABLE statements above, which
+        // predate real user data and must remain the only two in this file. This
+        // table is shared with macOS via the same file and simply stays empty there
+        // (no conditional migration, so the two platforms' schemas never diverge).
+        migrator.registerMigration("v3-pending-recordings") { db in
+            try db.create(table: "pendingRecording") { t in
+                t.autoIncrementedPrimaryKey("id")
+                t.column("uuid", .text).notNull().unique()
+                t.column("fileName", .text).notNull()
+                t.column("createdAt", .datetime).notNull().indexed()
+                t.column("status", .text).notNull()
+                t.column("durationSeconds", .double)
+                t.column("retryCount", .integer).notNull().defaults(to: 0)
+                t.column("failureReason", .text)
+            }
+        }
+
         try migrator.migrate(dbPool)
     }
 

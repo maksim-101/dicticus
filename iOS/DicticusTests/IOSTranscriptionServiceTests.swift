@@ -1,5 +1,4 @@
 import XCTest
-import AVFoundation
 @testable import Dicticus
 
 @MainActor
@@ -74,13 +73,13 @@ final class IOSTranscriptionServiceTests: XCTestCase {
     }
 
     // Configuration tests (require WhisperKit model)
-    func testInitialStateIsIdle() async throws {
-        let service = try await makeServiceOrSkip()
-        XCTAssertEqual(service.state, .idle)
-    }
-    func testMinimumDurationValue() async throws {
-        let service = try await makeServiceOrSkip()
-        XCTAssertEqual(service.minimumDurationSeconds, 0.3, accuracy: 0.001)
+    // Phase 46-02: IOSTranscriptionService no longer owns recording state — the
+    // `.state`/AVAudioSession-category tests moved to AudioRecorderTests.
+    // minimumDurationSeconds moved to a type-level constant (IOSTranscriptionService
+    // .minimumDurationSeconds) so DictationViewModel can consult it without an
+    // instance (a recording can be captured before any transcriber exists).
+    func testMinimumDurationValue() {
+        XCTAssertEqual(IOSTranscriptionService.minimumDurationSeconds, 0.3, accuracy: 0.001)
     }
     func testDefaultSilenceThreshold() async throws {
         let service = try await makeServiceOrSkip()
@@ -91,20 +90,6 @@ final class IOSTranscriptionServiceTests: XCTestCase {
         let service = try await makeServiceOrSkip()
         XCTAssertTrue(service.useCustomDictionary)
         XCTAssertTrue(service.useITN)
-    }
-
-    // IOSBG-01 / 36-AVSESSION: startRecording() must use .playAndRecord so the mic session
-    // survives backgrounding (UIBackgroundModes:audio keep-alive requires this category).
-    func testStartRecordingUsesPlayAndRecordCategory() async throws {
-        let service = try await makeServiceOrSkip()
-        try service.startRecording()
-        XCTAssertEqual(
-            AVAudioSession.sharedInstance().category,
-            .playAndRecord,
-            "startRecording() must set AVAudioSession category to .playAndRecord for background keep-alive"
-        )
-        service.cancelRecording()
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
     private func makeServiceOrSkip() async throws -> IOSTranscriptionService {

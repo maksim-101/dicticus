@@ -40,27 +40,34 @@ class DictationViewModel: ObservableObject {
     var capWarningSeconds: Double = 270   // 4:30 — pre-cap warning
 
 
-    // Set by DicticusApp once warmup completes (property injection)
-    var transcriptionService: IOSTranscriptionService? {
+    // Set by DicticusApp once warmup completes (property injection). Phase 46-02:
+    // recording no longer depends on this being non-nil — see startDictation().
+    var transcriptionService: (any TranscriptionProviding)? {
         didSet {
             if transcriptionService != nil {
                 error = nil
             }
-            transcriptionService?.onSilenceDetected = { [weak self] in
-                Task { @MainActor in
-                    guard let self else { return }
-                    // Disable silence auto-stop while backgrounded (Finding 2).
-                    // The user may pause to think/read in another app; killing the recording
-                    // after 2.5 s of silence would discard in-progress dictation silently.
-                    // The ~5-min soft cap and the Live Activity Stop button bound backgrounded
-                    // recordings. Foreground silence auto-stop (2.5 s) is preserved.
-                    guard !self.isBackgroundedProvider() else { return }
-                    await self.stopDictation()
-                }
-            }
-            // Check for pending intent if service just became available
-            if transcriptionService != nil {
-                checkPendingIntent()
+        }
+    }
+
+    // Phase 46-02 (D-01): recorder is now independent of ASR model readiness.
+    // Injectable so tests can drive DictationViewModel without a microphone.
+    var audioRecorder: AudioRecording = AudioRecorder()
+    // Phase 46-02 (D-01/D-09/D-10): durable queue of captured-but-not-yet-transcribed
+    // recordings. Injectable so tests never touch the real user database.
+    var pendingStore: PendingRecordingStore = .shared
+
+    init() {
+        audioRecorder.onSilenceDetected = { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                // Disable silence auto-stop while backgrounded (Finding 2).
+                // The user may pause to think/read in another app; killing the recording
+                // after 2.5 s of silence would discard in-progress dictation silently.
+                // The ~5-min soft cap and the Live Activity Stop button bound backgrounded
+                // recordings. Foreground silence auto-stop (2.5 s) is preserved.
+                guard !self.isBackgroundedProvider() else { return }
+                await self.stopDictation()
             }
         }
     }
@@ -120,11 +127,9 @@ class DictationViewModel: ObservableObject {
         }
         isShortcutLaunch = fromShortcut
 
-        // STEP 0: Ensure transcription service is available (model loaded)
-        guard transcriptionService != nil else {
-            self.error = "ASR model not loaded. Download it first."
-            return
-        }
+        // Phase 46-02 (D-01/D-03): recording is gated on microphone permission ONLY.
+        // No warm-up or model-availability check on this path — that guard is exactly
+        // what made a jetsammed app's Shortcut dead (see 46-CONTEXT.md D-01..D-03).
 
         // STEP 1: Request microphone permission
         let permissionGranted = await AVAudioApplication.requestRecordPermission()
@@ -144,7 +149,7 @@ class DictationViewModel: ObservableObject {
             DicticusIPCBridge.defaults?.set(Date().timeIntervalSince1970,
                                             forKey: DicticusIPCBridge.Key.recordingStartedAt)
             try startLiveActivity()
-            try transcriptionService?.startRecording()
+            _ = try audioRecorder.startRecording()
             startCapTimers()
             await requestNotificationAuthorizationIfNeeded()
         } catch {
@@ -165,14 +170,52 @@ class DictationViewModel: ObservableObject {
         // isBackgroundedProvider is injectable for unit tests (avoids UIApplication dependency).
         let isBackgrounded = isBackgroundedProvider()
 
+        // Phase 46-02 (D-01): stop the recorder to obtain a durable RecordingArtifact
+        // FIRST, independent of whether a transcriber exists yet.
+        let artifact: RecordingArtifact
         do {
-            guard let result = try await transcriptionService?.stopRecordingAndTranscribe() else {
-                await endLiveActivity()
-                // Clear stale recordingStartedAt since recording ended
-                DicticusIPCBridge.defaults?.removeObject(forKey: DicticusIPCBridge.Key.recordingStartedAt)
-                state = .idle
-                return
-            }
+            artifact = try audioRecorder.stopRecording()
+        } catch {
+            await endLiveActivity()
+            DicticusIPCBridge.defaults?.removeObject(forKey: DicticusIPCBridge.Key.recordingStartedAt)
+            self.error = error.localizedDescription
+            state = .idle
+            return
+        }
+
+        // A sub-threshold clip is a determination that there is nothing to
+        // transcribe, not a failure to hold (D-01/D-10 apply to real audio only).
+        if artifact.durationSeconds < Double(IOSTranscriptionService.minimumDurationSeconds) {
+            try? FileManager.default.removeItem(at: artifact.fileURL)
+            await endLiveActivity()
+            DicticusIPCBridge.defaults?.removeObject(forKey: DicticusIPCBridge.Key.recordingStartedAt)
+            self.error = "Recording too short."
+            state = .idle
+            return
+        }
+
+        // Durable BEFORE anything else can go wrong (D-01).
+        guard let pendingRow = pendingStore.enqueue(artifact) else {
+            await endLiveActivity()
+            DicticusIPCBridge.defaults?.removeObject(forKey: DicticusIPCBridge.Key.recordingStartedAt)
+            self.error = "Could not save recording."
+            state = .idle
+            return
+        }
+
+        guard let transcriptionService else {
+            // D-05: no model yet — the interaction ends immediately, with no error and
+            // no notification. The transcript arrives via drainPendingRecordingsIfNeeded()
+            // once the model becomes ready.
+            await endLiveActivity()
+            DicticusIPCBridge.defaults?.removeObject(forKey: DicticusIPCBridge.Key.recordingStartedAt)
+            error = nil
+            state = .idle
+            return
+        }
+
+        do {
+            let result = try await transcriptionService.transcribe(wavURL: artifact.fileURL)
 
             if isBackgrounded {
                 // BACKGROUND PATH (SPIKE constraints 1+2 / IOSBG-02):
@@ -233,6 +276,9 @@ class DictationViewModel: ObservableObject {
                 // Do NOT tag pendingTranscriptUUID — foreground delivery is inline.
             }
             error = nil
+            // Transcript delivered — the pending recording is resolved. Removes the
+            // WAV bytes and the row (D-02).
+            pendingStore.delete(pendingRow)
 
         } catch let transcriptionError as TranscriptionError {
             switch transcriptionError {
@@ -251,6 +297,8 @@ class DictationViewModel: ObservableObject {
             case .notRecording:
                 self.error = "Not recording."
             }
+            // Transcription failed — leave the pending row queued (D-10 hold). 46-03
+            // adds markFailed()/retry(); for this plan the row simply stays queued.
         } catch {
             self.error = error.localizedDescription
         }
@@ -397,9 +445,89 @@ class DictationViewModel: ObservableObject {
             checkPendingIntent()
         } else {
             // Normal idle foreground: deliver any transcript persisted while backgrounded,
+            // drain any recording that was captured before the model was ready (D-05),
             // then check whether a pending intent arrived just before the phase transition.
             await deliverPendingTranscriptsIfNeeded()
+            await drainPendingRecordingsIfNeeded()
             checkPendingIntent()
+        }
+    }
+
+    // MARK: - Pending-recording drain (Phase 46-02, D-05)
+
+    /// Transcribes the oldest queued `PendingRecording` (a recording captured before
+    /// the ASR model was ready) once a transcriber becomes available. Called after
+    /// `warmupService.isReady` publishes true and on every normal idle foreground.
+    ///
+    /// Carries the same race-avoidance guard shape already applied twice to this
+    /// codebase: `guard state == .idle` (as `deliverPendingTranscriptsIfNeeded()` does)
+    /// and a `pendingDictation` App-Group re-check (as the `isLlmReady` handler in
+    /// `DicticusApp.swift` does) — without both, a recording that arrives while this
+    /// drain is mid-flight would reopen the WR-03 / Finding-1 double-start race.
+    ///
+    /// This plan drains one recording per call (the oldest queued row); the queue
+    /// (D-09) and retry/failed-state handling (D-10/D-11) are 46-03's job.
+    func drainPendingRecordingsIfNeeded() async {
+        guard state == .idle else { return }
+        guard let transcriptionService else { return }
+
+        let pendingDictation = DicticusIPCBridge.defaults?.bool(forKey: "pendingDictation") ?? false
+        guard !pendingDictation else { return }
+
+        guard let oldest = pendingStore.pendingRecordings.first else { return }
+        guard let fileURL = try? pendingStore.fileURL(for: oldest) else { return }
+
+        let isBackgrounded = isBackgroundedProvider()
+
+        do {
+            let result = try await transcriptionService.transcribe(wavURL: fileURL)
+
+            // Mirrors stopDictation()'s background/foreground split exactly, so the
+            // LLM never re-enters a default path: backgrounded is always forced to
+            // .plain (GPU forbidden in background); foregrounded follows the same
+            // toggle+readiness selection as every other delivery path.
+            let mode: DictationMode
+            let cleanupProvider: CleanupProvider?
+            if isBackgrounded {
+                mode = .plain
+                cleanupProvider = nil
+            } else {
+                let wantsAiCleanup = (UserDefaults(suiteName: "group.com.dicticus") ?? .standard).bool(forKey: "aiCleanupEnabled")
+                let llmReady = cleanupService?.isLoaded ?? false
+                mode = Self.selectMode(wantsAiCleanup: wantsAiCleanup, llmReady: llmReady)
+                cleanupProvider = cleanupService
+            }
+
+            // TextProcessingService.process() saves the TranscriptionEntry itself
+            // (Step 4 of the pipeline) — never call HistoryService here directly, or
+            // every drained recording would double-write.
+            let processor = TextProcessingService(cleanupService: cleanupProvider,
+                                                   historyService: self.historyService)
+            _ = await processor.process(
+                text: result.text,
+                language: result.language,
+                mode: mode,
+                confidence: Double(result.confidence)
+            )
+
+            if isBackgrounded {
+                if let uuid = self.historyService.entries.first?.uuid {
+                    let defaults = DicticusIPCBridge.defaults
+                    var list = defaults?.stringArray(forKey: DicticusIPCBridge.Key.pendingTranscriptUUIDs) ?? []
+                    list.append(uuid.uuidString)
+                    defaults?.set(list, forKey: DicticusIPCBridge.Key.pendingTranscriptUUIDs)
+                    defaults?.set(uuid.uuidString, forKey: DicticusIPCBridge.Key.pendingTranscriptUUID)
+                }
+                // No transcript text in the notification body (T-36-08 / security).
+                await notificationPoster("Dictation ready",
+                                         "Recording stopped — your transcript is waiting. Tap to open Dicticus.")
+            }
+
+            // Resolved — removes the WAV bytes and the row (D-02).
+            pendingStore.delete(oldest)
+        } catch {
+            // Transcription failed — leave the row queued (D-10 hold). 46-03 adds
+            // markFailed()/retry(); for this plan the row simply stays queued.
         }
     }
 

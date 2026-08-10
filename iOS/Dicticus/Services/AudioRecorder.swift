@@ -1,0 +1,316 @@
+import Foundation
+import SwiftUI
+import UIKit
+@preconcurrency import AVFoundation
+import os
+
+/// Result of a completed recording — the durable unit `AudioRecorder` hands off to
+/// `PendingRecordingStore`. Contains no ASR/model state: this type exists precisely so
+/// captured audio can outlive the ASR model's absence (Phase 46 D-01).
+struct RecordingArtifact: Sendable {
+    let uuid: UUID
+    let fileURL: URL
+    let durationSeconds: Double
+}
+
+/// Errors thrown by `AudioRecorder` during the capture lifecycle. Deliberately
+/// disjoint from `TranscriptionError` — the recorder has no ASR dependency at all.
+enum RecorderError: Error {
+    case busy
+    case notRecording
+    case fileCreationFailed
+}
+
+/// Injection seam so `DictationViewModel` can be driven in tests without a microphone.
+/// Load-bearing for Task 2's end-to-end assertion, not decoration.
+@MainActor
+protocol AudioRecording: AnyObject {
+    var isRecording: Bool { get }
+    func startRecording() throws -> UUID
+    func stopRecording() throws -> RecordingArtifact
+    func cancelRecording()
+    var onSilenceDetected: (() -> Void)? { get set }
+}
+
+/// Tap-to-disk WAV writer, deliberately separate from `AudioRecorder` itself so it is
+/// unit-testable with synthesized buffers (Task 2) without driving `AVAudioEngine` or
+/// the microphone. All state is guarded by an `NSLock`, mirroring the concurrency
+/// discipline of the in-memory `AudioSampleBuffer` this replaces
+/// (`IOSTranscriptionService.swift`, pre-46-02).
+final class RecordingFileWriter: @unchecked Sendable {
+    private static let log = Logger(subsystem: "com.dicticus", category: "audioRecorder")
+
+    private let lock = NSLock()
+    private let url: URL
+    private let sampleRate: Double
+    private var file: AVAudioFile?
+    private var framesWritten: AVAudioFramePosition = 0
+
+    init(url: URL, format: AVAudioFormat) throws {
+        self.url = url
+        self.sampleRate = format.sampleRate
+        self.file = try AVAudioFile(forWriting: url, settings: format.settings)
+    }
+
+    /// Appends one tap-delivered buffer to the file. An I/O failure here must never
+    /// crash the real-time tap callback — it is logged and swallowed. The 46-03
+    /// relaunch-recovery scan is the safety net for a partially-written file, not
+    /// this call site.
+    func append(_ buffer: AVAudioPCMBuffer) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let file else { return }
+        do {
+            try file.write(from: buffer)
+            framesWritten += AVAudioFramePosition(buffer.frameLength)
+        } catch {
+            Self.log.error("Failed to append audio buffer to \(self.url.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Releases the file object (finalizing its RIFF header) and returns the
+    /// recorded duration, derived from frames written rather than any external clock.
+    @discardableResult
+    func finalize() -> Double {
+        lock.lock()
+        defer { lock.unlock() }
+        let duration = sampleRate > 0 ? Double(framesWritten) / sampleRate : 0
+        file = nil
+        return duration
+    }
+
+    /// Releases the file object and removes the partial file from disk. Used by
+    /// `cancelRecording()` and by any early-exit path in `startRecording()`.
+    func discard() {
+        lock.lock()
+        defer { lock.unlock() }
+        file = nil
+        try? FileManager.default.removeItem(at: url)
+    }
+}
+
+/// Records the microphone straight to a WAV file on disk, with zero ASR/model
+/// dependency — deliberately not importing WhisperKit or NaturalLanguage. This is the
+/// structural cut Phase 46 exists to make: recording can start, run, and finish
+/// whether or not an ASR model is loaded.
+@MainActor
+final class AudioRecorder: AudioRecording {
+    private static let log = Logger(subsystem: "com.dicticus", category: "audioRecorder")
+
+    private let audioEngine = AVAudioEngine()
+    private var writer: RecordingFileWriter?
+    private var currentUUID: UUID?
+    private var currentFileURL: URL?
+
+    private(set) var isRecording = false
+
+    @AppStorage("useAutoStop", store: DicticusIPCBridge.defaults)
+    var useAutoStop = true
+
+    let autoStopSilenceSeconds: Double = 2.5
+    let autoStopGracePeriod: Double = 3.0
+
+    /// Callback triggered when Auto-Stop detects sustained silence.
+    var onSilenceDetected: (() -> Void)?
+
+    /// Settable seam so the D-04 haptic-timing assertion is testable without haptic
+    /// hardware. Fires exactly once per recording, on the first buffer the tap
+    /// actually delivers — never at intent-fire or button-tap time.
+    var hapticTrigger: @MainActor @Sendable () -> Void = {
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+    }
+
+    /// Resolves (and creates, if needed) the app-private directory pending recordings
+    /// are written to. Deliberately NOT the App Group container — the widget and
+    /// intents never need the raw audio (T-46-05 mitigation is a bare filename in
+    /// `PendingRecording`; this is the T-46-03 mitigation of not sharing the
+    /// container in the first place). `completeUnlessOpen` (not `complete`) so a
+    /// recording that continues after the screen locks is not broken mid-write.
+    static func recordingsDirectory() throws -> URL {
+        guard let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            throw RecorderError.fileCreationFailed
+        }
+        let dir = appSupport.appendingPathComponent("Dicticus", isDirectory: true)
+            .appendingPathComponent("PendingRecordings", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: dir,
+            withIntermediateDirectories: true,
+            attributes: [.protectionKey: FileProtectionType.completeUnlessOpen]
+        )
+        var mutableDir = dir
+        var resourceValues = URLResourceValues()
+        resourceValues.isExcludedFromBackup = true
+        try mutableDir.setResourceValues(resourceValues)
+        return dir
+    }
+
+    func startRecording() throws -> UUID {
+        guard !isRecording else { throw RecorderError.busy }
+
+        // iOS ONLY: activate AVAudioSession with .playAndRecord so the mic session
+        // survives backgrounding (UIBackgroundModes: audio keeps it alive).
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
+        try session.setActive(true)
+
+        let inputNode = audioEngine.inputNode
+        let inputFormat = inputNode.outputFormat(forBus: 0)
+
+        let uuid = UUID()
+        let destinationURL: URL
+        let newWriter: RecordingFileWriter
+        do {
+            let dir = try Self.recordingsDirectory()
+            destinationURL = dir.appendingPathComponent("\(uuid.uuidString).wav")
+            // Write in the hardware's native format and trust the WAV header — do not
+            // carry sample rate/channel count out of band, because a later transcribe
+            // pass may run in a fresh process with no access to this AVAudioFormat.
+            newWriter = try RecordingFileWriter(url: destinationURL, format: inputFormat)
+        } catch {
+            try? session.setActive(false, options: .notifyOthersOnDeactivation)
+            throw RecorderError.fileCreationFailed
+        }
+
+        writer = newWriter
+        currentUUID = uuid
+        currentFileURL = destinationURL
+
+        let localHapticTrigger = hapticTrigger
+
+        Self.installTap(
+            on: inputNode,
+            format: inputFormat,
+            writer: newWriter,
+            autoStopEnabled: useAutoStop,
+            silenceThreshold: 0.01, // RMS threshold for "silence"
+            silenceDuration: autoStopSilenceSeconds,
+            gracePeriod: autoStopGracePeriod,
+            onSilence: { [weak self] in
+                Task { @MainActor in
+                    self?.onSilenceDetected?()
+                }
+            },
+            onFirstBuffer: {
+                Task { @MainActor in
+                    localHapticTrigger()
+                }
+            }
+        )
+
+        do {
+            try audioEngine.start()
+        } catch {
+            inputNode.removeTap(onBus: 0)
+            newWriter.discard()
+            writer = nil
+            currentUUID = nil
+            currentFileURL = nil
+            try? session.setActive(false, options: .notifyOthersOnDeactivation)
+            throw error
+        }
+
+        isRecording = true
+        return uuid
+    }
+
+    /// Install audio tap in a nonisolated context so the closure has no actor affinity.
+    /// Mirrors the pre-46-02 `IOSTranscriptionService.installTap` auto-stop logic
+    /// verbatim — only the destination (writer, not an in-memory buffer) changed.
+    nonisolated private static func installTap(
+        on inputNode: AVAudioInputNode,
+        format: AVAudioFormat,
+        writer: RecordingFileWriter,
+        autoStopEnabled: Bool,
+        silenceThreshold: Float,
+        silenceDuration: Double,
+        gracePeriod: Double,
+        onSilence: @escaping @Sendable () -> Void,
+        onFirstBuffer: @escaping @Sendable () -> Void
+    ) {
+        final class SilenceTracker: @unchecked Sendable {
+            var startTime = Date()
+            var lastSoundTime = Date()
+            var didTrigger = false
+        }
+        final class FirstBufferGate: @unchecked Sendable {
+            private let lock = NSLock()
+            private var fired = false
+            func fireIfNeeded() -> Bool {
+                lock.lock()
+                defer { lock.unlock() }
+                if fired { return false }
+                fired = true
+                return true
+            }
+        }
+        let tracker = SilenceTracker()
+        let firstBufferGate = FirstBufferGate()
+
+        inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) {
+            pcmBuffer, _ in
+            writer.append(pcmBuffer)
+
+            if firstBufferGate.fireIfNeeded() {
+                onFirstBuffer()
+            }
+
+            guard autoStopEnabled, let channelData = pcmBuffer.floatChannelData?[0] else { return }
+            let frameCount = Int(pcmBuffer.frameLength)
+            guard frameCount > 0 else { return }
+
+            let now = Date()
+            let elapsedTotal = now.timeIntervalSince(tracker.startTime)
+
+            // Simple RMS calculation to detect "sound"
+            var sum: Float = 0
+            for i in 0..<frameCount { let sample = channelData[i]; sum += sample * sample }
+            let rms = sqrt(sum / Float(frameCount))
+
+            if rms > silenceThreshold {
+                tracker.lastSoundTime = now
+            } else if !tracker.didTrigger && elapsedTotal > gracePeriod {
+                let silenceElapsed = now.timeIntervalSince(tracker.lastSoundTime)
+                if silenceElapsed >= silenceDuration {
+                    tracker.didTrigger = true
+                    onSilence()
+                }
+            }
+        }
+    }
+
+    func stopRecording() throws -> RecordingArtifact {
+        guard isRecording else { throw RecorderError.notRecording }
+
+        audioEngine.stop()
+        audioEngine.inputNode.removeTap(onBus: 0)
+        // Release the mic session on every exit path (success or throw). Without this
+        // the AVAudioSession stays active after a stop, and the next
+        // AudioRecordingIntent (Action Button session 2) fatal-asserts: "active audio
+        // session but without a Live Activity" (device-only).
+        defer { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
+
+        let duration = writer?.finalize() ?? 0
+        let uuid = currentUUID
+        let url = currentFileURL
+
+        writer = nil
+        currentUUID = nil
+        currentFileURL = nil
+        isRecording = false
+
+        guard let uuid, let url else { throw RecorderError.fileCreationFailed }
+        return RecordingArtifact(uuid: uuid, fileURL: url, durationSeconds: duration)
+    }
+
+    func cancelRecording() {
+        guard isRecording else { return }
+        audioEngine.stop()
+        audioEngine.inputNode.removeTap(onBus: 0)
+        writer?.discard()
+        writer = nil
+        currentUUID = nil
+        currentFileURL = nil
+        isRecording = false
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+}

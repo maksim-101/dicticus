@@ -128,6 +128,11 @@ struct DicticusApp: App {
                 let service = IOSTranscriptionService(whisperKit: whisperKit)
                 transcriptionService = service
                 viewModel.transcriptionService = service
+                // Phase 46-02 (D-05): a recording captured before the model was ready
+                // may already be queued — drain it now that a transcriber exists.
+                Task { @MainActor in
+                    await viewModel.drainPendingRecordingsIfNeeded()
+                }
             }
         }
         // Phase 19 Wave 5 — CLEAN-01 / CLEAN-02.
