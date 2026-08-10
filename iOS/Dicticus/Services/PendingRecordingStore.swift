@@ -56,7 +56,25 @@ final class PendingRecordingStore: ObservableObject {
     /// Ordered `createdAt` ascending — arrival order, the queue's drain order (46-03).
     @Published private(set) var pendingRecordings: [PendingRecording] = []
 
-    var pendingCount: Int { pendingRecordings.count }
+    /// Locked count definition (46-05-PLAN.md): queued + transcribing + failed —
+    /// identical to the History tab badge and the Home chip, so the two can never
+    /// disagree. Written as an explicit status filter rather than the array's bare
+    /// count: the three statuses happen to be exhaustive today, so the two are
+    /// numerically equal, but a filter means a fourth status added later forces a
+    /// deliberate decision instead of silently changing the number the user sees.
+    /// Counting only queued+failed would make the chip vanish mid-flight the moment
+    /// the last queued recording started transcribing — exactly the "app lost it"
+    /// read this definition exists to prevent.
+    var pendingCount: Int {
+        pendingRecordings.filter { row in
+            switch PendingRecordingStatus(rawValue: row.status) {
+            case .queued: return true
+            case .transcribing: return true
+            case .failed: return true
+            case nil: return false
+            }
+        }.count
+    }
 
     private init(historyService: HistoryService) {
         self.historyService = historyService

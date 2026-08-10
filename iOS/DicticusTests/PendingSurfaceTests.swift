@@ -1,4 +1,5 @@
 import XCTest
+@preconcurrency import AVFoundation
 @testable import Dicticus
 
 /// Phase 46-05: exact-string display-contract tests for the pending-recordings UI
@@ -59,5 +60,97 @@ final class PendingSurfaceTests: XCTestCase {
 
     func testStatusLabelFailed() {
         XCTAssertEqual(PendingRecordingRow.statusLabel(for: .failed), "Failed")
+    }
+
+    // MARK: - PendingQueueChip.label(for:)
+
+    func testChipLabelZeroReturnsNilNotRendered() {
+        XCTAssertNil(PendingQueueChip.label(for: 0), "count zero must mean not rendered, not an empty-string render")
+    }
+
+    func testChipLabelOneIsSingularSentence() {
+        XCTAssertEqual(PendingQueueChip.label(for: 1), "1 recording waiting to transcribe")
+    }
+
+    func testChipLabelPluralIncludesCount() {
+        XCTAssertEqual(PendingQueueChip.label(for: 4), "4 recordings waiting to transcribe")
+    }
+
+    func testChipLabelLargeNumber() {
+        XCTAssertEqual(PendingQueueChip.label(for: 42), "42 recordings waiting to transcribe")
+    }
+}
+
+/// The locked count definition (PendingRecordingStore.pendingCount = queued +
+/// transcribing + failed) needs a real store with rows in all three statuses, so this
+/// is a separate isolated-store test case rather than living alongside the pure-
+/// function tests above. Constructs its own `HistoryService`/`PendingRecordingStore`
+/// via `makeForTesting` against a temporary directory — no test names either
+/// production singleton (see `PendingRecordingStoreTests`'s established convention).
+@MainActor
+final class PendingSurfaceCountTests: XCTestCase {
+
+    private var tempContainer: URL!
+    private var historyService: HistoryService!
+    private var store: PendingRecordingStore!
+    private var wavDir: URL!
+
+    override func setUp() {
+        super.setUp()
+        tempContainer = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("PendingSurfaceCountTests-\(UUID().uuidString)", isDirectory: true)
+        let container = tempContainer!
+        historyService = HistoryService.makeForTesting(containerURLProvider: { container })
+        store = PendingRecordingStore.makeForTesting(historyService: historyService)
+        wavDir = try? AudioRecorder.recordingsDirectory()
+    }
+
+    override func tearDown() {
+        for row in store.pendingRecordings {
+            if let url = try? store.fileURL(for: row) {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
+        try? FileManager.default.removeItem(at: tempContainer)
+        tempContainer = nil
+        historyService = nil
+        store = nil
+        super.tearDown()
+    }
+
+    @discardableResult
+    private func writeRealWav(duration: Double = 1.0) throws -> RecordingArtifact {
+        let uuid = UUID()
+        let url = wavDir.appendingPathComponent("\(uuid.uuidString).wav")
+        let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false)!
+        let writer = try RecordingFileWriter(url: url, format: format)
+        let frameCount = AVAudioFrameCount(16000 * duration)
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount)!
+        buffer.frameLength = frameCount
+        writer.append(buffer)
+        let actualDuration = writer.finalize()
+        return RecordingArtifact(uuid: uuid, fileURL: url, durationSeconds: actualDuration)
+    }
+
+    /// Specifically covers the mid-flight case the UI-SPEC calls out by name: the
+    /// last queued item starting to transcribe must not make the chip/badge count
+    /// drop, because a bare `queued + failed` count would go from 3 to 2 the instant
+    /// the transcribing row's status flips — reading as "the app lost it".
+    func testPendingCountCoversQueuedTranscribingAndFailed() throws {
+        let queuedArtifact = try writeRealWav()
+        let transcribingArtifact = try writeRealWav()
+        let failedArtifact = try writeRealWav()
+
+        guard store.enqueue(queuedArtifact) != nil,
+              let transcribingRow = store.enqueue(transcribingArtifact),
+              let failedRow = store.enqueue(failedArtifact) else {
+            XCTFail("enqueue() must succeed for all three artifacts")
+            return
+        }
+
+        store.markTranscribing(transcribingRow)
+        store.markFailed(failedRow, reason: "test failure")
+
+        XCTAssertEqual(store.pendingCount, 3)
     }
 }
