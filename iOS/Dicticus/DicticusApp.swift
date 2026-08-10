@@ -19,11 +19,21 @@ struct DicticusApp: App {
     @Environment(\.scenePhase) private var scenePhase
 
     init() {
-        // ADDENDUM A: On launch, reconcile any orphaned Live Activities left by a prior process
-        // that terminated mid-recording (crash, SIGKILL, memory pressure). Without this,
-        // phantom "Recording…" banners stack indefinitely on the lock screen.
-        // Also reset the isRecording App Group flag — if it's stale-true from a prior process,
-        // DictateIntent toggle-to-stop would misfire (D-01a corollary).
+        // ADDENDUM A (extended 46-03): On launch, reconcile everything a prior process
+        // may have left behind mid-recording (crash, SIGKILL, jetsam, force-quit).
+        // Deliberately ONE ordered Task, not two independent ones — a killed recording
+        // leaves BOTH an orphaned Live Activity and (as of 46-02/46-03) an orphaned WAV
+        // on disk, and ending the stale activity BEFORE the WAV recovery scan runs means
+        // there is no window where the UI could show a stale "Recording…" banner while
+        // pending-recording rows are still being reconciled underneath it.
+        //
+        // The Live Activity end-loop itself only closes the gap once the app relaunches —
+        // ActivityKit gives app code no way to end or update an Activity while its owning
+        // process is dead (see 46-DEVICE-TEST-PROCEDURE.md Section D's 2026-08-10 finding:
+        // a force-quit mid-recording leaves the activity visibly counting until the next
+        // launch, which is this loop; there is no faster in-process fix available without
+        // a server-pushed ActivityKit update, which this strictly-local project does not
+        // run).
         Task { @MainActor in
             let activities = Activity<DictationAttributes>.activities
             for activity in activities {
@@ -35,6 +45,10 @@ struct DicticusApp: App {
                     dismissalPolicy: .immediate
                 )
             }
+            // D-01/46-03: find any WAV left on disk by a process that died before
+            // enqueue() ran, and reconcile rows against disk in the other direction
+            // (missing file -> failed, stranded .transcribing -> reset to .queued).
+            PendingRecordingStore.shared.recoverOrphanedRecordings()
         }
         DicticusIPCBridge.defaults?.set(false, forKey: DicticusIPCBridge.Key.isRecording)
     }
