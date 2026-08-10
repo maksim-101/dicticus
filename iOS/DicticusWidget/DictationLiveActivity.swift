@@ -8,26 +8,47 @@ struct DictationLiveActivity: Widget {
             // Lock-screen banner — primary no-reopen stop surface (D-01a).
             // The Stop button fires StopDictationIntent (LiveActivityIntent),
             // which runs backgrounded and posts .stopDictation without opening the app.
-            HStack {
-                Image(systemName: "mic.fill").foregroundColor(.red)
-                Text(context.state.isRecording ? "Recording\u{2026}" : "Processing\u{2026}")
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(Color.red.opacity(0.15))
+                        .frame(width: 32, height: 32)
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.red)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(context.state.isRecording ? "Recording" : "Processing")
+                        .font(.subheadline.weight(.semibold))
+                    // Bounded to DictationAttributes.maxDictationSeconds (not
+                    // Date.distantFuture) — see 46-LIVEACTIVITY-REDESIGN.md.
+                    Text(timerInterval: context.state.startedAt...context.state.startedAt.addingTimeInterval(DictationAttributes.maxDictationSeconds),
+                         countsDown: false, showsHours: false)
+                        .font(.caption)
+                        .monospacedDigit()
+                        .foregroundColor(.secondary)
+                }
+
                 Spacer()
-                Text(timerInterval: context.state.startedAt...Date.distantFuture, countsDown: false)
-                    .monospacedDigit()
+
                 Button(intent: StopDictationIntent()) {
                     Image(systemName: "stop.fill")
                         .font(.system(size: 14, weight: .bold))
-                        .padding(8)
+                        .padding(10)
                         .background(Circle().fill(Color.red))
                         .foregroundColor(.white)
                 }
                 .buttonStyle(.plain)
             }
-            .padding()
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    Image(systemName: "mic.fill").foregroundColor(.red)
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundColor(.red)
                 }
                 // Stop button in .trailing (higher-priority region than .bottom) ensures
                 // it renders on iOS 26+ where .bottom may be deprioritized on Pro Max.
@@ -42,30 +63,69 @@ struct DictationLiveActivity: Widget {
                     }
                     .buttonStyle(.plain)
                 }
+                // .center sits directly below the camera sensor — HIG's slot for a
+                // title/high-level status banner. Filling it lets .bottom hold just
+                // the timer, which is why the old label+Spacer .layoutPriority(1)
+                // compression fix there is no longer needed (nothing competes with
+                // the timer for width in .bottom anymore).
+                DynamicIslandExpandedRegion(.center) {
+                    Text(context.state.isRecording ? "Recording\u{2026}" : "Processing\u{2026}")
+                        .font(.footnote.weight(.medium))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
                 DynamicIslandExpandedRegion(.bottom) {
-                    HStack {
-                        Text(timerInterval: context.state.startedAt...Date.distantFuture, countsDown: false)
-                            .monospacedDigit()
-                            .font(.caption)
-                            .fixedSize()  // timer is short — never let it expand at expense of label
-                        Spacer()
-                        Text("Tap to open Dicticus")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.75)
-                            .layoutPriority(1)  // prefer label over spacer compression
-                    }
-                    .padding(.horizontal, 4)  // keep content off the DI edges
+                    // Bounded to DictationAttributes.maxDictationSeconds (not
+                    // Date.distantFuture) — see 46-LIVEACTIVITY-REDESIGN.md.
+                    // No "Tap to open Dicticus" hint: tapping a Live Activity to
+                    // open its app is an existing system-wide convention, and none
+                    // of the researched real-world examples spell it out either.
+                    Text(timerInterval: context.state.startedAt...context.state.startedAt.addingTimeInterval(DictationAttributes.maxDictationSeconds),
+                         countsDown: false, showsHours: false)
+                        .font(.title3.weight(.medium))
+                        .monospacedDigit()
+                        .fixedSize()  // timer is short — never let it expand at expense of the region
                 }
             } compactLeading: {
-                Image(systemName: "mic.fill").foregroundColor(.red)
+                Image(systemName: "mic.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.red)
             } compactTrailing: {
-                Text(timerInterval: context.state.startedAt...Date.distantFuture, countsDown: false)
+                // Bounded range + .caption2 are both measured fixes for the
+                // oversized compact pill — see 46-LIVEACTIVITY-REDESIGN.md.
+                Text(timerInterval: context.state.startedAt...context.state.startedAt.addingTimeInterval(DictationAttributes.maxDictationSeconds),
+                     countsDown: false, showsHours: false)
+                    .font(.caption2)
                     .monospacedDigit()
             } minimal: {
-                Image(systemName: "mic.fill").foregroundColor(.red)
+                Image(systemName: "mic.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(.red)
             }
         }
     }
+}
+
+#Preview("Lock Screen", as: .content, using: DictationAttributes()) {
+    DictationLiveActivity()
+} contentStates: {
+    DictationAttributes.ContentState(isRecording: true, startedAt: .now.addingTimeInterval(-7))
+}
+
+#Preview("Dynamic Island Compact", as: .dynamicIsland(.compact), using: DictationAttributes()) {
+    DictationLiveActivity()
+} contentStates: {
+    DictationAttributes.ContentState(isRecording: true, startedAt: .now.addingTimeInterval(-7))
+}
+
+#Preview("Dynamic Island Expanded", as: .dynamicIsland(.expanded), using: DictationAttributes()) {
+    DictationLiveActivity()
+} contentStates: {
+    DictationAttributes.ContentState(isRecording: true, startedAt: .now.addingTimeInterval(-7))
+}
+
+#Preview("Dynamic Island Minimal", as: .dynamicIsland(.minimal), using: DictationAttributes()) {
+    DictationLiveActivity()
+} contentStates: {
+    DictationAttributes.ContentState(isRecording: true, startedAt: .now.addingTimeInterval(-7))
 }
