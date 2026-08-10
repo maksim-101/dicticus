@@ -5,7 +5,7 @@ import WhisperKit
 import NaturalLanguage
 import os
 
-/// Errors thrown by IOSTranscriptionService during the record-transcribe cycle.
+/// Errors thrown by IOSTranscriptionService during transcription.
 enum TranscriptionError: Error, Sendable {
     /// Recording was shorter than minimumDurationSeconds.
     case tooShort
@@ -15,87 +15,57 @@ enum TranscriptionError: Error, Sendable {
     case noResult
     /// ASR models not available (model not warmed up).
     case modelNotReady
-    /// stopRecordingAndTranscribe() called when not recording.
+    /// stopRecordingAndTranscribe() called when not recording. Retained for source
+    /// compatibility with call sites that still switch over every TranscriptionError
+    /// case; IOSTranscriptionService itself no longer throws this (recording state
+    /// moved to AudioRecorder / RecorderError in 46-02).
     case notRecording
-    /// startRecording() called while already recording or transcribing.
+    /// startRecording() called while already recording or transcribing. Retained for
+    /// the same reason as .notRecording above.
     case busy
     /// ASR output contains non-Latin script (Cyrillic, CJK, Arabic, etc.) — likely a
     /// Parakeet hallucination when the spoken language doesn't match model expectations.
     case unexpectedLanguage
 }
 
-/// Thread-safe audio sample buffer for real-time AVAudioEngine tap callbacks.
-final class AudioSampleBuffer: @unchecked Sendable {
-    private var samples: [Float] = []
-    private let lock = NSLock()
-
-    func append(_ newSamples: [Float]) {
-        lock.lock()
-        samples.append(contentsOf: newSamples)
-        lock.unlock()
-    }
-
-    func drain() -> [Float] {
-        lock.lock()
-        let result = samples
-        samples.removeAll()
-        lock.unlock()
-        return result
-    }
-
-    func clear() {
-        lock.lock()
-        samples.removeAll()
-        lock.unlock()
-    }
+/// Injection seam so `DictationViewModel` can transcribe without depending on the
+/// concrete WhisperKit-backed implementation (tests use a fake conformer instead).
+@MainActor
+protocol TranscriptionProviding: AnyObject {
+    func transcribe(wavURL: URL) async throws -> DicticusTranscriptionResult
 }
 
-/// Core ASR pipeline for iOS: record audio via AVAudioEngine, apply silence-discard
-/// checks, transcribe via WhisperKit large-v3-turbo, and detect language post-hoc
-/// with NLLanguageRecognizer. (See whisper-dictation-dropout debug session for the
-/// two-cycle Layer 2 history: cycle 1 removed the fixed-threshold EnergyVAD
-/// pre-filter that misclassified genuine speech as silence on some microphones;
-/// cycle 2 reintroduced Layer 2 as AdaptiveVoiceGate, a clip-relative energy gate,
-/// after cycle 1's removal reopened D-09 silence-hallucination pastes.)
+/// Core ASR pipeline for iOS: transcribe a WAV file via WhisperKit large-v3-turbo,
+/// applying silence-discard checks, and detect language post-hoc with
+/// NLLanguageRecognizer. As of Phase 46-02 this class owns transcription only —
+/// recording moved to `AudioRecorder` so capture no longer requires a loaded model.
+/// (See whisper-dictation-dropout debug session for the two-cycle Layer 2 history:
+/// cycle 1 removed the fixed-threshold EnergyVAD pre-filter that misclassified genuine
+/// speech as silence on some microphones; cycle 2 reintroduced Layer 2 as
+/// AdaptiveVoiceGate, a clip-relative energy gate, after cycle 1's removal reopened
+/// D-09 silence-hallucination pastes.)
 @MainActor
-class IOSTranscriptionService: ObservableObject {
-
-    // MARK: - State machine
-
-    enum State: Equatable, Sendable {
-        case idle
-        case recording
-        case transcribing
-    }
-
-    @Published var state: State = .idle
-    @Published var lastResult: DicticusTranscriptionResult?
-    @Published var error: String?
+final class IOSTranscriptionService: TranscriptionProviding {
 
     @AppStorage("useCustomDictionary", store: DicticusIPCBridge.defaults)
     var useCustomDictionary = true
     @AppStorage("useITN", store: DicticusIPCBridge.defaults)
     var useITN = true
-    @AppStorage("useAutoStop", store: DicticusIPCBridge.defaults)
-    var useAutoStop = true
 
     // MARK: - Configuration
 
     static let vadProbabilityThreshold: Float = 0.75
     var silenceThreshold: Float = IOSTranscriptionService.vadProbabilityThreshold
-    let minimumDurationSeconds: Float = 0.3
-    let autoStopSilenceSeconds: Double = 2.5
-    let autoStopGracePeriod: Double = 3.0
+    /// Below this, a clip is a determination that there is nothing to transcribe, not
+    /// a failure to hold. Exposed as a type-level constant (not an instance property)
+    /// so `DictationViewModel.stopDictation()` can consult it even when no
+    /// `TranscriptionProviding` instance has been constructed yet (model not warm).
+    static let minimumDurationSeconds: Float = 0.3
 
     // MARK: - Private
 
     private let whisperKit: WhisperKit
-    private let audioEngine = AVAudioEngine()
-    private let sampleBuffer = AudioSampleBuffer()
     private let sampleRate: Double = 16000
-
-    /// Callback triggered when Auto-Stop detects sustained silence.
-    var onSilenceDetected: (() -> Void)?
 
     // MARK: - Initialization
 
@@ -105,118 +75,30 @@ class IOSTranscriptionService: ObservableObject {
         self.whisperKit = whisperKit
     }
 
-    // MARK: - Recording
-
-    /// Start recording via AVAudioEngine.
-    /// On iOS, this requires explicit AVAudioSession management.
-    func startRecording() throws {
-        guard state == .idle else { throw TranscriptionError.busy }
-        sampleBuffer.clear()
-
-        // iOS ONLY: activate AVAudioSession with .playAndRecord so the mic session
-        // survives backgrounding (UIBackgroundModes: audio keeps it alive).
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
-        try session.setActive(true)
-
-        let inputNode = audioEngine.inputNode
-        let inputFormat = inputNode.outputFormat(forBus: 0)
-
-        Self.installTap(
-            on: inputNode,
-            format: inputFormat,
-            buffer: sampleBuffer,
-            autoStopEnabled: useAutoStop,
-            silenceThreshold: 0.01, // RMS threshold for "silence"
-            silenceDuration: autoStopSilenceSeconds,
-            gracePeriod: autoStopGracePeriod,
-            onSilence: { [weak self] in
-                Task { @MainActor in
-                    self?.onSilenceDetected?()
-                }
-            }
-        )
-
-        try audioEngine.start()
-        state = .recording
-    }
-
-    /// Install audio tap in a nonisolated context so the closure has no actor affinity.
-    nonisolated private static func installTap(
-        on inputNode: AVAudioInputNode,
-        format: AVAudioFormat,
-        buffer: AudioSampleBuffer,
-        autoStopEnabled: Bool,
-        silenceThreshold: Float,
-        silenceDuration: Double,
-        gracePeriod: Double,
-        onSilence: @escaping @Sendable () -> Void
-    ) {
-        // Track silence state in a thread-safe way
-        final class SilenceTracker: @unchecked Sendable {
-            var startTime = Date()
-            var lastSoundTime = Date()
-            var didTrigger = false
-        }
-        let tracker = SilenceTracker()
-
-        inputNode.installTap(onBus: 0, bufferSize: 4096, format: format) {
-            pcmBuffer, _ in
-            guard let channelData = pcmBuffer.floatChannelData?[0] else { return }
-            let frameCount = Int(pcmBuffer.frameLength)
-            let samples = Array(UnsafeBufferPointer(start: channelData, count: frameCount))
-            buffer.append(samples)
-
-            if autoStopEnabled {
-                let now = Date()
-                let elapsedTotal = now.timeIntervalSince(tracker.startTime)
-                
-                // Simple RMS calculation to detect "sound"
-                var sum: Float = 0
-                for sample in samples { sum += sample * sample }
-                let rms = sqrt(sum / Float(frameCount))
-                
-                if rms > silenceThreshold {
-                    tracker.lastSoundTime = now
-                } else if !tracker.didTrigger && elapsedTotal > gracePeriod {
-                    let silenceElapsed = now.timeIntervalSince(tracker.lastSoundTime)
-                    if silenceElapsed >= silenceDuration {
-                        tracker.didTrigger = true
-                        onSilence()
-                    }
-                }
-            }
-        }
-    }
-
-    func cancelRecording() {
-        guard state == .recording else { return }
-        audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
-        sampleBuffer.clear()
-        state = .idle
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-    }
-
     // MARK: - Transcription
 
-    func stopRecordingAndTranscribe() async throws -> DicticusTranscriptionResult {
-        guard state == .recording else { throw TranscriptionError.notRecording }
+    /// Reads a WAV file back into `[Float]` samples at the file's own sample rate.
+    /// Used instead of WhisperKit's file-path-based entry point because it is
+    /// unverified whether that variant still exposes per-segment `noSpeechProb` /
+    /// `avgLogprob` — both drive `NoSpeechDiscard` and the derived confidence below.
+    static func readSamples(fromWavAt url: URL) throws -> (samples: [Float], sampleRate: Double) {
+        let file = try AVAudioFile(forReading: url)
+        let format = file.processingFormat
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(file.length)) else {
+            throw TranscriptionError.noResult
+        }
+        try file.read(into: buffer)
+        let frameCount = Int(buffer.frameLength)
+        guard let channelData = buffer.floatChannelData?[0] else {
+            return ([], format.sampleRate)
+        }
+        let samples = Array(UnsafeBufferPointer(start: channelData, count: frameCount))
+        return (samples, format.sampleRate)
+    }
 
-        audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
-        // Release the mic session on every exit path (success or throw). Without this the
-        // AVAudioSession stays active after a stop, and the next AudioRecordingIntent
-        // (Action Button session 2) fatal-asserts: "active audio session but without a
-        // Live Activity" (AppIntents PerformActionExecutorTask). Mirrors cancelRecording().
-        defer { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
-        state = .transcribing
+    func transcribe(wavURL: URL) async throws -> DicticusTranscriptionResult {
+        let (samples, inputSampleRate) = try Self.readSamples(fromWavAt: wavURL)
 
-        defer { if state == .transcribing { state = .idle } }
-
-        let samples = sampleBuffer.drain()
-
-        let inputSampleRate = audioEngine.inputNode.outputFormat(forBus: 0).sampleRate
         let resampledSamples: [Float]
         if abs(inputSampleRate - sampleRate) > 1.0 {
             resampledSamples = resampleAudio(samples, from: inputSampleRate, to: sampleRate)
@@ -227,7 +109,7 @@ class IOSTranscriptionService: ObservableObject {
         let durationSeconds = Float(resampledSamples.count) / Float(sampleRate)
 
         // Layer 1: Minimum duration guard
-        guard durationSeconds >= minimumDurationSeconds else {
+        guard durationSeconds >= Self.minimumDurationSeconds else {
             throw TranscriptionError.tooShort
         }
 
@@ -332,15 +214,11 @@ class IOSTranscriptionService: ObservableObject {
         let meanLogprob = avgLogprobs.isEmpty ? 0 : avgLogprobs.reduce(0, +) / Float(avgLogprobs.count)
         let confidence = exp(meanLogprob)
 
-        let transcriptionResult = DicticusTranscriptionResult(
+        return DicticusTranscriptionResult(
             text: processedText,
             language: detectedLanguage,
             confidence: confidence
         )
-
-        lastResult = transcriptionResult
-        state = .idle
-        return transcriptionResult
     }
 
     // MARK: - Adaptive voice gate support
@@ -401,7 +279,7 @@ class IOSTranscriptionService: ObservableObject {
         var conversionError: NSError?
         final class ConversionState: @unchecked Sendable { var didProvideData = false }
         let state = ConversionState()
-        
+
         converter.convert(to: outputBuffer, error: &conversionError) { _, outStatus in
             if state.didProvideData {
                 outStatus.pointee = .endOfStream
@@ -457,7 +335,7 @@ class IOSTranscriptionService: ObservableObject {
         let allowedSymbols = CharacterSet(charactersIn: "$€£¥©®™°%‰#@&*-+=/\\|<>{}[]()\"'`^~_")
         let allowedPunctuation = CharacterSet.punctuationCharacters
         let allowedNumbers = CharacterSet.decimalDigits
-        
+
         for scalar in text.unicodeScalars {
             if allowedNumbers.contains(scalar) || allowedPunctuation.contains(scalar) || allowedSymbols.contains(scalar) {
                 continue
