@@ -210,7 +210,11 @@ final class AudioRecorderTests: XCTestCase {
     /// parsing it as JSON rather than grepping for a substring. This is NOT a
     /// fake-closure test like the two above; it is the only test in this file
     /// that proves the disk artifact itself is well-formed and complete.
-    func testHapticTriggerWritesThreeParseableHapticImpactLinesEndToEnd() async throws {
+    ///
+    /// Asserts 1 line, not 3 — round 5 reverted the default pattern to a
+    /// single impact once suppression (not count/intensity) was confirmed as
+    /// the actual root cause; see `hapticTrigger`'s doc comment.
+    func testHapticTriggerWritesOneParseableHapticImpactLineEndToEnd() async throws {
         let defaults = UserDefaults.standard
         let wasEnabled = defaults.bool(forKey: "memProbe")
         defaults.set(true, forKey: "memProbe")
@@ -229,8 +233,8 @@ final class AudioRecorderTests: XCTestCase {
         let contents = try XCTUnwrap(try? String(contentsOf: probeURL, encoding: .utf8),
                                      "hapticTrigger() must produce a readable memprobe.jsonl — the probe never wrote anything")
         let impactLines = contents.split(separator: "\n").filter { $0.contains("\"stage\":\"haptic_impact\"") }
-        XCTAssertEqual(impactLines.count, 3,
-                       "hapticTrigger() must write exactly 3 haptic_impact lines — found \(impactLines.count). If this is not 3, no device session will show 3 either; the loop itself is broken, not just felt-weakly.")
+        XCTAssertEqual(impactLines.count, 1,
+                       "hapticTrigger() must write exactly 1 haptic_impact line — found \(impactLines.count). Round 5 reverted to a single impact now that suppression, not count, was the root cause.")
 
         var seenIndices: Set<Int> = []
         for line in impactLines {
@@ -244,7 +248,7 @@ final class AudioRecorderTests: XCTestCase {
                 seenIndices.insert(index)
             }
         }
-        XCTAssertEqual(seenIndices, [0, 1, 2], "The 3 written lines must carry indices 0, 1, 2 — not 3 copies of the same index")
+        XCTAssertEqual(seenIndices, [0], "The single written line must carry index 0")
 
         try? FileManager.default.removeItem(at: probeURL)
     }

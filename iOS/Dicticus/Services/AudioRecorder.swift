@@ -167,31 +167,43 @@ final class AudioRecorder: AudioRecording {
     /// BEGAN, an ongoing state, not a finished one) than a deliberate multi-tap
     /// that reads as "this is now ON"; (3) the user explicitly asked for "a
     /// double or triple tap," which a custom sequence implements directly.
+    /// 46-03 device-UAT (Section C, round 5 — ROOT CAUSE FOUND): rounds 2-4's
+    /// per-impact instrumentation proved, with data, that all 3 impacts fired
+    /// every time, ~130ms apart, `appState=active` at each one — the pattern
+    /// loop, the generator, and the foreground state were never the problem.
+    /// The actual cause: `AVAudioSession.setAllowHapticsAndSystemSoundsDuringRecording`
+    /// defaults to `false`, and iOS suppresses `UIFeedbackGenerator` haptics
+    /// while a session is actively using audio input — specifically so the
+    /// Taptic Engine's own motor noise cannot bleed into the recording.
+    /// `startRecording()` now sets it `true` before activating the session
+    /// (see the comment there). Three rounds of raising intensity/adding a
+    /// pattern achieved nothing because none of them addressed suppression.
+    ///
+    /// **Reverted from round 4's 3x pattern back to a SINGLE impact** now
+    /// that the actual blocker is gone — recommended, not defaulted: (1) a
+    /// single `.heavy` impact was already the round-2/3 baseline and is
+    /// expected to be more than sufficient once it can actually be felt at
+    /// all, since suppression (not weakness) explains every prior "too
+    /// faint"/"nothing" report, including round 3's; (2) a ~360ms rhythmic
+    /// triple-tap right at the start of every recording is real audio-bleed
+    /// exposure now that haptics are unmuted during capture — the iPhone's
+    /// mic sits physically close to the Taptic Engine, and a burst pattern
+    /// risks an audible artifact in the user's actual dictation content in a
+    /// way a single brief click does not; (3) Apple defaults this flag off
+    /// specifically because of that bleed risk, which is a signal to keep
+    /// the haptic itself minimal even once permitted, not to treat the
+    /// default as an obstacle to work around with a longer pattern.
+    /// `fireHapticPattern`'s count is still fully parameterized — if a single
+    /// impact turns out insufficient once genuinely felt (not suppressed),
+    /// widening back to 2-3 is a one-argument change, not a redesign.
     var hapticTrigger: @MainActor @Sendable () async -> Void = {
         let generator = UIImpactFeedbackGenerator(style: .heavy)
-        // .prepare() once, reused across all impacts in the sequence — Apple's
-        // documented technique for a rapid multi-impact pattern (distinct from
-        // the single-impact case, where round 2 confirmed .prepare() was never
-        // the issue): a fresh generator per impact would risk inconsistent
-        // spin-up latency on the 2nd/3rd impulse.
         generator.prepare()
-        // 46-03 device-UAT (Section C, round 4): round 3's 3x.heavy pattern was
-        // felt as ONE faint tap via the Shortcut, and as NOTHING via the in-app
-        // button — despite both paths reaching this exact same closure (traced
-        // read-only: DictationView.swift's button calls
-        // DictationViewModel.startDictation() with no separate/bypassing route,
-        // no .sensoryFeedback modifier or other competing haptic on the button
-        // itself). Rather than guess again, this fires a `haptic_impact`
-        // MemoryProbe mark PER impact (index + appState), to establish with
-        // data whether all 3 impacts actually execute and whether appState
-        // differs between the two felt-differently paths. Correlate with the
-        // `haptic_fired` mark (logged by the call site in startRecording(),
-        // which already carries `invocation=...`) by timestamp proximity —
-        // the two marks land within the same ~250ms window in memprobe.jsonl,
-        // so no separate context plumbing into this closure is needed. See
+        // haptic_fired/haptic_impact instrumentation kept per explicit
+        // instruction — device re-confirmation is still needed. See
         // 46-DEVICE-TEST-PROCEDURE.md Section C.
         await AudioRecorder.fireHapticPattern(
-            impactCount: 3,
+            impactCount: 1,
             spacingMilliseconds: AudioRecorder.hapticPatternSpacingMilliseconds
         ) { index in
             generator.impactOccurred()
@@ -292,6 +304,21 @@ final class AudioRecorder: AudioRecording {
         // survives backgrounding (UIBackgroundModes: audio keeps it alive).
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
+        // 46-03 device-UAT (Section C, round 5 — root cause): confirmed via
+        // AVAudioSession.h (iOS 13+, default NO) — iOS suppresses
+        // UIFeedbackGenerator haptics while a session is actively using audio
+        // input, specifically so the Taptic Engine's motor noise cannot bleed
+        // into the recording. Rounds 2-4's probe data proved every impact
+        // genuinely fired, foreground, at the configured spacing — the
+        // confirmation signal was being suppressed by the very thing it exists
+        // to confirm. Set BEFORE setActive(true), alongside the other session
+        // configuration (category/mode/options) — this governs behavior for
+        // the session's whole active lifetime, not a one-shot call, so it
+        // belongs with the rest of the "prepare, then activate" sequence.
+        // Re-applied on every startRecording() call rather than assumed to
+        // persist across a prior setActive(false) — Apple's header does not
+        // document persistence either way, and re-applying costs nothing.
+        try session.setAllowHapticsAndSystemSoundsDuringRecording(true)
         try session.setActive(true)
 
         let inputNode = audioEngine.inputNode
