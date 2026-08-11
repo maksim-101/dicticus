@@ -158,6 +158,43 @@ final class AudioRecorderTests: XCTestCase {
         XCTAssertFalse(gate.fireIfNeeded(), "Third call must still not fire again")
     }
 
+    // MARK: - Haptic pattern shape (D-04, 46-03 round 3): a pattern, not one impulse
+
+    /// Regression target: a single-impact seam (pre-round-3) would report 1, not
+    /// 3. Device-confirmed (round 2 → round 3) that raising intensity on ONE
+    /// impact was insufficient — this asserts the SHAPE of the fix (a
+    /// multi-impact pattern) independent of real haptic hardware, by injecting a
+    /// counting closure in place of `UIImpactFeedbackGenerator.impactOccurred()`.
+    func testHapticPatternFiresConfiguredImpactCount() async {
+        var impactCount = 0
+        await AudioRecorder.fireHapticPattern(impactCount: 3, spacingMilliseconds: 1) {
+            impactCount += 1
+        }
+        XCTAssertEqual(impactCount, 3,
+                       "The D-04 haptic pattern must fire 3 discrete impacts, not 1 (46-03 round 3: a single impact, even .heavy, was device-confirmed too faint)")
+    }
+
+    /// The pattern must respect whatever `impactCount` it's configured with —
+    /// not a value hardcoded inside the loop itself.
+    func testHapticPatternRespectsConfiguredCount() async {
+        var impactCount = 0
+        await AudioRecorder.fireHapticPattern(impactCount: 2, spacingMilliseconds: 1) {
+            impactCount += 1
+        }
+        XCTAssertEqual(impactCount, 2, "fireHapticPattern must fire exactly the configured impactCount")
+    }
+
+    /// The default `hapticPatternSpacingMilliseconds` must be tuned to a real,
+    /// nonzero gap (not 0 — which would collapse into one blurred buzz — and
+    /// not absurdly long, which would read as disconnected taps rather than one
+    /// cohesive pattern).
+    func testHapticPatternSpacingIsWithinReasonableRange() {
+        XCTAssertGreaterThan(AudioRecorder.hapticPatternSpacingMilliseconds, 0,
+                             "Spacing must be nonzero — 0ms would blur into a single buzz, not a perceptible pattern")
+        XCTAssertLessThanOrEqual(AudioRecorder.hapticPatternSpacingMilliseconds, 250,
+                                 "Spacing must stay tight enough to read as one cohesive pattern, not disconnected taps")
+    }
+
     // MARK: - recordingsDirectory(): app-private, protected, excluded from backup
 
     func testRecordingsDirectoryIsCreatedWithBackupExclusionAndProtection() throws {
