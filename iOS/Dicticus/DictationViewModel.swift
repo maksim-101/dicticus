@@ -3,9 +3,12 @@ import SwiftUI
 import UIKit
 @preconcurrency import AVFAudio
 import UserNotifications
+import os.log
 
 @MainActor
 class DictationViewModel: ObservableObject {
+    private static let log = Logger(subsystem: "com.dicticus", category: "pendingRecordings")
+
     enum State: Equatable {
         case idle
         case preparingLiveActivity
@@ -701,6 +704,15 @@ class DictationViewModel: ObservableObject {
                 // Resolved — removes the WAV bytes and the row (D-02).
                 pendingStore.delete(row)
             } catch {
+                // 2026-08-11 round 3 device UAT: nothing previously logged the
+                // ACTUAL transcriber error anywhere — `PendingRecording.failureReason`
+                // stores only the disposition table's canned copy, and the app-group
+                // History.sqlite (which holds that column) cannot currently be pulled
+                // off-device (devicectl error 11007, confirmed by two agents). This
+                // is the one place that error is otherwise lost entirely; logging it
+                // here makes it visible to Console.app / `devicectl device console`
+                // on the very next device session without needing the broken DB pull.
+                Self.log.error("Transcription failed for \(row.uuid, privacy: .public): \(String(describing: error), privacy: .public)")
                 switch Self.failureDisposition(for: error) {
                 case .discard:
                     pendingStore.delete(row)
