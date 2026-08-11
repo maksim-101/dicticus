@@ -254,16 +254,46 @@ class HistoryService: ObservableObject {
         }
     }
 
-    func save(_ entry: TranscriptionEntry) {
+    #if DEBUG
+    /// Test-only hook (fix 46-06/1): when `true`, `save(_:)` deterministically
+    /// fails without touching the database, simulating a SQLite write failure
+    /// (disk full, locked file, WAL checkpoint failure, ...). A real GRDB
+    /// `DatabasePool` already holds its connections open by the time a test
+    /// gets a reference to it, so OS-level tricks (chmod, deleting the file
+    /// out from under the pool) do not reliably force a write to fail through
+    /// an already-open fd — this flag is the honest, minimal seam instead.
+    /// Mirrors the existing `makeForTesting` test-seam idiom below. Defaults
+    /// `false`; never affects production (DEBUG-gated).
+    var forceSaveFailureForTesting = false
+    #endif
+
+    /// Persists `entry` and returns the saved row (with its real SQLite `id`
+    /// populated from `db.lastInsertedRowID`) on success, or `nil` if the write
+    /// failed. Callers MUST treat `nil` as a persist failure and NOT advance
+    /// state (e.g. delete a pending recording, or tag a UUID as "ready to
+    /// deliver") as if the save had completed — mirrors `update()`'s existing
+    /// `Bool`-return contract above.
+    @discardableResult
+    func save(_ entry: TranscriptionEntry) -> TranscriptionEntry? {
+        #if DEBUG
+        if forceSaveFailureForTesting {
+            Self.log.error("Failed to save entry (forced failure for testing): uuid=\(entry.uuid)")
+            return nil
+        }
+        #endif
         do {
-            let entryToSave = entry
-            try dbPool.write { db in
-                try entryToSave.insert(db)
+            let insertedID = try dbPool.write { db -> Int64 in
+                try entry.insert(db)
+                return db.lastInsertedRowID
             }
+            var savedEntry = entry
+            savedEntry.id = insertedID
             Self.log.info("Saved transcription to history: \(entry.text.prefix(20))...")
             load()
+            return savedEntry
         } catch {
             Self.log.error("Failed to save entry: \(error.localizedDescription)")
+            return nil
         }
     }
 
