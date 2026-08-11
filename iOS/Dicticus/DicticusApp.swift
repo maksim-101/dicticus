@@ -84,6 +84,12 @@ struct DicticusApp: App {
                             // unrelated relaunch — see
                             // DictationViewModel.pendingDictationStalenessSeconds.
                             DicticusIPCBridge.defaults?.set(Date().timeIntervalSince1970, forKey: "pendingDictationSetAt")
+                        } else {
+                            // Live Activity body tap (dicticus://liveactivity). Navigation
+                            // only — must NOT set pendingDictation or start a recording.
+                            // See DeepLinkRouter's doc comment. handleLiveActivityTap
+                            // no-ops for any other/unknown URL.
+                            DeepLinkRouter.shared.handleLiveActivityTap(url)
                         }
                     }
                     .sheet(isPresented: $showingOnboardingTour, onDismiss: {

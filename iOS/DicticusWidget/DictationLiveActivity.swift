@@ -43,6 +43,14 @@ struct DictationLiveActivity: Widget {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
+            // Tap-through navigation (user-requested, D-01a-adjacent): tapping the
+            // lock-screen banner body opens Dicticus on the Dictate tab. The Stop
+            // button above is a LiveActivityIntent and is its own tap target —
+            // widgetURL only fires for taps outside interactive elements, so this
+            // cannot conflate with or regress the no-reopen Stop path. Handled by
+            // DeepLinkRouter, not the pendingDictation mechanism — see its doc
+            // comment for why those two must stay separate.
+            .widgetURL(URL(string: "dicticus://liveactivity"))
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
@@ -112,6 +120,13 @@ struct DictationLiveActivity: Widget {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(.red)
             }
+            // Same tap-through URL as the lock-screen banner (see comment there):
+            // tapping the compact pill, minimal presentation, or non-interactive
+            // parts of the expanded presentation opens Dicticus on the Dictate
+            // tab. The Stop button in .trailing remains its own interactive tap
+            // target and is unaffected — StopDictationIntent still runs
+            // backgrounded with no app open (D-01a).
+            .widgetURL(URL(string: "dicticus://liveactivity"))
         }
     }
 }
