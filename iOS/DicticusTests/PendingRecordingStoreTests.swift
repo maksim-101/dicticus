@@ -185,6 +185,27 @@ final class PendingRecordingStoreTests: XCTestCase {
         XCTAssertEqual(row.status, PendingRecordingStatus.queued.rawValue)
     }
 
+    /// 2026-08-11 correction: a properly-finalized recording AT THE APP'S OWN
+    /// `minimumDurationSeconds` FLOOR (0.3s) must still classify as recoverable.
+    /// `AVAudioFile(forWriting:)`'s fixed ~4KB container overhead is a LARGER
+    /// fraction of a short clip's total bytes — before the fix, this exact case
+    /// (empirically measured ~18% header/byte-size disagreement) tripped the
+    /// cross-check's 5% threshold and silently marked a perfectly valid short
+    /// recording as unrecoverable, hiding its Retry button for no real reason.
+    func testRecoverOrphanedRecordingsShortValidWavIsRecoverable() throws {
+        let artifact = try writeRealWav(duration: 0.3)
+        store.recoverOrphanedRecordings()
+
+        let row = try XCTUnwrap(store.pendingRecordings.first(where: { $0.uuid == artifact.uuid }))
+        XCTAssertEqual(row.status, PendingRecordingStatus.queued.rawValue,
+                       "A short but properly-finalized recording must not be misclassified as unrecoverable")
+        XCTAssertTrue(row.isRetryable)
+        XCTAssertNotNil(row.durationSeconds)
+        if let duration = row.durationSeconds {
+            XCTAssertEqual(duration, 0.3, accuracy: 0.01)
+        }
+    }
+
     /// Regression target: a row whose WAV was never finalized must report `nil` for
     /// `durationSeconds` — NOT `0`. `AVAudioFile(forReading:)` does not throw for
     /// this class of file; it opens successfully and silently reports zero frames
@@ -198,6 +219,31 @@ final class PendingRecordingStoreTests: XCTestCase {
         let row = try XCTUnwrap(store.pendingRecordings.first(where: { $0.uuid == uuid }))
         XCTAssertNil(row.durationSeconds,
                      "An unfinalized (killed-mid-write) recording must report nil duration, never 0")
+    }
+
+    /// 2026-08-11 device UAT fix: an unfinalized orphan must be inserted ALREADY
+    /// `.failed`, honestly, once — not `.queued` (which would show "Waiting for
+    /// model" and offer Retry on a WAV empirically confirmed to always fail the
+    /// transcriber's file read, the exact "transcribing… then back to failed, no
+    /// change" trap the coordinator's device report described).
+    func testRecoverOrphanedRecordingsUnfinalizedFileIsInsertedAlreadyFailed() throws {
+        let uuid = try writeUnfinalizedOrphanWav(seconds: 1.0)
+        store.recoverOrphanedRecordings()
+
+        let row = try XCTUnwrap(store.pendingRecordings.first(where: { $0.uuid == uuid }))
+        XCTAssertEqual(row.status, PendingRecordingStatus.failed.rawValue,
+                       "An unrecoverable orphan must never pass through .queued — it can never succeed")
+        XCTAssertEqual(row.failureReason, PendingRecordingStore.unrecoverableFailureReason)
+        XCTAssertFalse(row.isRetryable)
+    }
+
+    /// A normally-enqueued row (real, non-optional duration from a live recording)
+    /// must remain retryable — this fix must not make EVERY failed row un-retryable,
+    /// only the specific class recovered from an untrustworthy header.
+    func testNormallyEnqueuedRowIsRetryable() throws {
+        let artifact = try writeRealWav()
+        let row = try XCTUnwrap(store.enqueue(artifact))
+        XCTAssertTrue(row.isRetryable)
     }
 
     /// Regression target: a row whose file has vanished from disk becomes `.failed`

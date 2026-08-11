@@ -581,8 +581,19 @@ class DictationViewModel: ObservableObject {
     /// normal idle foreground, via `handleForeground`) will pick it up once a
     /// transcriber exists, matching `46-UI-SPEC`'s "we'll try again automatically
     /// once the model reloads" copy.
+    ///
+    /// 2026-08-11 device UAT fix: a row with `isRetryable == false` (its WAV header
+    /// could not be trusted by the recovery scan — see `PendingRecording.isRetryable`)
+    /// is refused here even if some future UI regression still shows a Retry button
+    /// for it. `PendingRecordingRow` already hides Retry for these rows and
+    /// `recoverOrphanedRecordings()` already inserts them pre-failed rather than
+    /// `.queued`, so this guard is defense in depth, not the primary fix — but
+    /// without it, a stray call would requeue a row guaranteed to fail again and
+    /// re-run the exact "transcribing… then back to failed" cycle the device report
+    /// was about.
     func retryPendingRecording(_ recording: PendingRecording) async {
         guard state == .idle else { return }
+        guard recording.isRetryable else { return }
         pendingStore.requeue(recording)
         guard let transcriptionService else { return }
         await drainNow(using: transcriptionService)

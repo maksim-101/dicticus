@@ -68,8 +68,11 @@ struct PendingRecordingRow: View {
 
                 // Queued/transcribing rows offer only Clear — their resolution is
                 // automatic, so a Retry button there would imply the user has to do
-                // something.
-                if status == .failed {
+                // something. A failed row offers Retry only when the row is actually
+                // retryable (2026-08-11 device UAT fix) — a row recovered from a WAV
+                // whose header could not be trusted can never succeed, empirically
+                // confirmed, and a Retry button on it is a trap, not a recovery path.
+                if status == .failed && recording.isRetryable {
                     Button("Retry") {
                         Task { await viewModel.retryPendingRecording(recording) }
                     }
@@ -77,11 +80,19 @@ struct PendingRecordingRow: View {
                     .tint(.accentColor)
                 }
 
+                // 2026-08-11 device UAT fix: `.buttonStyle(.borderless)` is load-
+                // bearing, not decoration — without an explicit style, SwiftUI can
+                // promote this List row's one unstyled Button to be the row's whole
+                // hit-test target (the exact bug reported: tapping ANYWHERE on the
+                // row opened the delete confirmation, not just this icon). Mirrors
+                // the working precedent already in this file family
+                // (`HistoryRow`'s Copy button, `History/HistoryView.swift`).
                 Button {
                     showingClearConfirmation = true
                 } label: {
                     Image(systemName: "trash")
                 }
+                .buttonStyle(.borderless)
                 .tint(.secondary)
                 .accessibilityLabel("Clear recording")
             }
@@ -90,7 +101,9 @@ struct PendingRecordingRow: View {
             // consideration) — the two-line cap is a hard layout constraint so the
             // trailing Retry/Clear actions are never pushed off-screen.
             if status == .failed {
-                Text("Couldn't transcribe — tap Retry, or we'll try again automatically once the model reloads.")
+                Text(recording.isRetryable
+                     ? "Couldn't transcribe — tap Retry, or we'll try again automatically once the model reloads."
+                     : PendingRecordingStore.unrecoverableFailureReason)
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -175,12 +188,27 @@ struct PendingRecordingRow: View {
     .environmentObject(PendingRecordingStore.shared)
 }
 
-#Preview("Failed") {
+#Preview("Failed — retryable") {
     List {
         PendingRecordingRow(recording: PendingRecording(
             id: 3, uuid: UUID(), fileName: "c.wav", createdAt: Date(),
-            status: PendingRecordingStatus.failed.rawValue, durationSeconds: nil,
+            status: PendingRecordingStatus.failed.rawValue, durationSeconds: 12,
             retryCount: 1, failureReason: "Could not understand audio."
+        ))
+    }
+    .environmentObject(DictationViewModel())
+    .environmentObject(PendingRecordingStore.shared)
+}
+
+/// A row recovered from a WAV whose header could not be trusted — empirically
+/// confirmed (2026-08-11) to always fail transcription, so Retry is hidden and the
+/// explanatory text is the honest permanent-failure copy, not the generic one.
+#Preview("Failed — unrecoverable") {
+    List {
+        PendingRecordingRow(recording: PendingRecording(
+            id: 4, uuid: UUID(), fileName: "d.wav", createdAt: Date(),
+            status: PendingRecordingStatus.failed.rawValue, durationSeconds: nil,
+            retryCount: 0, failureReason: PendingRecordingStore.unrecoverableFailureReason
         ))
     }
     .environmentObject(DictationViewModel())

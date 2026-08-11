@@ -37,6 +37,27 @@ struct PendingRecording: Identifiable, Codable, Hashable, FetchableRecord, Persi
     /// GRDB requirement: Define the table name.
     /// nonisolated(unsafe) is needed for Swift 6 global shared state.
     nonisolated(unsafe) static var databaseTableName = "pendingRecording"
+
+    /// Whether a failed row could plausibly succeed if retried. `false` exactly when
+    /// `durationSeconds` is `nil` — the ONLY way that happens is
+    /// `recoverOrphanedRecordings()`'s `determineDurationSeconds(for:)` returning nil
+    /// because the WAV's header could not be trusted (a freshly-recorded row via
+    /// `enqueue(_:)` always carries a real, non-optional `RecordingArtifact.durationSeconds`,
+    /// so it can never produce a nil-duration row through the normal path).
+    ///
+    /// 2026-08-11 on-device UAT (device re-test of the drain-deadlock fix, 1ea1e03):
+    /// empirically confirmed via a direct simulator probe that a WAV whose header
+    /// reports zero frames (46-03's "outcome (b)") makes `AVAudioFile.read(into:)`
+    /// throw a deterministic, content-independent
+    /// `required condition is false: buffer.frameCapacity != 0` assertion EVERY
+    /// single time, regardless of how much real audio the file actually contains.
+    /// Retrying can never succeed for this class of file — offering Retry is a trap,
+    /// not a recovery path, and the coordinator's device report ("transcribing…
+    /// then back to failed, no change") is exactly what that trap looks like from
+    /// the user's side. `durationSeconds == nil` is the store's existing, exclusive
+    /// signal for "this file's structure could not be verified" — reusing it here
+    /// avoids inventing a second, possibly-disagreeing classification.
+    var isRetryable: Bool { durationSeconds != nil }
 }
 
 /// Manages the durable pending-recording queue: recordings that have been captured
@@ -235,6 +256,14 @@ final class PendingRecordingStore: ObservableObject {
         }
     }
 
+    /// House-voice explanation for a row `recoverOrphanedRecordings()` determined can
+    /// never be transcribed (2026-08-11) — plain language, leads with what actually
+    /// happened, states the (permanent) consequence, and says what the user can do.
+    /// Proposed wording, not yet folded into the locked `46-UI-SPEC.md` copy table —
+    /// see `46-05-SUMMARY.md` for the sign-off request.
+    static let unrecoverableFailureReason =
+        "This recording was cut off before it finished saving, so it can't be transcribed. Clear it to remove it."
+
     /// D-09's drain order — the only ordering the drain may use. `pendingRecordings`
     /// is already `createdAt` ascending (see `load()`), so this filters to just the
     /// rows actually eligible to be drained (excludes `.transcribing`/`.failed`).
@@ -277,11 +306,32 @@ final class PendingRecordingStore: ObservableObject {
         // duration is cross-checked against the file's own byte size, in case a
         // future device/OS combination produces a plausible-but-wrong nonzero value
         // instead of a flat zero.
+        //
+        // 2026-08-11 correction: `AVAudioFile(forWriting:)` adds a fixed container
+        // overhead — empirically confirmed EXACTLY identical (4096 bytes) at
+        // 0.3s/1s/10s test durations (16kHz mono Float32), i.e. duration-independent,
+        // not a data-proportional discrepancy. A pure percentage check against raw
+        // file size falsely flagged perfectly fine, freshly-recorded SHORT clips as
+        // untrustworthy: a 1s recording disagreed by 6%, and the app's own
+        // `minimumDurationSeconds` floor (0.3s) disagreed by ~18% — comfortably past
+        // the original 5% threshold. That false positive silently denied Retry to
+        // recordings that were never actually broken (this cross-check feeds
+        // `PendingRecording.isRetryable`). Subtracting the measured fixed overhead
+        // before comparing brought all three probed durations to an exact 0%
+        // disagreement — restoring the check's original intent (catching GROSS
+        // truncation) without punishing routine container overhead on short, valid
+        // recordings. Deliberately NOT padded further: over-subtracting would
+        // reintroduce the same asymmetric harm to short clips in the other
+        // direction (an under-count of true PCM bytes), and the 5% tolerance below
+        // already has headroom for minor cross-format variance this store hasn't
+        // directly measured.
+        let knownFixedContainerOverheadBytes = 4096.0
         let bytesPerFrame = Int(format.streamDescription.pointee.mBytesPerFrame)
         if bytesPerFrame > 0,
            let fileSize = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
            fileSize > 0 {
-            let byteSizeDuration = Double(fileSize) / Double(bytesPerFrame) / format.sampleRate
+            let adjustedByteCount = max(0, Double(fileSize) - knownFixedContainerOverheadBytes)
+            let byteSizeDuration = adjustedByteCount / Double(bytesPerFrame) / format.sampleRate
             if byteSizeDuration > 0 {
                 let disagreement = abs(headerDuration - byteSizeDuration) / max(headerDuration, byteSizeDuration)
                 guard disagreement <= 0.05 else { return nil }
@@ -335,15 +385,24 @@ final class PendingRecordingStore: ObservableObject {
             guard !pendingRecordings.contains(where: { $0.uuid == uuid }) else { continue }
 
             let durationSeconds = Self.determineDurationSeconds(for: url)
+            // 2026-08-11: a nil duration means determineDurationSeconds() could not
+            // trust this WAV's header — and (empirically confirmed via a direct
+            // simulator probe) that specific class of file makes the transcriber's
+            // own file read throw a deterministic, content-independent assertion
+            // every time. Inserting it as `.queued` would show "Waiting for model"
+            // and offer Retry on something that can never succeed — the exact trap
+            // the 2026-08-11 device report described ("transcribing… then back to
+            // failed, no change"). Insert it already `.failed`, honestly, once.
+            let isRecoverable = durationSeconds != nil
             let row = PendingRecording(
                 id: nil,
                 uuid: uuid,
                 fileName: url.lastPathComponent,
                 createdAt: Date(),
-                status: PendingRecordingStatus.queued.rawValue,
+                status: isRecoverable ? PendingRecordingStatus.queued.rawValue : PendingRecordingStatus.failed.rawValue,
                 durationSeconds: durationSeconds,
                 retryCount: 0,
-                failureReason: nil
+                failureReason: isRecoverable ? nil : Self.unrecoverableFailureReason
             )
             do {
                 try dbPool.write { db in try row.insert(db) }

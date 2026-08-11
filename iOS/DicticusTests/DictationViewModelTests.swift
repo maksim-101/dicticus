@@ -1665,6 +1665,74 @@ final class DictationViewModelTests: XCTestCase {
         try? FileManager.default.removeItem(at: tempContainer)
     }
 
+    /// Writes an unfinalized mid-write WAV — mirrors
+    /// `PendingRecordingStoreTests.writeUnfinalizedOrphanWav(seconds:)` (46-03 device
+    /// evidence: captures on-disk bytes WHILE the writer is still alive, before
+    /// `finalize()` ever runs, matching what a killed-mid-recording process leaves).
+    /// `recoverOrphanedRecordings()` classifies this as `.failed`/`isRetryable == false`
+    /// on sight (2026-08-11 fix) — this helper exists so
+    /// `testRetryPendingRecordingRefusesUnrecoverableRow` exercises the REAL
+    /// classification path rather than hand-constructing a `PendingRecording` that
+    /// might silently drift from what the store actually produces.
+    @discardableResult
+    private func writeUnfinalizedOrphanWav(seconds: Double = 1.0) throws -> UUID {
+        let dir = try AudioRecorder.recordingsDirectory()
+        let uuid = UUID()
+        let url = dir.appendingPathComponent("\(uuid.uuidString).wav")
+        let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false)!
+        let writer = try RecordingFileWriter(url: url, format: format)
+        let frameCount = AVAudioFrameCount(16000 * seconds)
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount)!
+        buffer.frameLength = frameCount
+        writer.append(buffer)
+        let midWriteBytes = try Data(contentsOf: url)
+        writer.discard()
+        try midWriteBytes.write(to: url)
+        return uuid
+    }
+
+    /// 2026-08-11 device UAT fix (second round): device re-test of the drain-deadlock
+    /// fix showed Retry now genuinely runs — and genuinely fails, every time, for the
+    /// 8 recordings recovered from today's mid-recording force-quits. Empirically
+    /// confirmed (direct simulator probe) that a WAV whose header could not be
+    /// trusted makes the transcriber's own file read throw a deterministic,
+    /// content-independent assertion — retrying such a row can never succeed.
+    /// `retryPendingRecording(_:)` must refuse to even attempt it: no transcriber
+    /// call, no requeue, no "transcribing… then back to failed" theater.
+    func testRetryPendingRecordingRefusesUnrecoverableRow() async throws {
+        let vm = DictationViewModel()
+        let tempContainer = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let testHistory = HistoryService.makeForTesting(containerURLProvider: { tempContainer })
+        let testStore = PendingRecordingStore.makeForTesting(historyService: testHistory)
+        vm.historyService = testHistory
+        vm.pendingStore = testStore
+        vm.audioRecorder = FakeAudioRecorder()
+        vm.isBackgroundedProvider = { false }
+
+        let orphanUUID = try writeUnfinalizedOrphanWav()
+        testStore.recoverOrphanedRecordings()
+
+        let unrecoverableRow = try XCTUnwrap(testStore.pendingRecordings.first(where: { $0.uuid == orphanUUID }))
+        XCTAssertEqual(unrecoverableRow.status, PendingRecordingStatus.failed.rawValue, "Precondition: already failed on sight")
+        XCTAssertFalse(unrecoverableRow.isRetryable, "Precondition: not retryable")
+
+        let transcriber = FakeTranscriptionProvider()
+        vm.transcriptionService = transcriber
+
+        await vm.retryPendingRecording(unrecoverableRow)
+
+        XCTAssertEqual(transcriber.callCount, 0,
+                       "An unrecoverable row must never reach the transcriber — the attempt is guaranteed to fail")
+        let stillFailed = try XCTUnwrap(testStore.pendingRecordings.first(where: { $0.uuid == orphanUUID }))
+        XCTAssertEqual(stillFailed.status, PendingRecordingStatus.failed.rawValue,
+                       "The row must stay failed, not cycle through queued/transcribing for nothing")
+
+        // Cleanup
+        for row in testStore.pendingRecordings { testStore.delete(row) }
+        try? FileManager.default.removeItem(at: tempContainer)
+    }
+
     /// Disposition table half 1: `.tooShort` discards the row and the bytes — a
     /// determination there was nothing to transcribe, not a failure to hold.
     func testTooShortOutcomeDiscardsRowAndFile() async throws {
