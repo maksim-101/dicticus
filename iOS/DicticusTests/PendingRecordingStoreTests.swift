@@ -354,6 +354,45 @@ final class PendingRecordingStoreTests: XCTestCase {
                        "clear() must remove the WAV bytes, not just the row")
     }
 
+    /// Regression target for fix 46-06/3. If `FileManager.removeItem` genuinely
+    /// fails (e.g. permission denied) AND the file still exists afterward, the row
+    /// must NOT be deleted — deleting it anyway is a latent resurrection bug:
+    /// `recoverOrphanedRecordings()` on the next cold launch would find that
+    /// orphaned WAV with no matching row and silently re-insert it, making a
+    /// "successful" clear reappear later as if nothing happened.
+    ///
+    /// Forces a REAL `unlink()` failure via `chflags`-style `isUserImmutable`
+    /// (`NSURLIsUserImmutableKey`) on just this one file — not a directory-wide
+    /// permission change, which would risk contending with any other concurrently
+    /// running test/process sharing the same test-host-scoped recordings
+    /// directory.
+    func testClearDoesNotDeleteRowWhenFileRemovalFails() throws {
+        let artifact = try writeRealWav()
+        guard let row = store.enqueue(artifact) else {
+            XCTFail("enqueue() must succeed")
+            return
+        }
+
+        var url = artifact.fileURL
+        var immutableValues = URLResourceValues()
+        immutableValues.isUserImmutable = true
+        try url.setResourceValues(immutableValues)
+        defer {
+            var mutableValues = URLResourceValues()
+            mutableValues.isUserImmutable = false
+            try? url.setResourceValues(mutableValues)
+            try? FileManager.default.removeItem(at: url)
+        }
+
+        store.clear(row)
+
+        XCTAssertEqual(store.pendingRecordings.count, 1,
+                       "The row must survive when the WAV removal genuinely failed — " +
+                       "deleting it anyway would let recoverOrphanedRecordings() resurrect it later")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: artifact.fileURL.path),
+                     "Precondition check: the WAV must still exist (removal genuinely failed, not a no-op)")
+    }
+
     /// `markFailed(_:reason:)` must retain the WAV bytes — D-10's hold. Only
     /// `delete(_:)`/`clear(_:)` ever remove audio.
     func testMarkFailedRetainsBytes() throws {
