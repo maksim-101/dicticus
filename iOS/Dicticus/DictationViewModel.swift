@@ -522,44 +522,116 @@ class DictationViewModel: ObservableObject {
 
     /// Re-entrancy guard so two near-simultaneous triggers (e.g. `isReady` flipping
     /// AND a foreground return in the same instant) cannot both drain concurrently.
+    ///
+    /// 2026-08-11 on-device UAT fix: before `drainTranscribeTimeoutSeconds` existed,
+    /// a single stalled `transcribe(wavURL:)` call (most plausibly ANE/CoreML compute
+    /// paused mid-inference by the OS during backgrounding) held this flag `true` for
+    /// the awaiting `Task`'s entire (unbounded) lifetime — silently blocking every
+    /// later automatic drain AND every later Retry tap for the rest of the process,
+    /// with zero user-facing feedback: a failed row's Retry button would flip its
+    /// status to "Waiting for model" (the `requeue()` call, which does complete) and
+    /// then simply never progress, because `drainNow(using:)` below would keep
+    /// bailing on this guard. See `transcribeWithTimeout(_:wavURL:)`.
     private var isDrainingPendingRecordings = false
 
     /// Drains the FULL arrival-ordered queue of `PendingRecording`s (a recording
     /// captured before the ASR model was ready, or several stacked during one
     /// warm-up — D-09) once a transcriber is available. Called after
-    /// `warmupService.isReady` publishes true, on every normal idle foreground, and
-    /// from `retryPendingRecording(_:)`.
+    /// `warmupService.isReady` publishes true and on every normal idle foreground.
     ///
     /// Carries the same race-avoidance guard shape already applied twice to this
     /// codebase before this: `guard state == .idle` (as
     /// `deliverPendingTranscriptsIfNeeded()` does) and a `pendingDictation` App-Group
     /// re-check (as the `isLlmReady` handler in `DicticusApp.swift` does) — without
     /// both, a recording that arrives while this drain is mid-flight would reopen the
-    /// WR-03 / Finding-1 double-start race.
+    /// WR-03 / Finding-1 double-start race. `retryPendingRecording(_:)` below deals
+    /// with a DIFFERENT situation (a deliberate UI tap, not an Action-Button
+    /// invocation racing this drain) and so calls `drainNow(using:)` directly,
+    /// skipping the `pendingDictation` check — see that function's doc comment.
     func drainPendingRecordingsIfNeeded() async {
         guard state == .idle else { return }
         guard let transcriptionService else { return }
-        guard !isDrainingPendingRecordings else { return }
 
         let pendingDictation = DicticusIPCBridge.defaults?.bool(forKey: "pendingDictation") ?? false
         guard !pendingDictation else { return }
 
+        await drainNow(using: transcriptionService)
+    }
+
+    /// The shared re-entrancy-guarded drain core. Both `drainPendingRecordingsIfNeeded()`
+    /// (automatic triggers) and `retryPendingRecording(_:)` (an explicit user tap)
+    /// funnel through here, so there is exactly one `isDrainingPendingRecordings` guard
+    /// — but only the automatic path above applies the `pendingDictation` race check,
+    /// because that guard protects against a fresh Action-Button/Shortcut invocation
+    /// racing an AUTOMATIC drain trigger, not against a user who is actively looking at
+    /// History and has just tapped Retry.
+    private func drainNow(using transcriptionService: any TranscriptionProviding) async {
+        guard !isDrainingPendingRecordings else { return }
         isDrainingPendingRecordings = true
         defer { isDrainingPendingRecordings = false }
-
         await drainQueue(using: transcriptionService)
     }
 
-    /// Entry point for the UI's Retry action (D-11, built by a later plan). Resets a
-    /// failed row to `.queued` and immediately attempts a drain. Safe to call when no
-    /// transcriber exists yet — `drainPendingRecordingsIfNeeded()`'s own guard makes
-    /// that a no-op, leaving the row queued and waiting, matching the copy
-    /// `46-UI-SPEC` promises ("we'll try again automatically once the model
-    /// reloads").
+    /// Entry point for the UI's Retry action (D-11). Resets a failed row to `.queued`
+    /// and immediately attempts a drain — bypassing the `pendingDictation` guard (see
+    /// `drainNow(using:)`) since a manual Retry tap is not the race that guard exists
+    /// for. Safe to call when no transcriber exists yet: `state == .idle` is
+    /// re-checked below, but if `transcriptionService` is nil the row is correctly
+    /// left `.queued` — `warmupService.isReady`'s one-time `onChange` (or the next
+    /// normal idle foreground, via `handleForeground`) will pick it up once a
+    /// transcriber exists, matching `46-UI-SPEC`'s "we'll try again automatically
+    /// once the model reloads" copy.
     func retryPendingRecording(_ recording: PendingRecording) async {
         guard state == .idle else { return }
         pendingStore.requeue(recording)
-        await drainPendingRecordingsIfNeeded()
+        guard let transcriptionService else { return }
+        await drainNow(using: transcriptionService)
+    }
+
+    /// Bounds a single transcription attempt so a stalled ASR call — most plausibly
+    /// CoreML/ANE compute paused mid-inference by the OS during backgrounding, per
+    /// this phase's own "warm-up suspends past the ~30s background grace period"
+    /// finding, extended here to an in-flight transcription — can never permanently
+    /// hold `isDrainingPendingRecordings`. 2026-08-11 on-device UAT: without this,
+    /// one hung attempt silently deadlocked the whole pending queue for the rest of
+    /// the process's life, with Retry taps doing nothing but flipping a row's status
+    /// to "queued" and stopping there forever. Mirrors `CleanupService`'s existing
+    /// `withThrowingTaskGroup` timeout idiom (`Shared/Services/CleanupService.swift`).
+    /// Injectable (not `let`) so unit tests can force a fast, deterministic timeout.
+    var drainTranscribeTimeoutSeconds: TimeInterval = 120
+
+    private struct DrainTimeoutError: Error, LocalizedError {
+        var errorDescription: String? { "Timed out waiting for the speech model to respond." }
+    }
+
+    private func transcribeWithTimeout(
+        _ transcriptionService: any TranscriptionProviding,
+        wavURL: URL
+    ) async throws -> DicticusTranscriptionResult {
+        // `TranscriptionProviding` is `@MainActor`-isolated (not `Sendable`), and this
+        // function's own parameter remains "accessible to main actor-isolated code"
+        // for the duration of the `await` below, which trips Swift 6's sending-closure
+        // check even though the child task below is the only place it is actually
+        // touched. `nonisolated(unsafe)` on a local copy — the same escape hatch
+        // `CleanupService`'s existing timeout idiom uses for its own non-Sendable
+        // captures — is safe here because `service` is only ever called from the
+        // `@MainActor`-annotated child task, never concurrently from this function.
+        nonisolated(unsafe) let service = transcriptionService
+        let timeout = drainTranscribeTimeoutSeconds
+        return try await withThrowingTaskGroup(of: DicticusTranscriptionResult.self) { group in
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(max(timeout, 0) * 1_000_000_000))
+                throw DrainTimeoutError()
+            }
+            group.addTask { @MainActor in
+                try await service.transcribe(wavURL: wavURL)
+            }
+            guard let result = try await group.next() else {
+                throw DrainTimeoutError()
+            }
+            group.cancelAll()
+            return result
+        }
     }
 
     /// Mirrors `deliverPendingTranscriptsIfNeeded()`'s "read the full batch, process
@@ -575,7 +647,7 @@ class DictationViewModel: ObservableObject {
             pendingStore.markTranscribing(row)
 
             do {
-                let result = try await transcriptionService.transcribe(wavURL: fileURL)
+                let result = try await transcribeWithTimeout(transcriptionService, wavURL: fileURL)
 
                 // Mirrors stopDictation()'s background/foreground split exactly, so
                 // the LLM never re-enters a default path: backgrounded is always
