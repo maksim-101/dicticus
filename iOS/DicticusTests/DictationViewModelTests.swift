@@ -1955,4 +1955,45 @@ final class DictationViewModelTests: XCTestCase {
         XCTAssertFalse(DicticusIPCBridge.defaults?.bool(forKey: "pendingDictation") ?? true,
                        "The flag must be cleared after a legitimate consumption too")
     }
+
+    // MARK: - 2026-08-11: notification path must carry the shortcut flag
+    //
+    // Traced by the haptic agent, confirmed by the coordinator: `DictateIntent.perform()`
+    // posts `.startDictation` directly; the observer called `startDictation()` with no
+    // argument (defaulting `fromShortcut: false`), and that zero-delay path always won
+    // the race against `checkPendingIntent()`'s own correctly-flagged call (fired after
+    // a deliberate 500ms sleep) — by which time `state` was already `.recording` and its
+    // own idle guard silently swallowed the only call that had `isShortcutLaunch` right.
+    // Every Shortcut/Action-Button launch was rendering the non-shortcut UI as a result
+    // (`DictationView` gates three branches on `isShortcutLaunch`).
+
+    /// The `.startDictation` notification path must read the App-Group
+    /// `isShortcutLaunch` flag (already written by `DictateIntent.perform()` BEFORE it
+    /// posts the notification) rather than defaulting to `fromShortcut: false`.
+    func testStartDictationNotificationCarriesShortcutFlag() async throws {
+        let vm = DictationViewModel()
+        let fakeRecorder = FakeAudioRecorder()
+        vm.audioRecorder = fakeRecorder
+        vm.permissionRequester = { true }
+
+        // Mirrors DictateIntent.perform()'s exact write order: the flag is set BEFORE
+        // the notification posts, so it must already be correct and synchronously
+        // readable when the observer's handler runs.
+        DicticusIPCBridge.defaults?.set(false, forKey: "pendingDictation")  // isolates from checkPendingIntent()'s own call inside setupNotificationObserver()
+        DicticusIPCBridge.defaults?.set(true, forKey: "isShortcutLaunch")
+
+        vm.setupNotificationObserver()
+        NotificationCenter.default.post(name: .startDictation, object: nil)
+
+        // The observer's handler is an async Task with no explicit delay — give it
+        // one scheduling pass to run.
+        try? await Task.sleep(for: .milliseconds(50))
+
+        XCTAssertTrue(vm.isShortcutLaunch,
+                      "The notification-triggered startDictation() call must carry fromShortcut: true, not the zero-value default")
+        XCTAssertEqual(vm.state, .recording, "Precondition: the call must have actually started a session")
+        XCTAssertGreaterThan(fakeRecorder.startCallCount, 0)
+
+        DicticusIPCBridge.defaults?.removeObject(forKey: "isShortcutLaunch")
+    }
 }
