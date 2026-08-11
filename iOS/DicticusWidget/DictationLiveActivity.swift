@@ -91,12 +91,22 @@ struct DictationLiveActivity: Widget {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(.red)
             } compactTrailing: {
-                // Bounded range + .caption2 are both measured fixes for the
-                // oversized compact pill — see 46-LIVEACTIVITY-REDESIGN.md.
-                Text(timerInterval: context.state.startedAt...context.state.startedAt.addingTimeInterval(DictationAttributes.maxDictationSeconds),
-                     countsDown: false, showsHours: false)
-                    .font(.caption2)
-                    .monospacedDigit()
+                // Deliberately empty — NOT a missed opportunity to show elapsed time.
+                // Measured on-device: ANY live Text(timerInterval:) in this slot makes
+                // WidgetKit reserve ~83% of screen width for the outer compact pill,
+                // REGARDLESS of the interval's bound (60s and 300s bounds produced the
+                // identical 1100px/1320px result on a freshly erased iPhone 17 Pro Max
+                // simulator, ruling out the range length as the cause). A static/frozen
+                // Text costs far less (~43%) but would never visually update once
+                // rendered (no frequent-updates entitlement — see Info.plist
+                // NSSupportsLiveActivitiesFrequentUpdates: false), which reads as
+                // broken rather than intentional. Apple's own built-in Screen
+                // Recording indicator follows the same pattern: no ticking counter in
+                // the compact pill, just the glyph — elapsed time lives in Lock
+                // Screen/.bottom instead, where the region is wide by system design
+                // and this cost doesn't apply. See 46-LIVEACTIVITY-REDESIGN.md §7 for
+                // the full measurement table.
+                EmptyView()
             } minimal: {
                 Image(systemName: "mic.fill")
                     .font(.system(size: 15, weight: .semibold))
