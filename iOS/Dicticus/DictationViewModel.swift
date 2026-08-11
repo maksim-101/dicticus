@@ -151,6 +151,18 @@ class DictationViewModel: ObservableObject {
         guard state == .idle else {
             return
         }
+        // Fix 46-06/2: claim the state SYNCHRONOUSLY with the guard above, before the
+        // first `await` suspension point. `guard state == .idle` only protects a
+        // caller if nothing suspends between the check and the state transition to
+        // non-idle — but `await permissionRequester()` below suspends, and (both
+        // callers being @MainActor) a second near-simultaneous invocation (Shortcut
+        // race, notification observer, delayed checkPendingIntent()) can interleave
+        // during that suspension and pass the same `state == .idle` guard, starting a
+        // second concurrent recording session. `.preparingLiveActivity` already
+        // exists in the `State` enum and is already wired into `DictationView` (button
+        // disabled, "Starting…" label) — it was simply never assigned anywhere before
+        // this fix.
+        state = .preparingLiveActivity
         isShortcutLaunch = fromShortcut
 
         // Phase 46-02 (D-01/D-03): recording is gated on microphone permission ONLY.
@@ -161,6 +173,7 @@ class DictationViewModel: ObservableObject {
         let permissionGranted = await permissionRequester()
         guard permissionGranted else {
             self.error = "Microphone access denied. Enable in Settings > Privacy > Microphone."
+            state = .idle
             return
         }
 
