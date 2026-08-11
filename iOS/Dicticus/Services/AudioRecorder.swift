@@ -175,12 +175,46 @@ final class AudioRecorder: AudioRecording {
         // the issue): a fresh generator per impact would risk inconsistent
         // spin-up latency on the 2nd/3rd impulse.
         generator.prepare()
+        // 46-03 device-UAT (Section C, round 4): round 3's 3x.heavy pattern was
+        // felt as ONE faint tap via the Shortcut, and as NOTHING via the in-app
+        // button — despite both paths reaching this exact same closure (traced
+        // read-only: DictationView.swift's button calls
+        // DictationViewModel.startDictation() with no separate/bypassing route,
+        // no .sensoryFeedback modifier or other competing haptic on the button
+        // itself). Rather than guess again, this fires a `haptic_impact`
+        // MemoryProbe mark PER impact (index + appState), to establish with
+        // data whether all 3 impacts actually execute and whether appState
+        // differs between the two felt-differently paths. Correlate with the
+        // `haptic_fired` mark (logged by the call site in startRecording(),
+        // which already carries `invocation=...`) by timestamp proximity —
+        // the two marks land within the same ~250ms window in memprobe.jsonl,
+        // so no separate context plumbing into this closure is needed. See
+        // 46-DEVICE-TEST-PROCEDURE.md Section C.
         await AudioRecorder.fireHapticPattern(
             impactCount: 3,
             spacingMilliseconds: AudioRecorder.hapticPatternSpacingMilliseconds
-        ) {
+        ) { index in
             generator.impactOccurred()
+            await AudioRecorder.logHapticImpact(index: index)
         }
+    }
+
+    /// Per-impact diagnostic (46-03 round 4): logs the index and
+    /// `UIApplication.shared.applicationState` at the instant EACH impact in
+    /// the pattern actually fires — not just once for the whole pattern. If
+    /// fewer than `impactCount` entries appear in `memprobe.jsonl` for a given
+    /// recording, the pattern loop is not completing (cancelled Task,
+    /// deallocated generator, early return); if all entries appear but the user
+    /// still feels only one/zero, the OS is coalescing or suppressing them.
+    static func logHapticImpact(index: Int) async {
+        let stateDescription: String
+        switch UIApplication.shared.applicationState {
+        case .active: stateDescription = "active"
+        case .inactive: stateDescription = "inactive"
+        case .background: stateDescription = "background"
+        @unknown default: stateDescription = "unknown"
+        }
+        await MemoryProbe.shared.mark("haptic_impact", note: "index=\(index) appState=\(stateDescription)")
     }
 
     /// 120ms between impacts: tight enough that the three impulses read as one
@@ -206,10 +240,10 @@ final class AudioRecorder: AudioRecording {
     static func fireHapticPattern(
         impactCount: Int,
         spacingMilliseconds: UInt64,
-        impact: () -> Void
+        impact: (Int) async -> Void
     ) async {
         for i in 0..<impactCount {
-            impact()
+            await impact(i)
             if i < impactCount - 1 {
                 try? await Task.sleep(nanoseconds: spacingMilliseconds * 1_000_000)
             }
