@@ -99,22 +99,20 @@ struct DictationLiveActivity: Widget {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundColor(.red)
             } compactTrailing: {
-                // Deliberately empty — NOT a missed opportunity to show elapsed time.
-                // Measured on-device: ANY live Text(timerInterval:) in this slot makes
-                // WidgetKit reserve ~83% of screen width for the outer compact pill,
-                // REGARDLESS of the interval's bound (60s and 300s bounds produced the
-                // identical 1100px/1320px result on a freshly erased iPhone 17 Pro Max
-                // simulator, ruling out the range length as the cause). A static/frozen
-                // Text costs far less (~43%) but would never visually update once
-                // rendered (no frequent-updates entitlement — see Info.plist
-                // NSSupportsLiveActivitiesFrequentUpdates: false), which reads as
-                // broken rather than intentional. Apple's own built-in Screen
-                // Recording indicator follows the same pattern: no ticking counter in
-                // the compact pill, just the glyph — elapsed time lives in Lock
-                // Screen/.bottom instead, where the region is wide by system design
-                // and this cost doesn't apply. See 46-LIVEACTIVITY-REDESIGN.md §7 for
-                // the full measurement table.
-                EmptyView()
+                // App identity mark (user-requested 2026-08-11, "like WhatsApp" —
+                // the red mic glyph alone says something is recording but not
+                // WHICH app). This is a STATIC vector image, not a live-updating
+                // element — the lesson from the timer investigation above still
+                // holds (only Text(timerInterval:) was ever shown to reserve
+                // outsized pill width; a static Image has no such property, and
+                // this was measured, not assumed — see
+                // 46-LIVEACTIVITY-REDESIGN.md §9). The timer stays out of this
+                // region entirely; it lives in the lock-screen banner and the
+                // expanded .bottom region only, unchanged.
+                Image("LiveActivityAppMark")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 15, height: 15)
             } minimal: {
                 Image(systemName: "mic.fill")
                     .font(.system(size: 15, weight: .semibold))
