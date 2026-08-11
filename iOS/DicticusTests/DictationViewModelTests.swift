@@ -64,6 +64,14 @@ private final class FakeTranscriptionProvider: TranscriptionProviding {
     var resultConfidence: Float = 0.9
     var errorToThrow: Error?
 
+    /// 2026-08-11 regression: simulates a stalled ASR call (e.g. ANE/CoreML compute
+    /// paused mid-inference by backgrounding) that never naturally returns or throws
+    /// — the exact shape `drainTranscribeTimeoutSeconds` exists to bound. Sleeps for
+    /// an effectively-unbounded duration; relies on the caller's timeout wrapper to
+    /// cancel it (`Task.sleep` is cancellation-aware and throws immediately once
+    /// cancelled, so a test using this does not actually wait out the duration).
+    var hangIndefinitely = false
+
     /// Optional per-call override queue (46-03): when non-empty, each call to
     /// `transcribe(wavURL:)` consumes the NEXT element instead of the fixed
     /// `resultText`/`errorToThrow` above — lets one fake drive a multi-recording
@@ -74,6 +82,9 @@ private final class FakeTranscriptionProvider: TranscriptionProviding {
 
     func transcribe(wavURL: URL) async throws -> DicticusTranscriptionResult {
         callCount += 1
+        if hangIndefinitely {
+            try await Task.sleep(nanoseconds: UInt64.max)
+        }
         if !responseQueue.isEmpty {
             switch responseQueue.removeFirst() {
             case .success(let result): return result
@@ -1543,6 +1554,113 @@ final class DictationViewModelTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path), "WAV must be gone after a successful retry")
 
         // Cleanup
+        for entry in testHistory.entries { if let id = entry.id { testHistory.delete(id: id) } }
+        try? FileManager.default.removeItem(at: tempContainer)
+    }
+
+    // MARK: - 2026-08-11 on-device UAT fix: Retry silently did nothing
+    //
+    // User report: "After clicking Retry on a failed history entry, what it says is
+    // waiting for the model. Though there seems to be no progress... retrying
+    // definitely is not working." Device state: 8 pending recordings, all failed,
+    // none draining automatically or via Retry. Root cause: an unbounded
+    // `await transcriptionService.transcribe(wavURL:)` inside `drainQueue` — if a
+    // transcription attempt ever stalled (never returning, never throwing — most
+    // plausibly ANE/CoreML compute paused mid-inference by backgrounding, per this
+    // phase's documented ~30s background-grace-period finding), the enclosing Task
+    // never reached its `defer { isDrainingPendingRecordings = false }`, permanently
+    // deadlocking every later automatic drain AND every later Retry tap for the rest
+    // of the process's life. `requeue()` still ran (the row's status genuinely
+    // flipped to "queued"/"Waiting for model"), which is exactly why the UI looked
+    // like *something* happened while nothing further ever did.
+
+    /// A stalled transcription attempt must time out (bounded by
+    /// `drainTranscribeTimeoutSeconds`), resolve the row to `.failed` rather than
+    /// leaving it stuck `.queued` forever, and — critically — release the
+    /// re-entrancy guard so a SUBSEQUENT drain can actually run. Reproduces the
+    /// reported symptom directly: a hang that would otherwise deadlock the queue.
+    func testHungTranscriptionTimesOutAndReleasesGuardForNextDrain() async throws {
+        let vm = DictationViewModel()
+        let tempContainer = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let testHistory = HistoryService.makeForTesting(containerURLProvider: { tempContainer })
+        let testStore = PendingRecordingStore.makeForTesting(historyService: testHistory)
+        vm.historyService = testHistory
+        vm.pendingStore = testStore
+        vm.audioRecorder = FakeAudioRecorder()
+        vm.isBackgroundedProvider = { false }
+        vm.drainTranscribeTimeoutSeconds = 0.05
+
+        vm.state = .recording
+        await vm.stopDictation()
+        XCTAssertEqual(testStore.pendingRecordings.count, 1, "Precondition: one row queued")
+
+        let hangingTranscriber = FakeTranscriptionProvider()
+        hangingTranscriber.hangIndefinitely = true
+        vm.transcriptionService = hangingTranscriber
+
+        await vm.drainPendingRecordingsIfNeeded()
+
+        let row = try XCTUnwrap(testStore.pendingRecordings.first)
+        XCTAssertEqual(row.status, PendingRecordingStatus.failed.rawValue,
+                       "A hung attempt must resolve to failed, not stay stuck queued forever")
+
+        // The guard must be released, not just this one attempt resolved: a SECOND
+        // drain, now with a working transcriber, must actually run.
+        let workingTranscriber = FakeTranscriptionProvider()
+        workingTranscriber.resultText = "recovered after timeout"
+        vm.transcriptionService = workingTranscriber
+        await vm.retryPendingRecording(row)
+
+        XCTAssertEqual(testHistory.entries.count, 1)
+        XCTAssertEqual(testHistory.entries.first?.text, "Recovered after timeout")
+        XCTAssertEqual(testStore.pendingRecordings.count, 0)
+
+        // Cleanup
+        for entry in testHistory.entries { if let id = entry.id { testHistory.delete(id: id) } }
+        try? FileManager.default.removeItem(at: tempContainer)
+    }
+
+    /// A manual Retry tap from History is a deliberate user action, not the
+    /// Action-Button race `pendingDictation` protects against (see
+    /// `testDrainIsNoOpWhenPendingDictationFlagSet` above, which must still pass
+    /// unchanged for the AUTOMATIC drain path) — it must not be silently swallowed
+    /// by that guard the way an automatic trigger correctly is.
+    func testRetryPendingRecordingBypassesPendingDictationGuard() async throws {
+        let vm = DictationViewModel()
+        let tempContainer = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let testHistory = HistoryService.makeForTesting(containerURLProvider: { tempContainer })
+        let testStore = PendingRecordingStore.makeForTesting(historyService: testHistory)
+        vm.historyService = testHistory
+        vm.pendingStore = testStore
+        vm.audioRecorder = FakeAudioRecorder()
+        vm.isBackgroundedProvider = { false }
+
+        vm.state = .recording
+        await vm.stopDictation()
+        let failingTranscriber = FakeTranscriptionProvider()
+        failingTranscriber.errorToThrow = TranscriptionError.noResult
+        vm.transcriptionService = failingTranscriber
+        await vm.drainPendingRecordingsIfNeeded()
+
+        let failedRow = try XCTUnwrap(testStore.pendingRecordings.first)
+        XCTAssertEqual(failedRow.status, PendingRecordingStatus.failed.rawValue, "Precondition: row is failed")
+
+        let succeedingTranscriber = FakeTranscriptionProvider()
+        succeedingTranscriber.resultText = "retried despite stale pendingDictation flag"
+        vm.transcriptionService = succeedingTranscriber
+        DicticusIPCBridge.defaults?.set(true, forKey: "pendingDictation")
+
+        await vm.retryPendingRecording(failedRow)
+
+        XCTAssertEqual(succeedingTranscriber.callCount, 1,
+                       "Retry must attempt transcription even when pendingDictation is set — a manual tap is not the Action-Button race that guard protects against")
+        XCTAssertEqual(testHistory.entries.count, 1)
+        XCTAssertEqual(testStore.pendingRecordings.count, 0)
+
+        // Cleanup
+        DicticusIPCBridge.defaults?.set(false, forKey: "pendingDictation")
         for entry in testHistory.entries { if let id = entry.id { testHistory.delete(id: id) } }
         try? FileManager.default.removeItem(at: tempContainer)
     }
