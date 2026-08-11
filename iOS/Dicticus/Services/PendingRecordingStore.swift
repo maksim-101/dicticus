@@ -196,6 +196,20 @@ final class PendingRecordingStore: ObservableObject {
             do {
                 try FileManager.default.removeItem(at: url)
             } catch {
+                // Fix 46-06/3: if the WAV removal genuinely failed AND the file
+                // still exists, do NOT delete the row. Deleting the row while its
+                // WAV survives on disk creates a latent resurrection: the next cold
+                // launch's recoverOrphanedRecordings() finds that orphaned WAV with
+                // no matching row and silently re-inserts it, so a "successful"
+                // delete/clear can reappear later as if nothing happened. This is
+                // correct on its own merits regardless of what caused the original
+                // deletion report (see fix 46-06/3 investigation notes — that
+                // specific report is no longer reproducible and traces to something
+                // else; this ordering bug is real independent of it).
+                if FileManager.default.fileExists(atPath: url.path) {
+                    Self.log.error("\(logPrefix)(): failed to remove WAV for pending recording \(recording.uuid): \(error.localizedDescription) — refusing to delete the row so it cannot be silently resurrected on next launch")
+                    return
+                }
                 Self.log.error("\(logPrefix)(): failed to remove WAV for pending recording \(recording.uuid): \(error.localizedDescription)")
             }
         }
