@@ -53,14 +53,32 @@ struct DictationLiveActivity: Widget {
             .widgetURL(URL(string: "dicticus://liveactivity"))
         } dynamicIsland: { context in
             DynamicIsland {
+                // Explicit outward margin (DESIGN.md `md` = 16) — these were the only
+                // two surfaces in the file with zero outward layout protection, which
+                // let the island's 44pt rounded border clip the mic glyph and Stop
+                // button on-device. See 46-LIVEACTIVITY-REDESIGN.md §11: `sm` (8) was
+                // tried first and measured WORSE than the unmodified default — 8pt is
+                // apparently below WidgetKit's own implicit corner-clearance margin, so
+                // setting it explicitly *shrank* the margin rather than adding to it.
+                // 16 was the smallest DESIGN.md token that measured fully clear of the
+                // corner curve on-simulator; 24 also works but has no visible benefit
+                // over 16 at this glyph size.
                 DynamicIslandExpandedRegion(.leading) {
                     Image(systemName: "mic.fill")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundColor(.red)
                 }
+                .contentMargins(.leading, 16)
                 // Stop button in .trailing (higher-priority region than .bottom) ensures
                 // it renders on iOS 26+ where .bottom may be deprioritized on Pro Max.
                 // This is the D-01a fix for the "long-press showed no Stop" bug.
+                // The outer .contentMargins(.trailing, 16) below is separate from the
+                // button's own internal .padding(8) — that padding sizes the tappable
+                // hit target and must not shrink; the margin only adds clearance
+                // between the finished circle and the island's own rounded edge. Set to
+                // the same 16 as .leading for symmetry — the user's on-device report
+                // named both sides as clipped, even though the .trailing button never
+                // visibly clipped in this session's simulator captures at 8.
                 DynamicIslandExpandedRegion(.trailing) {
                     Button(intent: StopDictationIntent()) {
                         Image(systemName: "stop.fill")
@@ -71,6 +89,7 @@ struct DictationLiveActivity: Widget {
                     }
                     .buttonStyle(.plain)
                 }
+                .contentMargins(.trailing, 16)
                 // .center sits directly below the camera sensor — HIG's slot for a
                 // title/high-level status banner. Filling it lets .bottom hold just
                 // the timer, which is why the old label+Spacer .layoutPriority(1)
