@@ -57,7 +57,26 @@ struct PendingRecording: Identifiable, Codable, Hashable, FetchableRecord, Persi
     /// the user's side. `durationSeconds == nil` is the store's existing, exclusive
     /// signal for "this file's structure could not be verified" — reusing it here
     /// avoids inventing a second, possibly-disagreeing classification.
-    var isRetryable: Bool { durationSeconds != nil }
+    ///
+    /// 2026-08-11 round 3 (device re-test of THIS fix): of 8 real device files
+    /// pulled and forensically probed (`AVAudioFile` header/byte-size agreement,
+    /// `IOSTranscriptionService.readSamples`, `AdaptiveVoiceGate` over their real
+    /// samples), 6 matched the length==0 case above exactly, but 2 were
+    /// structurally perfect — well-formed header, zero byte-size disagreement,
+    /// `readSamples` succeeded, AND the energy-based voice gate detected genuine
+    /// signal (one quiet ~3.9s clip, one loud ~5.8s clip peaking near 0 dBFS).
+    /// Misclassification was ruled out for both by direct evidence, not
+    /// inference. Their failure is therefore a CONTENT-level WhisperKit decision
+    /// (its own no-speech confidence, non-Latin-script decode, or a genuinely
+    /// wordless clip) that this classifier cannot detect without running the
+    /// model — a live device retry is required to observe it, which was outside
+    /// what this investigation could execute. Given that, `retryCount` (already
+    /// incremented once per failed attempt by `markFailed`) is what closes the
+    /// loop this classifier cannot: a structurally-fine row gets exactly one
+    /// honest retry (`retryCount < 2` — the first automatic attempt plus one
+    /// user-initiated Retry) before Retry is withdrawn, so a row proven capable
+    /// of failing forever cannot invite an indefinite fail loop either.
+    var isRetryable: Bool { durationSeconds != nil && retryCount < 2 }
 }
 
 /// Manages the durable pending-recording queue: recordings that have been captured
@@ -263,6 +282,17 @@ final class PendingRecordingStore: ObservableObject {
     /// see `46-05-SUMMARY.md` for the sign-off request.
     static let unrecoverableFailureReason =
         "This recording was cut off before it finished saving, so it can't be transcribed. Clear it to remove it."
+
+    /// House-voice explanation for a row that WAS structurally fine (readable,
+    /// real duration, real voice-level energy) but still failed transcription
+    /// twice — 2026-08-11 round 3 device UAT. Distinct from
+    /// `unrecoverableFailureReason` above: that one is about a file that could
+    /// never even be read; this one is about a file that read fine but whose
+    /// content WhisperKit itself could not turn into words, twice in a row.
+    /// Proposed wording, not yet folded into the locked `46-UI-SPEC.md` copy
+    /// table — see the `46-05` summary for the sign-off request.
+    static let retriesExhaustedFailureReason =
+        "We tried transcribing this recording twice and couldn't make out any words. Clear it to remove it."
 
     /// D-09's drain order — the only ordering the drain may use. `pendingRecordings`
     /// is already `createdAt` ascending (see `load()`), so this filters to just the

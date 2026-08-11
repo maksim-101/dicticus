@@ -35,6 +35,26 @@ struct PendingRecordingRow: View {
         }
     }
 
+    private var failedExplanationText: String {
+        Self.failedExplanationText(for: recording)
+    }
+
+    /// The failed-row explanatory line. Three distinct cases, in priority order:
+    /// still retryable (generic copy, unchanged); never even readable
+    /// (`durationSeconds == nil` — `unrecoverableFailureReason`); readable but
+    /// content-unrecoverable after an honest retry (`retriesExhaustedFailureReason`).
+    /// A static pure function, mirroring `durationLabel`/`statusLabel` above, so the
+    /// three-way branch is machine-checked rather than eyeballed.
+    static func failedExplanationText(for recording: PendingRecording) -> String {
+        if recording.isRetryable {
+            return "Couldn't transcribe — tap Retry, or we'll try again automatically once the model reloads."
+        }
+        if recording.durationSeconds == nil {
+            return PendingRecordingStore.unrecoverableFailureReason
+        }
+        return PendingRecordingStore.retriesExhaustedFailureReason
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -100,10 +120,15 @@ struct PendingRecordingRow: View {
             // The longest text a row can carry (per the UI-SPEC's `long-text`
             // consideration) — the two-line cap is a hard layout constraint so the
             // trailing Retry/Clear actions are never pushed off-screen.
+            //
+            // 2026-08-11 round 3: two DIFFERENT reasons collapse to isRetryable ==
+            // false, and they need different copy — a row whose file could never
+            // even be read (durationSeconds == nil) is not the same claim as a row
+            // that read fine but whose content genuinely couldn't be turned into
+            // words after an honest retry (retryCount >= 2). Saying "cut off before
+            // it finished saving" about the second case would be false.
             if status == .failed {
-                Text(recording.isRetryable
-                     ? "Couldn't transcribe — tap Retry, or we'll try again automatically once the model reloads."
-                     : PendingRecordingStore.unrecoverableFailureReason)
+                Text(failedExplanationText)
                     .font(.body)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -209,6 +234,21 @@ struct PendingRecordingRow: View {
             id: 4, uuid: UUID(), fileName: "d.wav", createdAt: Date(),
             status: PendingRecordingStatus.failed.rawValue, durationSeconds: nil,
             retryCount: 0, failureReason: PendingRecordingStore.unrecoverableFailureReason
+        ))
+    }
+    .environmentObject(DictationViewModel())
+    .environmentObject(PendingRecordingStore.shared)
+}
+
+/// A row that WAS structurally fine (real duration, real audio) but failed
+/// transcription twice — 2026-08-11 round 3 device UAT. Retry is hidden and the
+/// copy is honest about having actually tried, not about a save failure.
+#Preview("Failed — retries exhausted") {
+    List {
+        PendingRecordingRow(recording: PendingRecording(
+            id: 5, uuid: UUID(), fileName: "e.wav", createdAt: Date(),
+            status: PendingRecordingStatus.failed.rawValue, durationSeconds: 5.8,
+            retryCount: 2, failureReason: PendingRecordingStore.retriesExhaustedFailureReason
         ))
     }
     .environmentObject(DictationViewModel())

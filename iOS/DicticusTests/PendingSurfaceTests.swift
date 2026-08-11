@@ -6,6 +6,12 @@ import XCTest
 /// surface. `durationLabel`/`statusLabel` (Task 1) and `PendingQueueChip.label(for:)`/
 /// `PendingRecordingStore.pendingCount` (Task 2) are pure functions precisely so this
 /// contract is machine-checked rather than eyeballed.
+///
+/// `@MainActor`: `failedExplanationText(for:)` (round 3) reads
+/// `PendingRecordingStore`'s static failure-copy constants, which are
+/// MainActor-isolated because `PendingRecordingStore` itself is — this class needs
+/// the same isolation to call them.
+@MainActor
 final class PendingSurfaceTests: XCTestCase {
 
     // MARK: - PendingRecordingRow.durationLabel
@@ -60,6 +66,57 @@ final class PendingSurfaceTests: XCTestCase {
 
     func testStatusLabelFailed() {
         XCTAssertEqual(PendingRecordingRow.statusLabel(for: .failed), "Failed")
+    }
+
+    // MARK: - PendingRecordingRow.failedExplanationText (2026-08-11 round 3)
+
+    private func makeRecording(durationSeconds: Double?, retryCount: Int) -> PendingRecording {
+        PendingRecording(
+            id: 1, uuid: UUID(), fileName: "x.wav", createdAt: Date(),
+            status: PendingRecordingStatus.failed.rawValue, durationSeconds: durationSeconds,
+            retryCount: retryCount, failureReason: nil
+        )
+    }
+
+    func testFailedExplanationTextStillRetryableIsGenericCopy() {
+        let row = makeRecording(durationSeconds: 5, retryCount: 1)
+        XCTAssertTrue(row.isRetryable, "Precondition: one prior failure still leaves one honest retry")
+        XCTAssertEqual(PendingRecordingRow.failedExplanationText(for: row),
+                       "Couldn't transcribe — tap Retry, or we'll try again automatically once the model reloads.")
+    }
+
+    func testFailedExplanationTextStructurallyUnrecoverableIsHonestCopy() {
+        let row = makeRecording(durationSeconds: nil, retryCount: 0)
+        XCTAssertFalse(row.isRetryable)
+        XCTAssertEqual(PendingRecordingRow.failedExplanationText(for: row), PendingRecordingStore.unrecoverableFailureReason)
+    }
+
+    func testFailedExplanationTextRetriesExhaustedIsDistinctHonestCopy() {
+        let row = makeRecording(durationSeconds: 5.8, retryCount: 2)
+        XCTAssertFalse(row.isRetryable)
+        XCTAssertEqual(PendingRecordingRow.failedExplanationText(for: row), PendingRecordingStore.retriesExhaustedFailureReason)
+        XCTAssertNotEqual(PendingRecordingStore.retriesExhaustedFailureReason, PendingRecordingStore.unrecoverableFailureReason,
+                          "The two unrecoverable cases must read differently — one is a save failure, the other is a real, honestly-attempted transcription failure")
+    }
+
+    // MARK: - PendingRecording.isRetryable (2026-08-11 round 3: one honest retry)
+
+    func testIsRetryableTrueForFreshStructurallySoundRow() {
+        XCTAssertTrue(makeRecording(durationSeconds: 5, retryCount: 0).isRetryable)
+    }
+
+    func testIsRetryableTrueAfterExactlyOnePriorFailure() {
+        XCTAssertTrue(makeRecording(durationSeconds: 5, retryCount: 1).isRetryable,
+                      "One prior failure (the initial automatic attempt) must still allow one honest user-initiated retry")
+    }
+
+    func testIsRetryableFalseAfterTwoPriorFailures() {
+        XCTAssertFalse(makeRecording(durationSeconds: 5, retryCount: 2).isRetryable,
+                       "A structurally-sound row that has already failed twice must stop offering Retry")
+    }
+
+    func testIsRetryableFalseForStructurallyUnrecoverableRegardlessOfRetryCount() {
+        XCTAssertFalse(makeRecording(durationSeconds: nil, retryCount: 0).isRetryable)
     }
 
     // MARK: - PendingQueueChip.label(for:)
