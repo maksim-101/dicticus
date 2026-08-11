@@ -906,7 +906,29 @@ class DictationViewModel: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                await self?.startDictation()
+                // 2026-08-11 fix: `DictateIntent.perform()` writes the App-Group
+                // `isShortcutLaunch` flag BEFORE posting this notification (see
+                // `Intents/DictateIntent.swift`), so it is already correct and
+                // synchronously readable here — no race to wait out. Before this
+                // fix, this call always defaulted to `fromShortcut: false` and won
+                // the race against `checkPendingIntent()`'s own correctly-flagged
+                // call (which fires after a deliberate 500ms sleep — see below):
+                // by the time that second call ran, `state` was already
+                // `.recording` from THIS one, so its own idle guard silently
+                // swallowed the only call that had the right flag. Reading the
+                // flag directly here means the FIRST call to actually succeed
+                // (whichever path wins the race) carries the correct value —
+                // `checkPendingIntent()`'s delayed call, if it still runs after
+                // this one already started dictation, remains a harmless no-op
+                // via that same idle guard, exactly as before. Deliberately NOT
+                // clearing the flag here — `checkPendingIntent()` (unchanged, not
+                // touched by this fix) remains the sole owner of clearing
+                // `pendingDictation`/`isShortcutLaunch`/`pendingDictationSetAt`
+                // and of the staleness guard that protects that clear (46-03,
+                // commit 0a18fb2) — reading a value twice is harmless; only ONE
+                // piece of code may safely consume (clear) it.
+                let shortcut = DicticusIPCBridge.defaults?.bool(forKey: "isShortcutLaunch") ?? false
+                await self?.startDictation(fromShortcut: shortcut)
             }
         }
         notificationObservers.append(startObserver)
