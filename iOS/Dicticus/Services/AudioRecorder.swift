@@ -138,22 +138,82 @@ final class AudioRecorder: AudioRecording {
     var onSilenceDetected: (() -> Void)?
 
     /// Settable seam so the D-04 haptic-timing assertion is testable without haptic
-    /// hardware. Fires exactly once per recording, on the first buffer the tap
-    /// actually delivers — never at intent-fire or button-tap time.
+    /// hardware. Fires exactly once per recording START, on the first buffer the
+    /// tap actually delivers — never at intent-fire or button-tap time.
     ///
-    /// 46-03 device-UAT (Section C, resolved 2026-08-10): the haptic DOES fire on
-    /// every real invocation path with the app foreground — confirmed by the user
-    /// ("It's there. It's not very prominent, but the haptic is noticeable") and by
-    /// `appState=active` logged via `MemoryProbe` at fire time across all attempts.
-    /// Both original hypotheses (missing `.prepare()`, app-not-foreground) are dead;
-    /// the original "I didn't feel any specific haptic" report was a perception miss
-    /// on a weak `.medium` impact, not a missing call. `.heavy` (not `.rigid`) is
-    /// chosen because the deficiency was raw prominence, not character — `.rigid`
-    /// optimizes for a sharp/precise feel rather than intensity, and D-04's whole
-    /// purpose (confirm the mic just opened) needs a signal that registers, not one
-    /// that's merely distinctively shaped.
-    var hapticTrigger: @MainActor @Sendable () -> Void = {
-        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+    /// 46-03 device-UAT (Section C, round 2, resolved 2026-08-10): a single
+    /// `.medium` impact DOES fire on every real invocation path with the app
+    /// foreground — both original hypotheses (missing `.prepare()`, app-not-
+    /// foreground) were dead; the original "I didn't feel any specific haptic"
+    /// report was a perception miss on a weak impact, not a missing call.
+    ///
+    /// 46-03 device-UAT (Section C, round 3): raising the SAME single impact to
+    /// `.heavy` was device-confirmed still insufficient — user, verbatim: "it's
+    /// still just a very faint tap." This is itself useful evidence: the ceiling
+    /// on a single `UIImpactFeedbackGenerator` impact sits below this user's
+    /// real-world noticeability threshold (phone in hand/pocket/on a desk,
+    /// attention elsewhere) — chasing more intensity on one impulse is a dead
+    /// end. Per the user's own suggestion, this now fires a short PATTERN
+    /// (`fireHapticPattern`, below) rather than one impulse.
+    ///
+    /// `UINotificationFeedbackGenerator(.success)` (a system-defined pattern) was
+    /// considered and rejected in favor of a custom multi-impact sequence: (1) a
+    /// single `.heavy` impact is already CONFIRMED to physically register on
+    /// this exact user's exact device, just too faintly — building on that same
+    /// proven primitive with repetition is lower-risk than switching to an
+    /// entirely different generator class whose felt intensity on this specific
+    /// device/wear level is unverified; (2) `.success`'s semantic label ("a task
+    /// just completed") is a worse fit for D-04's actual event (capture just
+    /// BEGAN, an ongoing state, not a finished one) than a deliberate multi-tap
+    /// that reads as "this is now ON"; (3) the user explicitly asked for "a
+    /// double or triple tap," which a custom sequence implements directly.
+    var hapticTrigger: @MainActor @Sendable () async -> Void = {
+        let generator = UIImpactFeedbackGenerator(style: .heavy)
+        // .prepare() once, reused across all impacts in the sequence — Apple's
+        // documented technique for a rapid multi-impact pattern (distinct from
+        // the single-impact case, where round 2 confirmed .prepare() was never
+        // the issue): a fresh generator per impact would risk inconsistent
+        // spin-up latency on the 2nd/3rd impulse.
+        generator.prepare()
+        await AudioRecorder.fireHapticPattern(
+            impactCount: 3,
+            spacingMilliseconds: AudioRecorder.hapticPatternSpacingMilliseconds
+        ) {
+            generator.impactOccurred()
+        }
+    }
+
+    /// 120ms between impacts: tight enough that the three impulses read as one
+    /// cohesive pattern (not disconnected, unrelated taps), loose enough that
+    /// each impulse is individually perceptible rather than blurring into one
+    /// longer buzz — in the same range published multi-impulse haptic patterns
+    /// (including Apple's own system `UINotificationFeedbackGenerator` patterns,
+    /// per community teardown analysis) typically use internally.
+    static let hapticPatternSpacingMilliseconds: UInt64 = 120
+
+    /// Fires `impactCount` discrete impacts, `spacingMilliseconds` apart,
+    /// invoking `impact` for each one. Extracted as a standalone, directly
+    /// testable primitive so the D-04 pattern's SHAPE (count/spacing) is
+    /// assertable without real haptic hardware or `UIImpactFeedbackGenerator` —
+    /// `impact` is injected, matching this file's existing seam-injection style.
+    ///
+    /// Does NOT block or delay the start of capture: `AVAudioEngine` recording
+    /// is already running by the time `onFirstBuffer()` (which awaits this) is
+    /// invoked — the tap callback that calls it is itself wrapped in a
+    /// fire-and-forget `Task { @MainActor in ... }` at the call site in
+    /// `startRecording()`, so nothing in the real-time audio path ever awaits
+    /// this function's completion.
+    static func fireHapticPattern(
+        impactCount: Int,
+        spacingMilliseconds: UInt64,
+        impact: () -> Void
+    ) async {
+        for i in 0..<impactCount {
+            impact()
+            if i < impactCount - 1 {
+                try? await Task.sleep(nanoseconds: spacingMilliseconds * 1_000_000)
+            }
+        }
     }
 
     /// 46-03 device-UAT instrumentation (Section C re-investigation, "no haptic
@@ -240,15 +300,12 @@ final class AudioRecorder: AudioRecording {
             },
             onFirstBuffer: {
                 Task { @MainActor in
-                    localHapticTrigger()
                     // 46-03 device-UAT instrumentation (Section C): capture the
-                    // decisive datum — app state at the EXACT instant the haptic
-                    // fires — via the already-established memprobe.jsonl sink
-                    // (-memProbe 1 launch arg; no-op and zero overhead otherwise).
-                    // Discriminates H-A (missing .prepare()) from H-B (app not
-                    // foreground when a Shortcut/Action-Button/URL-scheme
-                    // invocation fires it) from H-C (device Settings). See
-                    // 46-DEVICE-TEST-PROCEDURE.md Section C.
+                    // decisive datum — app state at the instant confirmation
+                    // BEGINS (before the multi-impact pattern's ~240ms runtime,
+                    // not after) — via the already-established memprobe.jsonl
+                    // sink (-memProbe 1 launch arg; no-op and zero overhead
+                    // otherwise). See 46-DEVICE-TEST-PROCEDURE.md Section C.
                     let stateDescription: String
                     switch UIApplication.shared.applicationState {
                     case .active: stateDescription = "active"
@@ -260,6 +317,7 @@ final class AudioRecorder: AudioRecording {
                         "haptic_fired",
                         note: "appState=\(stateDescription) invocation=\(localInvocationContext)"
                     )
+                    await localHapticTrigger()
                 }
             }
         )
