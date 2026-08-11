@@ -167,7 +167,7 @@ final class AudioRecorderTests: XCTestCase {
     /// counting closure in place of `UIImpactFeedbackGenerator.impactOccurred()`.
     func testHapticPatternFiresConfiguredImpactCount() async {
         var impactCount = 0
-        await AudioRecorder.fireHapticPattern(impactCount: 3, spacingMilliseconds: 1) {
+        await AudioRecorder.fireHapticPattern(impactCount: 3, spacingMilliseconds: 1) { _ in
             impactCount += 1
         }
         XCTAssertEqual(impactCount, 3,
@@ -178,10 +178,75 @@ final class AudioRecorderTests: XCTestCase {
     /// not a value hardcoded inside the loop itself.
     func testHapticPatternRespectsConfiguredCount() async {
         var impactCount = 0
-        await AudioRecorder.fireHapticPattern(impactCount: 2, spacingMilliseconds: 1) {
+        await AudioRecorder.fireHapticPattern(impactCount: 2, spacingMilliseconds: 1) { _ in
             impactCount += 1
         }
         XCTAssertEqual(impactCount, 2, "fireHapticPattern must fire exactly the configured impactCount")
+    }
+
+    /// 46-03 round 4: `fireHapticPattern`'s `impact` closure now receives the
+    /// impact's index (0-based) so each real impact can be individually logged
+    /// (`AudioRecorder.logHapticImpact(index:)`) — this asserts the indices
+    /// arrive in order and match the count, independent of the logging call
+    /// itself (which needs `UIApplication`/`MemoryProbe`, unavailable in a
+    /// plain unit test host without a running app).
+    func testHapticPatternDeliversSequentialIndices() async {
+        var observedIndices: [Int] = []
+        await AudioRecorder.fireHapticPattern(impactCount: 3, spacingMilliseconds: 1) { index in
+            observedIndices.append(index)
+        }
+        XCTAssertEqual(observedIndices, [0, 1, 2],
+                       "Each impact must report its own sequential index, in order — needed to tell which of N impacts fired from the device log")
+    }
+
+    /// End-to-end verification of the ACTUAL write path (46-03 round 4,
+    /// explicit coordinator instruction: "confirm the log actually captures
+    /// what you need before asking for another device round — do not burn a
+    /// user session on a probe that turns out not to have been recording").
+    /// Drives the real, unmocked `hapticTrigger` default closure — real
+    /// `UIImpactFeedbackGenerator` calls (harmless no-ops without Taptic
+    /// hardware in the Simulator) and real `MemoryProbe.mark()` writes — and
+    /// reads back the actual `memprobe.jsonl` file `MemoryProbe` wrote to,
+    /// parsing it as JSON rather than grepping for a substring. This is NOT a
+    /// fake-closure test like the two above; it is the only test in this file
+    /// that proves the disk artifact itself is well-formed and complete.
+    func testHapticTriggerWritesThreeParseableHapticImpactLinesEndToEnd() async throws {
+        let defaults = UserDefaults.standard
+        let wasEnabled = defaults.bool(forKey: "memProbe")
+        defaults.set(true, forKey: "memProbe")
+        defer { defaults.set(wasEnabled, forKey: "memProbe") }
+
+        guard let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            XCTFail("Test host has no Documents directory — cannot verify the memprobe.jsonl write path")
+            return
+        }
+        let probeURL = documents.appendingPathComponent("memprobe.jsonl")
+        try? FileManager.default.removeItem(at: probeURL)
+
+        let recorder = AudioRecorder()
+        await recorder.hapticTrigger()
+
+        let contents = try XCTUnwrap(try? String(contentsOf: probeURL, encoding: .utf8),
+                                     "hapticTrigger() must produce a readable memprobe.jsonl — the probe never wrote anything")
+        let impactLines = contents.split(separator: "\n").filter { $0.contains("\"stage\":\"haptic_impact\"") }
+        XCTAssertEqual(impactLines.count, 3,
+                       "hapticTrigger() must write exactly 3 haptic_impact lines — found \(impactLines.count). If this is not 3, no device session will show 3 either; the loop itself is broken, not just felt-weakly.")
+
+        var seenIndices: Set<Int> = []
+        for line in impactLines {
+            let data = try XCTUnwrap(line.data(using: .utf8))
+            let obj = try XCTUnwrap(try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                                    "Each haptic_impact line must be valid, parseable JSON")
+            let note = try XCTUnwrap(obj["note"] as? String)
+            XCTAssertTrue(note.contains("appState="), "Each haptic_impact line's note must record appState — the decisive datum for H-A/H-B/coalescing")
+            if let match = note.range(of: "index="), let indexStr = note[match.upperBound...].split(separator: " ").first,
+               let index = Int(indexStr) {
+                seenIndices.insert(index)
+            }
+        }
+        XCTAssertEqual(seenIndices, [0, 1, 2], "The 3 written lines must carry indices 0, 1, 2 — not 3 copies of the same index")
+
+        try? FileManager.default.removeItem(at: probeURL)
     }
 
     /// The default `hapticPatternSpacingMilliseconds` must be tuned to a real,
