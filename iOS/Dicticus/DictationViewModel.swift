@@ -250,6 +250,13 @@ class DictationViewModel: ObservableObject {
         do {
             let result = try await transcriptionService.transcribe(wavURL: artifact.fileURL)
 
+            // Fix 46-06/1: the entry actually persisted by process() (or nil on a
+            // HistoryService.save() failure) — never guessed via
+            // `historyService.entries.first`, which silently resolves to the
+            // PREVIOUS entry on a save failure and would tag/deliver the WRONG
+            // transcript.
+            var savedEntry: TranscriptionEntry?
+
             if isBackgrounded {
                 // BACKGROUND PATH (SPIKE constraints 1+2 / IOSBG-02):
                 // - NEVER run GPU/Metal (LLM cleanup) — kIOGPUCommandBufferCallbackErrorBackgroundExecutionNotPermitted
@@ -264,24 +271,23 @@ class DictationViewModel: ObservableObject {
                     mode: .plain,
                     confidence: Double(result.confidence)
                 )
+                savedEntry = processor.lastSavedEntry
 
-                // Append the most-recent persisted entry's UUID to the pending list.
-                // TextProcessingService.process() calls HistoryService.save() + load() —
-                // the new entry is now at .entries.first (createdAt DESC).
-                // We query the most-recent UUID here because process() doesn't surface it.
-                if let uuid = self.historyService.entries.first?.uuid {
+                if let savedEntry {
+                    // Tag the ACTUAL persisted entry's UUID for foreground delivery.
                     let defaults = DicticusIPCBridge.defaults
                     var list = defaults?.stringArray(forKey: DicticusIPCBridge.Key.pendingTranscriptUUIDs) ?? []
-                    list.append(uuid.uuidString)
+                    list.append(savedEntry.uuid.uuidString)
                     defaults?.set(list, forKey: DicticusIPCBridge.Key.pendingTranscriptUUIDs)
                     // Also write the legacy single-key for any older build reading it.
-                    defaults?.set(uuid.uuidString, forKey: DicticusIPCBridge.Key.pendingTranscriptUUID)
-                }
+                    defaults?.set(savedEntry.uuid.uuidString, forKey: DicticusIPCBridge.Key.pendingTranscriptUUID)
 
-                // Post away-stop notification (D-02a) — only on background path.
-                // Body contains NO transcript text (T-36-08 / security).
-                await notificationPoster("Dictation ready",
-                                         "Recording stopped — your transcript is waiting. Tap to open Dicticus.")
+                    // Post away-stop notification (D-02a) — only on background path,
+                    // and only when a transcript was actually persisted to wait for.
+                    // Body contains NO transcript text (T-36-08 / security).
+                    await notificationPoster("Dictation ready",
+                                             "Recording stopped — your transcript is waiting. Tap to open Dicticus.")
+                }
 
             } else {
                 // FOREGROUND PATH — unchanged from 36-02:
@@ -303,15 +309,28 @@ class DictationViewModel: ObservableObject {
                     mode: mode,
                     confidence: Double(result.confidence)
                 )
+                savedEntry = processor.lastSavedEntry
 
+                // The transcription itself succeeded, so the user gets their text
+                // regardless of whether History persistence below succeeded — the
+                // pending row is what tracks the persistence outcome.
                 clipboardWriter(cleaned)
                 lastResult = cleaned
                 // Do NOT tag pendingTranscriptUUID — foreground delivery is inline.
             }
             error = nil
-            // Transcript delivered — the pending recording is resolved. Removes the
-            // WAV bytes and the row (D-02).
-            pendingStore.delete(pendingRow)
+
+            if savedEntry != nil {
+                // Transcript delivered AND confirmed persisted — the pending
+                // recording is resolved. Removes the WAV bytes and the row (D-02).
+                pendingStore.delete(pendingRow)
+            } else {
+                // Transcription succeeded but HistoryService.save() failed (e.g. a
+                // SQLite write error) — an environmental failure, not evidence the
+                // audio held nothing. D-10 hold: keep the WAV and the row so a
+                // retry can attempt the save again; never silently discard.
+                pendingStore.markFailed(pendingRow, reason: "Could not save transcript to history.")
+            }
 
         } catch let transcriptionError as TranscriptionError {
             switch transcriptionError {
@@ -692,13 +711,23 @@ class DictationViewModel: ObservableObject {
                     confidence: Double(result.confidence)
                 )
 
-                if isBackgrounded, let entry = self.historyService.entries.first {
-                    deliveredWhileBackgrounded.append(entry)
+                // Fix 46-06/1: the entry actually persisted (or nil on a
+                // HistoryService.save() failure) — never guessed via
+                // `historyService.entries.first`, which silently resolves to
+                // whatever the PREVIOUS entry was on a save failure.
+                guard let savedEntry = processor.lastSavedEntry else {
+                    Self.log.error("History save failed for \(row.uuid, privacy: .public) after successful transcription")
+                    pendingStore.markFailed(row, reason: "Could not save transcript to history.")
+                    continue
+                }
+
+                if isBackgrounded {
+                    deliveredWhileBackgrounded.append(savedEntry)
                     let defaults = DicticusIPCBridge.defaults
                     var list = defaults?.stringArray(forKey: DicticusIPCBridge.Key.pendingTranscriptUUIDs) ?? []
-                    list.append(entry.uuid.uuidString)
+                    list.append(savedEntry.uuid.uuidString)
                     defaults?.set(list, forKey: DicticusIPCBridge.Key.pendingTranscriptUUIDs)
-                    defaults?.set(entry.uuid.uuidString, forKey: DicticusIPCBridge.Key.pendingTranscriptUUID)
+                    defaults?.set(savedEntry.uuid.uuidString, forKey: DicticusIPCBridge.Key.pendingTranscriptUUID)
                 }
 
                 // Resolved — removes the WAV bytes and the row (D-02).

@@ -58,6 +58,18 @@ class TextProcessingService: ObservableObject {
     /// existing call sites (DicticusApp, DictationViewModel) compile unchanged.
     private let brandMatcher: BrandMatcher
 
+    /// The `TranscriptionEntry` actually persisted by the most recent `process()`
+    /// call (with its real SQLite `id`), or `nil` if that call's `HistoryService.save()`
+    /// failed. `process()`'s return type stays `String` (40+ existing call sites across
+    /// three test targets depend on that), so this out-of-band property is the surface
+    /// callers must read to learn whether persistence succeeded and, if so, the saved
+    /// row's UUID — instead of guessing via `historyService.entries.first` (fix 46-06/1:
+    /// that guess silently returns the PREVIOUS entry on a save failure, delivering the
+    /// wrong transcript). Reset at the start of every `process()` call. Callers that
+    /// construct a fresh `TextProcessingService` per call (as every production call site
+    /// does) can read this immediately after `await process(...)` returns with no race.
+    private(set) var lastSavedEntry: TranscriptionEntry?
+
     /// Initialize with required services.
     init(
         dictionaryService: DictionaryService = .shared,
@@ -99,6 +111,8 @@ class TextProcessingService: ObservableObject {
         context: DictationContext = .default,
         detectedBundleID: String? = nil
     ) async -> String {
+        lastSavedEntry = nil
+
         #if DEBUG_RECORDER
         if let cs = cleanupService as? CleanupService {
             cs.lastDebugTrace = nil
@@ -446,7 +460,7 @@ class TextProcessingService: ObservableObject {
             mode: mode.rawValue,
             confidence: confidence
         )
-        historyService.save(entry)
+        lastSavedEntry = historyService.save(entry)
 
         #if DEBUG_RECORDER
         // Phase 25-02: this record-assembly block runs for BOTH `mode == .plain`

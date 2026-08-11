@@ -378,4 +378,74 @@ final class PendingRecordingLifecycleInvariantTests: XCTestCase {
         // Cleanup
         store.clear(afterRetry)
     }
+
+    // MARK: - History-save failure must not masquerade as delivery (fix 46-06/1)
+
+    /// Regression target for fix 46-06/1: a SUCCESSFUL transcription whose
+    /// `HistoryService.save()` call fails must NOT be treated as delivered.
+    /// Before the fix, `DictationViewModel.drainQueue` deleted the pending row
+    /// (losing the WAV) on the strength of `process()` merely returning, and
+    /// separately guessed the "just saved" UUID via `historyService.entries.first`
+    /// — which, on a save failure, silently resolves to whatever entry happens to
+    /// already be at the top of history (the PREVIOUS dictation, if any), tagging
+    /// the WRONG transcript as ready for delivery.
+    ///
+    /// This test forces the save failure via `HistoryService.forceSaveFailureForTesting`
+    /// (a DEBUG-only seam — see that property's doc comment for why OS-level
+    /// permission tricks don't reliably force a write to fail through GRDB's
+    /// already-open connection pool) and asserts BOTH halves of the fix:
+    ///   1. The row survives as `.failed` (held), and its WAV is not deleted.
+    ///   2. No history entry — right OR wrong — is tagged as delivered: the
+    ///      pending-transcript UUID list stays empty.
+    func test_historySaveFailure_holdsRowAndWav_neverTagsAnyEntryAsDelivered() async throws {
+        // Seed a PRE-EXISTING history entry first, so a regression to the old
+        // `entries.first` guess would have something plausible-but-wrong to grab.
+        let staleEntry = TranscriptionEntry(
+            text: "stale previous dictation — must never be re-delivered",
+            rawText: "stale previous dictation",
+            language: "en",
+            mode: "plain",
+            confidence: 0.9
+        )
+        historyService.save(staleEntry)
+        XCTAssertEqual(historyService.entries.count, 1, "Precondition: exactly one pre-existing entry")
+
+        let vm = makeViewModel()
+        vm.isBackgroundedProvider = { true }  // background path — the one that tags pendingTranscriptUUIDs
+        let seededRow = try seedRecording()
+        let fileURL = try store.fileURL(for: seededRow)
+
+        let transcriber = SequencedTranscriber()
+        transcriber.responseQueue.append(.success(
+            DicticusTranscriptionResult(text: "new dictation that must not be lost", language: "en", confidence: 0.9)))
+        vm.transcriptionService = transcriber
+
+        historyService.forceSaveFailureForTesting = true
+        defer { historyService.forceSaveFailureForTesting = false }
+
+        await vm.drainPendingRecordingsIfNeeded()
+
+        XCTAssertEqual(transcriber.callCount, 1, "Precondition: transcription itself ran and succeeded")
+
+        // 1. Row survives, held (not deleted as if delivered), WAV intact.
+        let survivingRow = try XCTUnwrap(
+            store.pendingRecordings.first(where: { $0.uuid == seededRow.uuid }),
+            "The row must survive a history-save failure — it must not be deleted as if delivered")
+        XCTAssertEqual(survivingRow.status, PendingRecordingStatus.failed.rawValue)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path),
+                     "The WAV must survive a history-save failure")
+
+        // 2. No entry — right or wrong — was tagged as delivered.
+        XCTAssertEqual(historyService.entries.count, 1, "No new entry should exist — the save failed")
+        let defaults = DicticusIPCBridge.defaults
+        let pendingList = defaults?.stringArray(forKey: DicticusIPCBridge.Key.pendingTranscriptUUIDs) ?? []
+        XCTAssertTrue(pendingList.isEmpty,
+                     "Nothing may be tagged pending-delivery when nothing was actually persisted " +
+                     "(regression: the old `entries.first` guess would tag the STALE pre-existing entry here)")
+
+        // Cleanup
+        store.clear(survivingRow)
+        defaults?.removeObject(forKey: DicticusIPCBridge.Key.pendingTranscriptUUIDs)
+        defaults?.removeObject(forKey: DicticusIPCBridge.Key.pendingTranscriptUUID)
+    }
 }
