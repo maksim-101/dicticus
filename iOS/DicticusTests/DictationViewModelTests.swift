@@ -1205,6 +1205,41 @@ final class DictationViewModelTests: XCTestCase {
                              "startDictation() must attempt to record even with no transcriptionService (D-03)")
     }
 
+    /// Regression target for fix 46-06/2. `guard state == .idle` in `startDictation()`
+    /// only protects a caller if nothing suspends between the check and the
+    /// transition to non-idle — but `await permissionRequester()` right after the
+    /// guard DOES suspend, so a second near-simultaneous invocation (Shortcut race,
+    /// notification observer, delayed `checkPendingIntent()`) can interleave during
+    /// that suspension and pass the same guard, starting a second concurrent
+    /// recording session.
+    ///
+    /// `permissionRequester` here calls `Task.yield()` before returning — an honest
+    /// stand-in for the real suspension `AVAudioApplication.requestRecordPermission()`
+    /// (or a real TCC prompt) introduces, without depending on TCC infrastructure the
+    /// test host doesn't have. Two `startDictation()` calls are launched concurrently
+    /// via `async let` so both bodies genuinely interleave on the `@MainActor` around
+    /// that suspension point, mirroring the real race exactly (not merely asserting
+    /// the fix's mechanism in isolation).
+    func testConcurrentStartDictationCallsProduceExactlyOneRecordingSession() async {
+        let vm = DictationViewModel()
+        let fakeRecorder = FakeAudioRecorder()
+        vm.audioRecorder = fakeRecorder
+        vm.permissionRequester = {
+            await Task.yield()
+            return true
+        }
+
+        async let first: Void = vm.startDictation()
+        async let second: Void = vm.startDictation()
+        _ = await (first, second)
+
+        XCTAssertEqual(fakeRecorder.startCallCount, 1,
+                       "Two overlapping startDictation() calls racing the permission-request " +
+                       "suspension must produce EXACTLY ONE recording session, not two")
+        XCTAssertEqual(vm.state, .recording,
+                       "Exactly one session must have won and be actively recording")
+    }
+
     /// The full happy path with no model present: start, stop, and the recording is
     /// durably queued with no error and no data loss. This is the exact spine the
     /// phase exists to prove — asserted with exact values, not `contains`-style checks.
