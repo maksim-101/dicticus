@@ -25,6 +25,23 @@ final class PendingRecordingStoreTests: XCTestCase {
         historyService = HistoryService.makeForTesting(containerURLProvider: { container })
         store = PendingRecordingStore.makeForTesting(historyService: historyService)
         wavDir = try? AudioRecorder.recordingsDirectory()
+
+        // recordingsDirectory() is a real, test-host-scoped shared path (not a
+        // per-test temp directory) — it's also read by AudioRecorderTests,
+        // PendingSurfaceTests, PendingRecordingLifecycleInvariantTests, and
+        // DictationViewModelTests. A sibling class can leave a `.wav` there that
+        // it never enqueue()d, and recoverOrphanedRecordings() correctly counts
+        // any such file as an orphan — so this class must start from a genuinely
+        // empty directory regardless of what a predecessor left behind. Sweep
+        // CONTENTS only: never remove/recreate wavDir itself, never widen to a
+        // parent directory.
+        if let dir = wavDir,
+           let contents = try? FileManager.default.contentsOfDirectory(
+               at: dir, includingPropertiesForKeys: nil, options: []) {
+            for url in contents {
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
     }
 
     override func tearDown() {

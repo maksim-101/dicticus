@@ -86,14 +86,23 @@ final class IOSModelWarmupServiceTests: XCTestCase {
     // MARK: - Phase 33 Plan 01 — Task 1 (IOS-ONB-01): synchronous hasModels init
 
     /// Pins the IOS-ONB-01 fix: `hasModels` must reflect the real filesystem
-    /// state immediately after init — BEFORE any async warmup runs.
+    /// state immediately after init — BEFORE any async warmup runs, in whichever
+    /// direction the filesystem currently points (a simulator that already has a
+    /// model cached must read `true`; a clean one must read `false`).
     ///
-    /// On the simulator (no model downloaded), `hasModels` must be `false`
-    /// right after construction. Two services created in the same process must
-    /// agree on the value, confirming it is computed from the same filesystem
-    /// source rather than a per-instance async race. This pins the synchronous-
-    /// init contract without requiring a direct import of the ASR SDK in the
-    /// test target.
+    /// `hasModels` must equal a value this test derives itself, at the same
+    /// moment, from the same on-disk location `IOSModelWarmupService` reads
+    /// (`Documents/huggingface/models/argmaxinc/whisperkit-coreml/<AsrModelLoader.modelName>`).
+    /// Two services created in the same process must also agree with each
+    /// other, confirming the value is computed from the same filesystem source
+    /// rather than a per-instance async race. This pins the synchronous-init
+    /// contract without requiring a direct import of the ASR SDK in the test
+    /// target.
+    ///
+    /// The path is deliberately re-derived here rather than reaching into
+    /// production for it: it's an independent cross-check of the same fact, so
+    /// a future divergence between the two derivations surfaces as a loud
+    /// failure instead of both sides silently agreeing on a shared bug.
     func testHasModelsReflectsFilesystemStateImmediatelyAfterInit() {
         let service1 = IOSModelWarmupService()
         let service2 = IOSModelWarmupService()
@@ -105,9 +114,16 @@ final class IOSModelWarmupServiceTests: XCTestCase {
         // unlikely but the ordering guarantee absent.
         XCTAssertEqual(service1.hasModels, service2.hasModels,
                        "hasModels must be computed synchronously from the filesystem at init — both instances read the same cache directory")
-        // On a clean simulator (no model downloaded), the value must be false.
-        // This is the primary assertion for the flash-fix contract.
-        XCTAssertFalse(service1.hasModels,
-                       "hasModels must be false on a simulator with no model downloaded — a flash-free first launch requires the correct initial state")
+
+        let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+        let modelDir = documentsDir?
+            .appendingPathComponent("huggingface/models/argmaxinc/whisperkit-coreml")
+            .appendingPathComponent(AsrModelLoader.modelName)
+        let expectedHasModels = modelDir.flatMap {
+            try? FileManager.default.contentsOfDirectory(atPath: $0.path)
+        }?.isEmpty == false
+
+        XCTAssertEqual(service1.hasModels, expectedHasModels,
+                       "hasModels must match whether the WhisperKit model directory is currently non-empty on disk — this test derives the expectation from the filesystem instead of assuming a clean simulator")
     }
 }
