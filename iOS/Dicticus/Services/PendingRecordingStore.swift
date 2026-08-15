@@ -116,6 +116,29 @@ final class PendingRecordingStore: ObservableObject {
         }.count
     }
 
+    /// The structurally-unrecoverable subset of `pendingCount` — rows a
+    /// `recoverOrphanedRecordings()` scan could not read a trustworthy duration for
+    /// (see `PendingRecording.isRetryable`'s doc comment). These can never be
+    /// transcribed, only cleared. `waitingCount + unrecoverableCount == pendingCount`
+    /// always holds — the two are a strict partition of the same status filter above,
+    /// split only on `durationSeconds`.
+    var unrecoverableCount: Int {
+        pendingRecordings.filter { row in
+            guard PendingRecordingStatus(rawValue: row.status) != nil else { return false }
+            return row.durationSeconds == nil
+        }.count
+    }
+
+    /// The transcribable subset of `pendingCount` (queued, transcribing, or
+    /// retryable-failed). `waitingCount + unrecoverableCount == pendingCount` always
+    /// holds.
+    var waitingCount: Int {
+        pendingRecordings.filter { row in
+            guard PendingRecordingStatus(rawValue: row.status) != nil else { return false }
+            return row.durationSeconds != nil
+        }.count
+    }
+
     private init(historyService: HistoryService) {
         self.historyService = historyService
         load()

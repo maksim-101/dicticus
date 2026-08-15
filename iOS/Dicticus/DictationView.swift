@@ -67,8 +67,8 @@ struct DictationView: View {
 
                 // Sits below the warm-up banner (or alone, once the model is ready
                 // and only the queue is nonempty) — renders nothing at count zero,
-                // per PendingQueueChip.label(for:).
-                PendingQueueChip(count: pendingStore.pendingCount, onTap: onOpenPendingQueue)
+                // per PendingQueueChip.label(waiting:unrecoverable:).
+                PendingQueueChip(waiting: pendingStore.waitingCount, unrecoverable: pendingStore.unrecoverableCount, onTap: onOpenPendingQueue)
                     .padding(.horizontal, 24)
 
                 if let result = viewModel.lastResult {
