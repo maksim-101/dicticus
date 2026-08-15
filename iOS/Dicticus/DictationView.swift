@@ -56,6 +56,7 @@ struct DictationView: View {
                             downloadProgress: warmupService.downloadProgress,
                             warmupStartedAt: warmupService.warmupStartedAt,
                             error: warmupService.error,
+                            isFirstWarmup: warmupService.isFirstWarmupForCurrentVersion,
                             onDownloadNow: { warmupService.warmup(force: true) },
                             onRetry: { warmupService.retry() }
                         )

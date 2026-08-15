@@ -151,13 +151,15 @@ final class WarmupStatusBannerTests: XCTestCase {
         stage: WarmupBannerStage,
         downloadProgress: Double = 0,
         warmupStartedAt: Date? = nil,
-        error: String? = nil
+        error: String? = nil,
+        isFirstWarmup: Bool = false
     ) -> WarmupStatusBanner {
         WarmupStatusBanner(
             stage: stage,
             downloadProgress: downloadProgress,
             warmupStartedAt: warmupStartedAt,
             error: error,
+            isFirstWarmup: isFirstWarmup,
             onDownloadNow: {},
             onRetry: {}
         )
@@ -181,6 +183,20 @@ final class WarmupStatusBannerTests: XCTestCase {
         XCTAssertEqual(
             banner.bodyText,
             "Dicticus is getting ready in the background, which takes a few seconds. It'll catch up with what you've said as soon as it's done."
+        )
+        XCTAssertEqual(banner.iconName, "gearshape.2")
+    }
+
+    // 260815-ait Fix 5: the loading stage's copy branches on isFirstWarmup.
+    // The default-false case above (test_copy_loading_exact) pins the fast copy
+    // unchanged; this pins the honest first-time copy, and that the headline/
+    // icon (which do not depend on isFirstWarmup) stay the same either way.
+    func test_copy_loading_firstWarmup_exact() {
+        let banner = makeBanner(stage: .loading, isFirstWarmup: true)
+        XCTAssertEqual(banner.headline, "Go ahead — you can start recording")
+        XCTAssertEqual(
+            banner.bodyText,
+            "First-time setup \u{2014} preparing the speech model. This can take up to a minute."
         )
         XCTAssertEqual(banner.iconName, "gearshape.2")
     }

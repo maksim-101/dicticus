@@ -36,4 +36,14 @@ final class DeepLinkRouter: ObservableObject {
         dictateTabRequestCount += 1
         return true
     }
+
+    /// Forces the Dictate tab for a genuine record-first launch (the `dicticus://dictate`
+    /// deep link or `DictateIntent`/Action Button start) — 260815-ait Fix 2. Shares
+    /// `dictateTabRequestCount` with `handleLiveActivityTap` so ContentView's existing
+    /// onAppear/onChange hook handles both triggers with one mechanism. Callers must only
+    /// invoke this once a pending record-first intent is confirmed genuine (not stale,
+    /// not a normal in-app dictation start) — see `DictationViewModel.checkPendingIntent()`.
+    func requestDictateTab() {
+        dictateTabRequestCount += 1
+    }
 }

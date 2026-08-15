@@ -126,4 +126,36 @@ final class IOSModelWarmupServiceTests: XCTestCase {
         XCTAssertEqual(service1.hasModels, expectedHasModels,
                        "hasModels must match whether the WhisperKit model directory is currently non-empty on disk — this test derives the expectation from the filesystem instead of assuming a clean simulator")
     }
+
+    // MARK: - 260815-ait Fix 5: isFirstWarmup pure predicate
+
+    /// No stored version (fresh install, or `UserDefaults` never wrote the key) —
+    /// must read as a first warm-up regardless of what the current key is.
+    func testIsFirstWarmupTrueWhenNoStoredVersion() {
+        XCTAssertTrue(
+            IOSModelWarmupService.isFirstWarmup(storedVersionKey: nil, currentVersionKey: "42::model-a")
+        )
+    }
+
+    /// A stored version from an older build or model — must read as a first
+    /// warm-up for the new one, even though SOME warm-up completed previously.
+    /// This is the version-keyed behavior the fix requires instead of a
+    /// one-time boolean: an app/model update must see the honest copy again.
+    func testIsFirstWarmupTrueWhenStoredVersionDiffers() {
+        XCTAssertTrue(
+            IOSModelWarmupService.isFirstWarmup(storedVersionKey: "41::model-a", currentVersionKey: "42::model-a")
+        )
+        XCTAssertTrue(
+            IOSModelWarmupService.isFirstWarmup(storedVersionKey: "42::model-a", currentVersionKey: "42::model-b")
+        )
+    }
+
+    /// The stored version exactly matches the current build/model — this warm-up
+    /// already completed once for this exact combination, so it is NOT a first
+    /// warm-up and must get the fast copy.
+    func testIsFirstWarmupFalseWhenStoredVersionMatchesCurrent() {
+        XCTAssertFalse(
+            IOSModelWarmupService.isFirstWarmup(storedVersionKey: "42::model-a", currentVersionKey: "42::model-a")
+        )
+    }
 }

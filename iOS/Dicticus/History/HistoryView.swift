@@ -95,11 +95,6 @@ struct HistoryRow: View {
                 .lineLimit(3)
 
             HStack {
-                Label("\(Int(entry.confidence * 100))%", systemImage: "waveform")
-                    .font(.caption2)
-                    .foregroundColor(.secondary)
-                    .accessibilityLabel("Confidence: \(Int(entry.confidence * 100)) percent")
-
                 Spacer()
 
                 Button(action: copyToClipboard) {

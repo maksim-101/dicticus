@@ -80,6 +80,14 @@ class IOSModelWarmupService: ObservableObject {
 
     @Published var isWarming = false
     @Published var isReady = false
+    /// True when this warm-up is the first one to complete successfully for the
+    /// current app build + model combination (260815-ait Fix 5). Drives the honest
+    /// "First-time setup…" copy on the first post-install/-update ANE recompile
+    /// (~60–90s observed), vs. the fast "Loading speech model…" copy every cached
+    /// warm-up sees after that. Recomputed at the start of every `warmup()` call
+    /// from `isFirstWarmup(storedVersionKey:currentVersionKey:)` — the small pure,
+    /// testable predicate this fix is built around.
+    @Published private(set) var isFirstWarmupForCurrentVersion: Bool = false
     /// When the current warm-up run began. Drives the `WarmupStatusBanner`'s "loading"
     /// stage elapsed-time readout (`Text(startedAt, style: .timer)`) — the honest
     /// substitute for a determinate bar on a stage whose progress genuinely cannot be
@@ -189,6 +197,31 @@ class IOSModelWarmupService: ObservableObject {
         hasModels = IOSModelWarmupService.checkWhisperKitCache()
     }
 
+    // MARK: - First-warmup detection (260815-ait Fix 5)
+
+    /// `UserDefaults.standard` key holding the version key (see
+    /// `currentWarmupVersionKey`) of the last warm-up that completed successfully.
+    private static let lastWarmedUpVersionDefaultsKey = "lastWarmedUpVersionKey"
+
+    /// Identifies "this exact app build + model" for `isFirstWarmup` below.
+    /// Combines the app build number — an ANE recompile can be triggered by an
+    /// app update even when the model file itself is unchanged — with the model
+    /// name, so a future model swap is also honestly flagged as a first warm-up.
+    private static var currentWarmupVersionKey: String {
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
+        return "\(build)::\(AsrModelLoader.modelName)"
+    }
+
+    /// Pure, directly-testable predicate: true when no warm-up has completed
+    /// successfully for `currentVersionKey` yet (`storedVersionKey` is `nil` or
+    /// differs). Deliberately version-keyed rather than a one-time `Bool` — a
+    /// future app/model update's first warm-up must be flagged honestly again,
+    /// not silently treated as "already warmed" because some earlier build once
+    /// completed a warm-up.
+    nonisolated static func isFirstWarmup(storedVersionKey: String?, currentVersionKey: String) -> Bool {
+        storedVersionKey != currentVersionKey
+    }
+
     /// Start WhisperKit large-v3-turbo initialization in a background Task via the
     /// shared bounded-retry `AsrModelLoader` (parity with macOS `ModelWarmupService`).
     /// Pass `force: true` from explicit user actions (Download / Retry button) so the
@@ -205,6 +238,10 @@ class IOSModelWarmupService: ObservableObject {
         warmupStartedAt = Date()
         error = nil
         downloadProgress = 0.0
+        isFirstWarmupForCurrentVersion = Self.isFirstWarmup(
+            storedVersionKey: UserDefaults.standard.string(forKey: Self.lastWarmedUpVersionDefaultsKey),
+            currentVersionKey: Self.currentWarmupVersionKey
+        )
         // Honest stage text: on a fresh install this is a large one-time download; on every
         // later launch the model is already on disk and this is just an ANE load. The old copy
         // said "Downloading…" in BOTH cases, which is why a restart showed a misleading state.
@@ -212,8 +249,15 @@ class IOSModelWarmupService: ObservableObject {
         // see 37-02-SUMMARY.md for verification. Matches the model's own filename
         // (openai_whisper-large-v3-v20240930_626MB), SettingsView, and macOS's
         // ModelWarmupService/label copy, all of which already say "~626 MB".
+        //
+        // 260815-ait Fix 5: an on-disk model still pays a one-time ANE recompile
+        // (~60–90s observed) the first time a given build/model combination warms
+        // up — the plain "Loading speech model…" copy looked hung during that
+        // window. `isFirstWarmupForCurrentVersion` distinguishes that case.
         downloadStatus = hasModels
-            ? "Loading speech model\u{2026}"
+            ? (isFirstWarmupForCurrentVersion
+                ? "First-time setup \u{2014} preparing the speech model. This can take up to a minute."
+                : "Loading speech model\u{2026}")
             : "Downloading speech model\u{2026} (first run, ~626 MB)"
 
         let warmupLog = Logger(subsystem: "com.dicticus", category: "warmup")
@@ -261,6 +305,13 @@ class IOSModelWarmupService: ObservableObject {
                     self?.hasModels = true
                     self?.watchdogTask?.cancel()
                     self?.watchdogTask = nil
+                    // 260815-ait Fix 5: record this build/model as warmed-up so the
+                    // NEXT warm-up (this launch's re-foreground, or the next cold
+                    // launch) sees the fast copy instead of "First-time setup…".
+                    UserDefaults.standard.set(
+                        IOSModelWarmupService.currentWarmupVersionKey,
+                        forKey: IOSModelWarmupService.lastWarmedUpVersionDefaultsKey
+                    )
                 }
                 warmupLog.info("ASR pipeline ready — UI unblocked")
 

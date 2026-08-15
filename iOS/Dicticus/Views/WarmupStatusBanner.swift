@@ -45,8 +45,32 @@ struct WarmupStatusBanner: View {
     let downloadProgress: Double
     let warmupStartedAt: Date?
     let error: String?
+    /// 260815-ait Fix 5: true when the current `.loading` warm-up is the first one
+    /// for this app build/model (see `IOSModelWarmupService.isFirstWarmupForCurrentVersion`)
+    /// — selects the honest "First-time setup…" copy over the fast-path copy below.
+    /// Defaults to `false` (via the explicit initializer below) so existing call
+    /// sites and the locked fast-copy test stay unchanged.
+    let isFirstWarmup: Bool
     let onDownloadNow: () -> Void
     let onRetry: () -> Void
+
+    init(
+        stage: WarmupBannerStage,
+        downloadProgress: Double,
+        warmupStartedAt: Date?,
+        error: String?,
+        isFirstWarmup: Bool = false,
+        onDownloadNow: @escaping () -> Void,
+        onRetry: @escaping () -> Void
+    ) {
+        self.stage = stage
+        self.downloadProgress = downloadProgress
+        self.warmupStartedAt = warmupStartedAt
+        self.error = error
+        self.isFirstWarmup = isFirstWarmup
+        self.onDownloadNow = onDownloadNow
+        self.onRetry = onRetry
+    }
 
     /// `warning` is a declared `DESIGN.md` token but iOS ships no color-asset
     /// catalog yet (confirmed absent — see 46-04-SUMMARY.md follow-up note), so this
@@ -144,7 +168,12 @@ struct WarmupStatusBanner: View {
         case .downloading:
             return "One-time download, about 626 MB. You can start recording anytime — we'll transcribe once it's ready."
         case .loading:
-            return "Dicticus is getting ready in the background, which takes a few seconds. It'll catch up with what you've said as soon as it's done."
+            // 260815-ait Fix 5: the first ANE recompile for a build/model can take
+            // ~60-90s, not "a few seconds" — the fast-path copy would look like a
+            // hang during that window, so the first warm-up gets honest copy.
+            return isFirstWarmup
+                ? "First-time setup \u{2014} preparing the speech model. This can take up to a minute."
+                : "Dicticus is getting ready in the background, which takes a few seconds. It'll catch up with what you've said as soon as it's done."
         case .modelMissing:
             return "Recordings will wait until you download it."
         case .failed:
