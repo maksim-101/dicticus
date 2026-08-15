@@ -118,8 +118,15 @@ struct PendingRecordingRow: View {
             }
 
             // The longest text a row can carry (per the UI-SPEC's `long-text`
-            // consideration) — the two-line cap is a hard layout constraint so the
-            // trailing Retry/Clear actions are never pushed off-screen.
+            // consideration). Retry/Clear are on the row ABOVE this text (not
+            // pushed off-screen by it), so the cap only needs to fit the copy,
+            // not protect the buttons.
+            //
+            // 260815-ait Fix 2/UAT: the two-line cap clipped the unrecoverable
+            // copy's trailing "Clear it to remove it." on-device, hiding the only
+            // action available on that row (it has no Retry). Raised to 3 lines so
+            // the full sentence — including the action — is always visible; the
+            // retries-exhausted copy already fit in 2 and is unaffected.
             //
             // 2026-08-11 round 3: two DIFFERENT reasons collapse to isRetryable ==
             // false, and they need different copy — a row whose file could never
@@ -131,7 +138,7 @@ struct PendingRecordingRow: View {
                 Text(failedExplanationText)
                     .font(.body)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .lineLimit(3)
                     .truncationMode(.tail)
             }
         }

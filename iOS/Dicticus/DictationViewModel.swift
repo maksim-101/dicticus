@@ -1011,6 +1011,13 @@ class DictationViewModel: ObservableObject {
         let shortcut = shared?.bool(forKey: "isShortcutLaunch") ?? false
         shared?.set(false, forKey: "isShortcutLaunch")
         shared?.removeObject(forKey: "pendingDictationSetAt")
+
+        // 260815-ait Fix 2: this branch only runs for a genuine, non-stale record-first
+        // launch (dictate deep link or DictateIntent/Action Button) — force the Dictate
+        // tab so the recording that's about to start is visible, matching the
+        // Live-Activity-tap navigation already handled the same way.
+        DeepLinkRouter.shared.requestDictateTab()
+
         Task {
             try? await Task.sleep(nanoseconds: 500_000_000)
             await self.startDictation(fromShortcut: shortcut)
