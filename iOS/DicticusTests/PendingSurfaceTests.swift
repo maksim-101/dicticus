@@ -119,22 +119,30 @@ final class PendingSurfaceTests: XCTestCase {
         XCTAssertFalse(makeRecording(durationSeconds: nil, retryCount: 0).isRetryable)
     }
 
-    // MARK: - PendingQueueChip.label(for:)
+    // MARK: - PendingQueueChip.label(waiting:unrecoverable:)
 
     func testChipLabelZeroReturnsNilNotRendered() {
-        XCTAssertNil(PendingQueueChip.label(for: 0), "count zero must mean not rendered, not an empty-string render")
+        XCTAssertNil(PendingQueueChip.label(waiting: 0, unrecoverable: 0), "both zero must mean not rendered, not an empty-string render")
     }
 
-    func testChipLabelOneIsSingularSentence() {
-        XCTAssertEqual(PendingQueueChip.label(for: 1), "1 recording waiting to transcribe")
+    func testChipLabelOneWaitingIsSingularSentence() {
+        XCTAssertEqual(PendingQueueChip.label(waiting: 1, unrecoverable: 0), "1 recording waiting to transcribe")
     }
 
-    func testChipLabelPluralIncludesCount() {
-        XCTAssertEqual(PendingQueueChip.label(for: 4), "4 recordings waiting to transcribe")
+    func testChipLabelWaitingPluralIncludesCount() {
+        XCTAssertEqual(PendingQueueChip.label(waiting: 2, unrecoverable: 0), "2 recordings waiting to transcribe")
     }
 
-    func testChipLabelLargeNumber() {
-        XCTAssertEqual(PendingQueueChip.label(for: 42), "42 recordings waiting to transcribe")
+    func testChipLabelOneUnrecoverableIsSingularSentence() {
+        XCTAssertEqual(PendingQueueChip.label(waiting: 0, unrecoverable: 1), "1 recording couldn't be saved")
+    }
+
+    func testChipLabelUnrecoverablePluralIncludesCount() {
+        XCTAssertEqual(PendingQueueChip.label(waiting: 0, unrecoverable: 3), "3 recordings couldn't be saved")
+    }
+
+    func testChipLabelMixedStatesBoth() {
+        XCTAssertEqual(PendingQueueChip.label(waiting: 2, unrecoverable: 1), "2 waiting · 1 couldn't be saved")
     }
 }
 
@@ -189,6 +197,27 @@ final class PendingSurfaceCountTests: XCTestCase {
         return RecordingArtifact(uuid: uuid, fileURL: url, durationSeconds: actualDuration)
     }
 
+    /// Writes an unfinalized mid-write WAV under `wavDir` — same technique as
+    /// `PendingRecordingStoreTests.writeUnfinalizedOrphanWav(seconds:)` — so that
+    /// `recoverOrphanedRecordings()` inserts it as a structurally-unrecoverable
+    /// (`durationSeconds == nil`) row, exactly the case `unrecoverableCount` exists
+    /// to surface.
+    @discardableResult
+    private func writeUnfinalizedOrphanWav(seconds: Double = 1.0) throws -> UUID {
+        let uuid = UUID()
+        let url = wavDir.appendingPathComponent("\(uuid.uuidString).wav")
+        let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false)!
+        let writer = try RecordingFileWriter(url: url, format: format)
+        let frameCount = AVAudioFrameCount(16000 * seconds)
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount)!
+        buffer.frameLength = frameCount
+        writer.append(buffer)
+        let midWriteBytes = try Data(contentsOf: url)
+        writer.discard()
+        try midWriteBytes.write(to: url)
+        return uuid
+    }
+
     /// Specifically covers the mid-flight case the UI-SPEC calls out by name: the
     /// last queued item starting to transcribe must not make the chip/badge count
     /// drop, because a bare `queued + failed` count would go from 3 to 2 the instant
@@ -208,6 +237,30 @@ final class PendingSurfaceCountTests: XCTestCase {
         store.markTranscribing(transcribingRow)
         store.markFailed(failedRow, reason: "test failure")
 
+        XCTAssertEqual(store.pendingCount, 3)
+    }
+
+    /// Store-level partition test (UAT finding F, 2026-08-15): one queued
+    /// (duration set), one transcribing (duration set), and one recovered
+    /// structurally-unrecoverable row (duration nil) — `waitingCount` counts only
+    /// the first two, `unrecoverableCount` only the third, and the total is
+    /// unchanged.
+    func testWaitingAndUnrecoverableCountsPartitionPendingCount() throws {
+        let queuedArtifact = try writeRealWav()
+        let transcribingArtifact = try writeRealWav()
+
+        guard store.enqueue(queuedArtifact) != nil,
+              let transcribingRow = store.enqueue(transcribingArtifact) else {
+            XCTFail("enqueue() must succeed for both waiting artifacts")
+            return
+        }
+        store.markTranscribing(transcribingRow)
+
+        try writeUnfinalizedOrphanWav()
+        store.recoverOrphanedRecordings()
+
+        XCTAssertEqual(store.waitingCount, 2)
+        XCTAssertEqual(store.unrecoverableCount, 1)
         XCTAssertEqual(store.pendingCount, 3)
     }
 }

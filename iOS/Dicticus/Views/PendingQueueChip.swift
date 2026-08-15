@@ -5,7 +5,8 @@ import SwiftUI
 /// zero is what implements "not rendered at all"; the chip is never hidden with
 /// opacity.
 struct PendingQueueChip: View {
-    let count: Int
+    let waiting: Int
+    let unrecoverable: Int
     let onTap: () -> Void
 
     /// `warning` is a declared `DESIGN.md` token but iOS ships no color-asset catalog
@@ -15,7 +16,7 @@ struct PendingQueueChip: View {
     private var warningTint: Color { .orange }
 
     var body: some View {
-        if let label = Self.label(for: count) {
+        if let label = Self.label(waiting: waiting, unrecoverable: unrecoverable) {
             Button(action: onTap) {
                 HStack(spacing: 8) {
                     Image(systemName: "tray.full")
@@ -44,29 +45,45 @@ struct PendingQueueChip: View {
         }
     }
 
-    /// Nil at zero (renders nothing), the singular sentence at one, the plural
-    /// sentence with the number above one — the two locked sentences from the
-    /// UI-SPEC's Copywriting Contract, verbatim.
-    static func label(for count: Int) -> String? {
-        switch count {
-        case 0: return nil
-        case 1: return "1 recording waiting to transcribe"
-        default: return "\(count) recordings waiting to transcribe"
+    /// Nil when both are zero (renders nothing). Waiting-only and unrecoverable-only
+    /// keep their own singular/plural sentences; when both are nonzero, a single
+    /// mixed sentence states both counts — the approved copy (UAT finding F,
+    /// 2026-08-15).
+    static func label(waiting: Int, unrecoverable: Int) -> String? {
+        switch (waiting, unrecoverable) {
+        case (0, 0):
+            return nil
+        case (_, 0):
+            return waiting == 1 ? "1 recording waiting to transcribe" : "\(waiting) recordings waiting to transcribe"
+        case (0, _):
+            return unrecoverable == 1 ? "1 recording couldn't be saved" : "\(unrecoverable) recordings couldn't be saved"
+        default:
+            return "\(waiting) waiting · \(unrecoverable) couldn't be saved"
         }
     }
 }
 
 #Preview("One waiting") {
-    PendingQueueChip(count: 1, onTap: {})
+    PendingQueueChip(waiting: 1, unrecoverable: 0, onTap: {})
         .padding()
 }
 
 #Preview("Several waiting") {
-    PendingQueueChip(count: 4, onTap: {})
+    PendingQueueChip(waiting: 4, unrecoverable: 0, onTap: {})
         .padding()
 }
 
 #Preview("Zero — renders nothing") {
-    PendingQueueChip(count: 0, onTap: {})
+    PendingQueueChip(waiting: 0, unrecoverable: 0, onTap: {})
+        .padding()
+}
+
+#Preview("Couldn't be saved") {
+    PendingQueueChip(waiting: 0, unrecoverable: 2, onTap: {})
+        .padding()
+}
+
+#Preview("Mixed") {
+    PendingQueueChip(waiting: 2, unrecoverable: 1, onTap: {})
         .padding()
 }
