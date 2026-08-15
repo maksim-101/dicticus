@@ -147,10 +147,15 @@ struct PendingRecordingRow: View {
         // speech the user recorded — irreversible, and gated behind a destructive
         // confirmation whose message states plainly that the recording has not been
         // transcribed and that deletion cannot be undone (T-46-10).
-        .confirmationDialog(
+        // Use .alert (not .confirmationDialog): a confirmationDialog presents as a
+        // popover WITHOUT a visible Cancel button in a regular width class (iPad /
+        // iPhone Pro Max split-view/landscape), dismissible only by tapping outside —
+        // observed in the 2026-08-15 device UAT. .alert always shows both buttons in
+        // every size class and is not tap-outside dismissable (correct for a
+        // destructive, irreversible action).
+        .alert(
             "Delete Recording?",
-            isPresented: $showingClearConfirmation,
-            titleVisibility: .visible
+            isPresented: $showingClearConfirmation
         ) {
             Button("Delete", role: .destructive) {
                 pendingStore.clear(recording)
