@@ -1260,7 +1260,6 @@ public enum SelfCorrectionResolver {
     /// Discretion, resolved in favor of one path (39-CONTEXT.md).
     private enum ScratchSpanKind {
         case sentence
-        case word
     }
 
     private struct ScratchCommand {
@@ -1273,8 +1272,6 @@ public enum SelfCorrectionResolver {
         ScratchCommand(phrase: "scratch the last sentence", span: .sentence),
         ScratchCommand(phrase: "ignore the last sentence", span: .sentence),
         ScratchCommand(phrase: "forget the last sentence", span: .sentence),
-        ScratchCommand(phrase: "scratch the last word", span: .word),
-        ScratchCommand(phrase: "ignore the last word", span: .word),
     ]
 
     /// D-06: precision over recall — this list is DELIBERATELY small. Do
@@ -1297,10 +1294,6 @@ public enum SelfCorrectionResolver {
         ScratchCommand(phrase: "vergiss den letzten Satz", span: .sentence),
         ScratchCommand(phrase: "streich das", span: .sentence),
         ScratchCommand(phrase: "streiche das", span: .sentence),
-        ScratchCommand(phrase: "ignoriere das letzte Wort", span: .word),
-        ScratchCommand(phrase: "vergiss das letzte Wort", span: .word),
-        ScratchCommand(phrase: "streich das letzte Wort", span: .word),
-        ScratchCommand(phrase: "streiche das letzte Wort", span: .word),
     ]
 
     /// The ONLY word tokens permitted to sit between a clause boundary
@@ -1365,88 +1358,18 @@ public enum SelfCorrectionResolver {
     /// `false`, every scratch command phrase (English and German) is
     /// pasted literally and nothing is ever destroyed.
     ///
-    /// **Defect 1 (CR-01, `39-REVIEW.md`, found by post-hoc code
-    /// review):** the `.word`-span path performs TWO separate deletions
-    /// against the immutable original text and, when the command has
-    /// trailing content, glues the retained prefix directly onto the
-    /// retained suffix with no separator inserted:
-    ///
-    ///   IN:  "The server is called alpha beta. Scratch the last word.
-    ///         It ships Friday."
-    ///   OUT: "The server is called alphaIt ships Friday."
-    ///
-    /// This was mitigated same-day by shipping `enableScratchMidUtterance
-    /// = false` (see that flag below) — narrowing the surface to
-    /// tail-only commands, which was believed to route around the
-    /// defect entirely.
-    ///
-    /// **Defect 2 (CR-02, `39-VERIFICATION.md`, found by independent
-    /// fresh-eyes re-verification, 2026-07-11 — the SAME day, a second
-    /// review pass):** even in the tail-only surface that the CR-01
-    /// mitigation left ENABLED, the `.word`-span path silently rewrites
-    /// or drops the PRECEDING sentence's own terminal punctuation
-    /// whenever that sentence does not end in "." — a defect entirely
-    /// independent of CR-01's trailing-content shape:
-    ///
-    ///   IN:  "Is it alpha beta? Scratch the last word."
-    ///   OUT: "Is it alpha."                                  ("?" → ".")
-    ///
-    ///   IN:  "This is amazing alpha beta! Scratch the last word."
-    ///   OUT: "This is amazing alpha."                        ("!" → ".")
-    ///
-    ///   IN:  "Alpha beta! Scratch the last word"
-    ///   OUT: "Alpha"                                         ("!" dropped, no replacement)
-    ///
-    ///   IN:  "Das ist super Alpha Beta! Vergiss das letzte Wort."
-    ///   OUT: "Das ist super Alpha."                          (German, same defect)
-    ///
-    ///   CONTROL (the one shape that works — every shipped fixture used
-    ///   exactly this shape): "The server is called alpha beta. Scratch
-    ///   the last word." → "The server is called alpha." (correct,
-    ///   because the preceding sentence already ended in ".")
-    ///
-    /// **Architectural root cause (shared by both defects):** the
-    /// `.word`-span case (see the `.word` case in
-    /// `resolveScratchCommandPath` below) performs two independent
-    /// deletions — Edit A (the "last word" token, found via a
-    /// whitespace-only tokenizer that does not distinguish the
-    /// PRECEDING sentence's own terminal punctuation from an ordinary
-    /// word boundary) and Edit B (the command's own clause) — plus a
-    /// Step 7 terminal-punctuation "restore" that only ever re-inserts
-    /// the COMMAND's OWN consumed terminator, never the terminator that
-    /// was actually deleted from the preceding sentence. The `.sentence`
-    /// -span path, by contrast, uses ONE contiguous `deleteRange` (no
-    /// two-edit arithmetic, no restore heuristic to get wrong) and is
-    /// clean under every adversarial probe tried against it. Gap
-    /// closure must rebuild the `.word` path on the `.sentence` path's
-    /// single-contiguous-range model rather than patching the two-edit
-    /// arithmetic further.
-    ///
-    /// **Why the ship gates gave a false pass — the most important
-    /// fact for the next reader:** the `selfcorr43` scale-replay
-    /// (18 changed / 1894 texts, zero new pairs versus the pre-phase
-    /// baseline) was TELLING THE TRUTH — it genuinely found zero new
-    /// corruptions — but it is structurally blind: the real debug-log
-    /// corpus contains ZERO genuine scratch-command usages (RESEARCH
-    /// A4 — every hit is meta-discussion about designing this feature),
-    /// so it cannot exercise the firing path at all, let alone the
-    /// punctuation-mutation shape. Separately, every one of plan
-    /// 39-01's 11 hand-authored positive fixtures places the command at
-    /// the END of the string with a PRECEDING PERIOD — the one shape
-    /// that happens to work — so the fixture suite was a monoculture
-    /// that could not have caught CR-02 either. Sound replay method,
-    /// blind corpus; sound fixture method, monoculture fixture shapes.
-    /// Neither gate was rubber-stamped; both were structurally unable
-    /// to see this class of defect.
-    ///
-    /// See `39-REVIEW.md` (CR-01) and `39-VERIFICATION.md` (CR-02) for
-    /// full empirical detail. See `39-SELFCORR43-CLASSIFICATION.md` for
-    /// the (now superseded, but honestly-arrived-at) original scale-
-    /// replay classification. The call site's `guard enableScratchCommand
-    /// else { return text }` below is left fully in place,
-    /// reachable-but-disabled — re-enabling this is a one-line flip once
-    /// the `.word` case is rebuilt on the `.sentence` model and
-    /// re-verified against BOTH defect shapes, not just CR-01's.
+    /// **Word-span path removed (2026-08-15).** The two defects that
+    /// drove the "ships fully disabled" verdict above (CR-01
+    /// fragment-glue, `39-REVIEW.md`; CR-02 terminal-punctuation
+    /// mutation, `39-VERIFICATION.md`) lived exclusively in the
+    /// `.word`-span deletion path, which has now been DELETED — see
+    /// `backlog/voice-edit-word-span-redesign.md` for the planned
+    /// rebuild. The `.sentence`-span path was never implicated by
+    /// either defect and remains fully intact below (see
+    /// `resolveScratchCommandPath`'s `.sentence` deletion arm). This flag
+    /// stays `false` regardless: re-enabling scratch commands requires
+    /// re-verifying the `.sentence` path on its own merits, and `.word`
+    /// support cannot return until it is rebuilt per the backlog doc.
     private static let enableScratchCommand = false
 
     /// Gate flag governing ONLY D-11's WIDER mid-utterance firing
@@ -1458,57 +1381,16 @@ public enum SelfCorrectionResolver {
     /// classifies even one corruption attributable to the wider anchor.
     ///
     /// CORRECTED VERDICT (39-05 mitigation, 2026-07-11): SHIPS DISABLED.
-    /// The original 2026-07-11 verdict below ("SHIPS ENABLED", based on
-    /// the `selfcorr43` scale-replay reporting 18 changed / 1894 texts —
-    /// identical to the 18/1878 pre-phase baseline, zero new changed
-    /// pairs) was a FALSE PASS. The scale-replay corpus contains ZERO
-    /// genuine scratch-command usages (RESEARCH A4 — every hit is
-    /// meta-discussion about designing this feature), so it structurally
-    /// could not exercise the firing path that corrupts. Post-hoc code
-    /// review (`39-REVIEW.md` CR-01) found the defect by inspection and
-    /// empirically confirmed it by compiling this file standalone and
-    /// running it against adversarial input — not via the gate. The
-    /// `.word`-span two-edit deletion (see the `.word` case below) glues
-    /// the retained prefix directly onto the retained suffix with no
-    /// separator whenever the command has trailing content, e.g.:
-    ///
-    ///   IN:  "The server is called alpha beta. Scratch the last word.
-    ///         It ships Friday."
-    ///   OUT: "The server is called alphaIt ships Friday."
-    ///
-    /// This is the exact `hasTrailingContent` case this flag gates at
-    /// the call site below — so the corruption is attributable to this
-    /// flag, and per the plan's own non-negotiable rule ("even ONE
-    /// corruption attributable to `enableScratchMidUtterance` → that
-    /// flag alone ships `false`"), it now ships `false`. The feature
-    /// degrades to tail-only: a scratch command must sit at the end of
-    /// the utterance to fire (D-04 case 3's original, narrower, verified
-    /// surface). The call site's `hasTrailingContent` guard below is
-    /// left fully in place, reachable-but-disabled, so re-enabling this
-    /// is a one-line flip once the `.word` case's delete-range
-    /// arithmetic is fixed to insert a separator (see `39-REVIEW.md`
-    /// CR-01 "Fix" section) and re-verified. See
-    /// `39-SELFCORR43-CLASSIFICATION.md` for the original (now
-    /// superseded) replay numbers.
-    ///
-    /// ORIGINAL RECORDED VERDICT (39-05, 2026-07-11, SUPERSEDED ABOVE):
-    /// SHIPS ENABLED — same evidence as `enableScratchCommand` above
-    /// (18/1894, 0 new changed pairs, 0 corruptions attributable to the
-    /// wider mid-utterance anchor specifically). Human-confirmed
-    /// 2026-07-11; see `39-SELFCORR43-CLASSIFICATION.md`.
-    ///
-    /// SUPERSEDED AGAIN, SAME DAY (39-05 SECOND mitigation, 2026-07-11,
-    /// CR-02): a second defect, independent of this flag's own
-    /// trailing-content shape, was found in the tail-only surface this
-    /// mitigation left enabled — see `enableScratchCommand`'s doc
-    /// comment above for the full CR-02 detail. The parent
-    /// `enableScratchCommand` flag now ships `false` and its guard
+    /// The defect that drove this verdict (CR-01, `39-REVIEW.md`) lived
+    /// exclusively in the `.word`-span deletion path, which has now been
+    /// DELETED (2026-08-15) — see `enableScratchCommand`'s doc comment
+    /// above and `backlog/voice-edit-word-span-redesign.md` for detail.
+    /// This flag's own value is moot regardless: the parent
+    /// `enableScratchCommand` flag ships `false` and its guard
     /// short-circuits before this flag's `hasTrailingContent` check is
-    /// ever reached, so this flag's own value is currently moot. It is
-    /// left at `false` (its already-correct value) rather than being
-    /// reset to `true`, since the CR-01 defect it was built to contain
-    /// remains unfixed. When gap closure rebuilds the `.word` case, both
-    /// flags must be re-evaluated together against BOTH defect shapes.
+    /// ever reached. It stays `false` (its already-correct value) rather
+    /// than being reset to `true`. See `39-SELFCORR43-CLASSIFICATION.md`
+    /// for the original (now superseded) replay numbers.
     private static let enableScratchMidUtterance = false
 
     private static let scratchLeftBoundaryPunctuation = Set<Character>(".!?,;:")
@@ -1552,9 +1434,9 @@ public enum SelfCorrectionResolver {
         // Flat, escaped, longest-first alternation — identical
         // construction to resolveCommaPath's connector alternation. No
         // nesting, no unbounded quantifiers (T-39-05: no catastrophic-
-        // backtracking surface). Longest-first ensures e.g. "streiche das
-        // letzte Wort" wins over "streiche das" when both could match at
-        // the same position.
+        // backtracking surface). Longest-first prevents a shorter
+        // command phrase from shadowing a longer one that shares the
+        // same leading text at a given match position.
         let sortedCommands = commands.sorted(by: { $0.phrase.count > $1.phrase.count })
         let alternation = sortedCommands
             .map { NSRegularExpression.escapedPattern(for: $0.phrase) }
@@ -1652,51 +1534,6 @@ public enum SelfCorrectionResolver {
                 let deleteRange = deleteStart..<commandEnd
                 edits.append((NSRange(deleteRange, in: text), ""))
                 acceptedEditRanges.append(deleteRange)
-
-            case .word:
-                // Edit B's clause-deletion left boundary: scan backward
-                // from commandStart over whitespace and, if present, a
-                // single , or ; and any whitespace before that.
-                var clauseStart = commandStart
-                while clauseStart > text.startIndex, text[text.index(before: clauseStart)].isWhitespace {
-                    clauseStart = text.index(before: clauseStart)
-                }
-                if clauseStart > text.startIndex, [",", ";"].contains(text[text.index(before: clauseStart)]) {
-                    clauseStart = text.index(before: clauseStart)
-                    while clauseStart > text.startIndex, text[text.index(before: clauseStart)].isWhitespace {
-                        clauseStart = text.index(before: clauseStart)
-                    }
-                }
-
-                // The search region for "the last word token" EXCLUDES
-                // the boundary comma/semicolon consumed above (Edit B
-                // owns that), so the two edits are adjacent, never
-                // overlapping.
-                let searchRange: Range<String.Index>
-                if commandBeginsItsSpan {
-                    guard spanIdx > 0 else { continue }
-                    searchRange = spanRanges[spanIdx - 1]
-                } else {
-                    searchRange = spanStart..<clauseStart
-                }
-
-                guard let lastToken = scratchLastWordToken(in: searchRange, text: text) else { continue }
-
-                var editAStart = lastToken.lowerBound
-                while editAStart > searchRange.lowerBound, text[text.index(before: editAStart)].isWhitespace {
-                    editAStart = text.index(before: editAStart)
-                }
-                let editARange = editAStart..<lastToken.upperBound
-                let clauseRange = clauseStart..<commandEnd
-
-                // There is no token cap anywhere in this function
-                // (unlike resolveCommaPath's `actualDrop` cap) — a
-                // whole-word or whole-sentence delete is never
-                // truncated.
-                edits.append((NSRange(editARange, in: text), ""))
-                edits.append((NSRange(clauseRange, in: text), ""))
-                acceptedEditRanges.append(editARange)
-                acceptedEditRanges.append(clauseRange)
             }
 
             if commandEnd == text.endIndex, let terminator = consumedTerminator {
@@ -1717,10 +1554,10 @@ public enum SelfCorrectionResolver {
         }
         result = result.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Step 7: terminal-punctuation restore. Without this, a
-        // word-span delete that consumed the command's own trailing
-        // period (e.g. "…beta." -> the deleted token carried the
-        // period with it) would silently lose the sentence's full stop.
+        // Step 7: terminal-punctuation restore. Without this, a delete
+        // that consumed the command's own trailing period (e.g.
+        // "…beta." -> the deleted range carried the period with it)
+        // would silently lose the sentence's full stop.
         if !result.isEmpty,
            let terminator = finalConsumedTerminator,
            let last = result.last,
@@ -1836,22 +1673,6 @@ public enum SelfCorrectionResolver {
             start = text.index(before: start)
         }
         guard start < idx else { return nil }
-        return start..<idx
-    }
-
-    /// The last whitespace-delimited token inside `range` (trailing
-    /// whitespace inside `range` is skipped first). Used to find the
-    /// "last word" for D-04 case 2's named-span `.word` deletion.
-    private static func scratchLastWordToken(in range: Range<String.Index>, text: String) -> Range<String.Index>? {
-        var idx = range.upperBound
-        while idx > range.lowerBound, text[text.index(before: idx)].isWhitespace {
-            idx = text.index(before: idx)
-        }
-        guard idx > range.lowerBound else { return nil }
-        var start = idx
-        while start > range.lowerBound, !text[text.index(before: start)].isWhitespace {
-            start = text.index(before: start)
-        }
         return start..<idx
     }
 

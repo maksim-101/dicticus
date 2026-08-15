@@ -891,70 +891,6 @@ final class SelfCorrectionResolverTests: XCTestCase {
         )
     }
 
-    // MARK: - 39-REVIEW.md CR-01: blind-spot fixtures (.word span + trailing content)
-    //
-    // BLIND-SPOT FIXTURES (39-REVIEW.md CR-01). Every 39-01 positive
-    // fixture placed the command at the end of the utterance — the one
-    // shape that works — so the `.word`-span + trailing-content
-    // corruption shipped undetected. These pin the DISABLED (passthrough)
-    // behavior. When gap closure fixes the `.word` delete-range
-    // arithmetic (both CR-01 AND CR-02) and restores both gate flags, these
-    // MUST be flipped to assert the CORRECT delete (e.g. "The server is
-    // called alpha. It ships Friday.") — NOT passthrough. Do not simply
-    // re-enable the flags and leave these asserting passthrough.
-
-    /// The exact corrupting case from `39-REVIEW.md` CR-01: `.word`-span
-    /// command, period-boundary (`commandBeginsItsSpan == true`), with
-    /// trailing content. Pre-mitigation this produced
-    /// "The server is called alphaIt ships Friday." (fragments glued
-    /// together, period silently dropped).
-    ///
-    /// DISABLED 2026-07-11 (enableScratchCommand = false; see CR-01/CR-02).
-    /// WHEN RE-ENABLED after gap closure, this MUST assert:
-    ///   "The server is called alpha. It ships Friday."
-    /// Do not re-enable the flag and leave this asserting passthrough.
-    func testScratchWordSpanTrailingContentPeriodBoundaryEN() {
-        let input = "The server is called alpha beta. Scratch the last word. It ships Friday."
-        XCTAssertEqual(
-            SelfCorrectionResolver.resolve(input, language: "en"),
-            input,
-            "enableScratchCommand ships false (CR-01/CR-02) — must ABSTAIN, byte-identical"
-        )
-    }
-
-    /// `39-REVIEW.md` CR-01, comma-prefixed sub-case (same-sentence
-    /// command, not period-terminated). Pre-mitigation this produced
-    /// "The server is called alphaand we ship Friday.".
-    ///
-    /// DISABLED 2026-07-11 (enableScratchCommand = false; see CR-01/CR-02).
-    /// WHEN RE-ENABLED after gap closure, this MUST assert:
-    ///   "The server is called alpha and we ship Friday."
-    /// Do not re-enable the flag and leave this asserting passthrough.
-    func testScratchWordSpanTrailingContentCommaPrefixedEN() {
-        let input = "The server is called alpha beta, scratch the last word, and we ship Friday."
-        XCTAssertEqual(
-            SelfCorrectionResolver.resolve(input, language: "en"),
-            input,
-            "enableScratchCommand ships false (CR-01/CR-02) — must ABSTAIN, byte-identical"
-        )
-    }
-
-    /// `39-REVIEW.md` CR-01, German. Pre-mitigation this produced
-    /// "Der Server heisst AlphaWir liefern am Montag.".
-    ///
-    /// DISABLED 2026-07-11 (enableScratchCommand = false; see CR-01/CR-02).
-    /// WHEN RE-ENABLED after gap closure, this MUST assert:
-    ///   "Der Server heisst Alpha. Wir liefern am Montag."
-    /// Do not re-enable the flag and leave this asserting passthrough.
-    func testScratchWordSpanTrailingContentPeriodBoundaryDE() {
-        let input = "Der Server heisst Alpha Beta. Vergiss das letzte Wort. Wir liefern am Montag."
-        XCTAssertEqual(
-            SelfCorrectionResolver.resolve(input, language: "de"),
-            input,
-            "enableScratchCommand ships false (CR-01/CR-02) — must ABSTAIN, byte-identical"
-        )
-    }
-
     /// D-04 case 2 (command names its span explicitly): named span = last
     /// sentence.
     ///
@@ -968,142 +904,6 @@ final class SelfCorrectionResolverTests: XCTestCase {
             SelfCorrectionResolver.resolve(input, language: "en"),
             input,
             "enableScratchCommand ships false (CR-01/CR-02) — must ABSTAIN, byte-identical"
-        )
-    }
-
-    /// D-04 case 2: named span = last word, command in its own
-    /// period-delimited sentence. This is the EXACT CR-02 control shape —
-    /// the preceding sentence already ends in "." so this particular
-    /// fixture would have been correct even under the CR-02 defect. It is
-    /// precisely BECAUSE every `.word`-span fixture used only this shape
-    /// that CR-02's "!"/"?" mutation shipped undetected — see the new
-    /// blind-spot fixtures below.
-    ///
-    /// DISABLED 2026-07-11 (enableScratchCommand = false; see CR-01/CR-02).
-    /// WHEN RE-ENABLED after gap closure, this MUST assert:
-    ///   "The server is called alpha."
-    /// Do not re-enable the flag and leave this asserting passthrough.
-    func testScratchNamedSpanLastWordEN() {
-        let input = "The server is called alpha beta. Scratch the last word."
-        XCTAssertEqual(
-            SelfCorrectionResolver.resolve(input, language: "en"),
-            input,
-            "enableScratchCommand ships false (CR-01/CR-02) — must ABSTAIN, byte-identical"
-        )
-    }
-
-    /// D-04 case 2: named span = last word, comma-prefixed command in the
-    /// SAME sentence as the span it targets.
-    ///
-    /// DISABLED 2026-07-11 (enableScratchCommand = false; see CR-01/CR-02).
-    /// WHEN RE-ENABLED after gap closure, this MUST assert:
-    ///   "The server is called alpha."
-    /// Do not re-enable the flag and leave this asserting passthrough.
-    func testScratchNamedSpanLastWordSameSentenceEN() {
-        let input = "The server is called alpha beta, scratch the last word."
-        XCTAssertEqual(
-            SelfCorrectionResolver.resolve(input, language: "en"),
-            input,
-            "enableScratchCommand ships false (CR-01/CR-02) — must ABSTAIN, byte-identical"
-        )
-    }
-
-    /// D-04 case 2, German: named span = last word.
-    ///
-    /// DISABLED 2026-07-11 (enableScratchCommand = false; see CR-01/CR-02).
-    /// WHEN RE-ENABLED after gap closure, this MUST assert:
-    ///   "Der Server heisst Alpha."
-    /// Do not re-enable the flag and leave this asserting passthrough.
-    func testScratchNamedSpanLastWordDE() {
-        let input = "Der Server heisst Alpha Beta. Vergiss das letzte Wort."
-        XCTAssertEqual(
-            SelfCorrectionResolver.resolve(input, language: "de"),
-            input,
-            "enableScratchCommand ships false (CR-01/CR-02) — must ABSTAIN, byte-identical"
-        )
-    }
-
-    // MARK: - 39-VERIFICATION.md CR-02: blind-spot fixtures (.word span,
-    // preceding-sentence terminator other than ".")
-    //
-    // BLIND-SPOT FIXTURES (CR-02, 39-VERIFICATION.md). Every `.word`-span
-    // fixture above used a preceding "." — the one terminator that works —
-    // so the punctuation-mutation bug shipped undetected in a surface that
-    // was, at the time, ENABLED. When `.word` is rebuilt, these MUST
-    // assert the ORIGINAL terminator survives ("?" stays "?", "!" stays
-    // "!"), NOT a period.
-
-    /// CR-02 EN, question mark. Pre-CR-02-discovery this silently produced
-    /// "Is it alpha." — the "?" became a "." (question → statement).
-    ///
-    /// DISABLED 2026-07-11 (enableScratchCommand = false; see CR-02).
-    /// WHEN RE-ENABLED after gap closure, this MUST assert:
-    ///   "Is it alpha?"
-    /// — note the "?" MUST survive, NOT become ".". Do not re-enable the
-    /// flag and leave this asserting passthrough, and do not accept a
-    /// "fix" that produces "Is it alpha." for this input.
-    func testScratchWordSpanBlindSpotQuestionMarkBoundaryEN() {
-        let input = "Is it alpha beta? Scratch the last word."
-        XCTAssertEqual(
-            SelfCorrectionResolver.resolve(input, language: "en"),
-            input,
-            "enableScratchCommand ships false (CR-02 blind spot) — must ABSTAIN, byte-identical"
-        )
-    }
-
-    /// CR-02 EN, exclamation mark, command has its own trailing period.
-    /// Pre-CR-02-discovery this silently produced "This is amazing alpha."
-    /// — the "!" became a ".".
-    ///
-    /// DISABLED 2026-07-11 (enableScratchCommand = false; see CR-02).
-    /// WHEN RE-ENABLED after gap closure, this MUST assert:
-    ///   "This is amazing alpha!"
-    /// — note the "!" MUST survive, NOT become ".". Do not re-enable the
-    /// flag and leave this asserting passthrough.
-    func testScratchWordSpanBlindSpotExclamationBoundaryEN() {
-        let input = "This is amazing alpha beta! Scratch the last word."
-        XCTAssertEqual(
-            SelfCorrectionResolver.resolve(input, language: "en"),
-            input,
-            "enableScratchCommand ships false (CR-02 blind spot) — must ABSTAIN, byte-identical"
-        )
-    }
-
-    /// CR-02 EN, exclamation mark, command has NO trailing punctuation of
-    /// its own (raw/unpunctuated ASR tail). Pre-CR-02-discovery this
-    /// silently produced "Alpha" — the "!" was dropped entirely, with no
-    /// replacement at all.
-    ///
-    /// DISABLED 2026-07-11 (enableScratchCommand = false; see CR-02).
-    /// WHEN RE-ENABLED after gap closure, this MUST assert:
-    ///   "Alpha!"
-    /// — note the "!" MUST survive, NOT be silently dropped. Do not
-    /// re-enable the flag and leave this asserting passthrough.
-    func testScratchWordSpanBlindSpotExclamationNoTrailingPunctuationEN() {
-        let input = "Alpha beta! Scratch the last word"
-        XCTAssertEqual(
-            SelfCorrectionResolver.resolve(input, language: "en"),
-            input,
-            "enableScratchCommand ships false (CR-02 blind spot) — must ABSTAIN, byte-identical"
-        )
-    }
-
-    /// CR-02 DE, exclamation mark. Pre-CR-02-discovery this silently
-    /// produced "Das ist super Alpha." — the "!" became a ".". German
-    /// sibling confirming the defect is language-independent (same
-    /// resolver code path, no language-specific punctuation handling).
-    ///
-    /// DISABLED 2026-07-11 (enableScratchCommand = false; see CR-02).
-    /// WHEN RE-ENABLED after gap closure, this MUST assert:
-    ///   "Das ist super Alpha!"
-    /// — note the "!" MUST survive, NOT become ".". Do not re-enable the
-    /// flag and leave this asserting passthrough.
-    func testScratchWordSpanBlindSpotExclamationBoundaryDE() {
-        let input = "Das ist super Alpha Beta! Vergiss das letzte Wort."
-        XCTAssertEqual(
-            SelfCorrectionResolver.resolve(input, language: "de"),
-            input,
-            "enableScratchCommand ships false (CR-02 blind spot) — must ABSTAIN, byte-identical"
         )
     }
 
@@ -1154,7 +954,6 @@ final class SelfCorrectionResolverTests: XCTestCase {
             ("content-word-follows", "Scratch that idea, it will not work.", "content word follows the command — the command does not terminate its clause"),
             ("verb-complement-3", "He wanted to scratch that from the record.", "verb-complement exclusion (D-05b)"),
             ("verb-complement-4", "The cat likes to scratch that post.", "verb-complement exclusion (D-05b)"),
-            ("polite-prefix-content-follows", "Please ignore the last word of the previous paragraph when you review it.", "allowed polite prefix + exact command phrase, but a content word follows"),
             ("content-word-follows-2", "You can ignore the last sentence if it is unclear.", "content word follows the command — the command does not terminate its clause"),
             ("verb-complement-blocker", "If you want, just scratch that.", "comma boundary, but the verb-complement blocker 'just' intervenes (D-05b)"),
             ("verb-complement-5", "Do not scratch that surface.", "verb-complement exclusion (D-05b)"),
@@ -1181,11 +980,9 @@ final class SelfCorrectionResolverTests: XCTestCase {
             ("real-corpus-4", "Wir haben geprüft, ob wichtige Aspekte vergessen gingen.", "real debug-log collision (39-RESEARCH.md Pitfall 3) — not an exact D-06 phrase"),
             ("real-corpus-5", "Es gibt Abschnitte, die du inhaltlich ignorieren kannst.", "real debug-log collision (39-RESEARCH.md Pitfall 3) — not an exact D-06 phrase"),
             ("exact-phrase-content-follows", "Bitte streiche das Kapitel aus dem Bericht.", "allowed prefix + exact phrase 'streiche das' + a content word follows"),
-            ("exact-phrase-content-follows-2", "Streiche das letzte Wort nicht, es ist wichtig.", "exact named-span phrase at string start + a content word follows — sharpest right-guard test in the corpus"),
             ("same-words-different-order", "Du kannst den letzten Satz ignorieren, wenn er unklar ist.", "same words, different order — must not match"),
-            ("not-a-shipped-phrase", "Vergiss das nicht wieder.", "'vergiss das' is NOT a shipped phrase; only the named-span forms are"),
+            ("not-a-shipped-phrase", "Vergiss das nicht wieder.", "'vergiss das' is NOT a shipped phrase"),
             ("verb-complement", "Ich musste den letzten Satz vergessen, weil er falsch war.", "verb-complement exclusion (D-05b)"),
-            ("verb-complement-2", "Er sagte, ich solle das letzte Wort streichen.", "verb-complement exclusion (D-05b)"),
         ]
         for c in cases {
             XCTAssertEqual(
