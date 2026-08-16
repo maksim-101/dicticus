@@ -393,11 +393,10 @@ extension IOSTranscriptionService {
     }
 
     /// Returns true if the Parakeet TDT v3 model is cached on this machine.
-    /// Used by tests to conditionally skip model-dependent tests. Retained under the
-    /// pre-existing `isWhisperKitAvailable` name for source compatibility with
-    /// `IOSTranscriptionServiceTests.swift` (Phase 47.1 Task 3 updates the call sites);
-    /// the implementation itself is now FluidAudio's real `AsrModels.modelsExist(at:)`.
-    static func isWhisperKitAvailable() -> Bool {
+    /// Used by tests to conditionally skip model-dependent tests. Renamed from
+    /// `isWhisperKitAvailable` (Phase 47.1 Task 3) to reflect the FluidAudio engine
+    /// swap — the implementation is FluidAudio's real `AsrModels.modelsExist(at:)`.
+    static func isModelAvailable() -> Bool {
         AsrModels.modelsExist(at: AsrModels.defaultCacheDirectory())
     }
 
