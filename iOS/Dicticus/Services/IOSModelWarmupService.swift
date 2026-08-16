@@ -1,10 +1,11 @@
 import SwiftUI
-import WhisperKit
+import FluidAudio
 import Network
 import os.log
 
-/// Manages WhisperKit large-v3-turbo CoreML warm-up state for iOS, via the shared
-/// bounded-retry `AsrModelLoader` (parity with macOS `ModelWarmupService`, WHISP-02).
+/// Manages FluidAudio/Parakeet TDT v3 CoreML warm-up state for iOS (Phase 47.1, D-04
+/// engine swap — replaces WhisperKit large-v3-turbo), via the shared bounded-retry
+/// `AsrModelLoader` (parity with macOS `ModelWarmupService`, WHISP-02).
 ///
 /// iOS v2.0 focuses on plain dictation; AI cleanup (LLM) is excluded to reduce memory pressure
 /// and binary footprint on mobile hardware (D- تصمیم taken in STATE.md).
@@ -100,7 +101,7 @@ class IOSModelWarmupService: ObservableObject {
     // literal caused a one-frame flash on cold launch when models were present:
     // the property briefly published `false` before `checkHasModels()` ran in
     // `init()`. Using a closure initializer removes that race entirely.
-    @Published var hasModels: Bool = IOSModelWarmupService.checkWhisperKitCache()
+    @Published var hasModels: Bool = IOSModelWarmupService.checkFluidAudioCache()
     @Published var downloadProgress: Double = 0.0
     @Published var downloadStatus: String = ""
     @Published var error: String?
@@ -115,7 +116,7 @@ class IOSModelWarmupService: ObservableObject {
     /// Current LLM warmup lifecycle state — observed by Settings UI (Wave 4).
     @Published public private(set) var llmStatus: LlmStatus = .idle
 
-    private var whisperKit: WhisperKit?
+    private var asrManager: AsrManager?
 
     /// llama.cpp-backed cleanup service instance — populated by Step 4 on success.
     /// Exposed via `cleanupServiceInstance` for `DictationViewModel` injection.
@@ -169,32 +170,22 @@ class IOSModelWarmupService: ObservableObject {
         pathMonitor.start(queue: pathMonitorQueue)
     }
 
-    /// WhisperKit's on-disk HuggingFace cache directory for the pinned large-v3-turbo
-    /// model — same layout WhisperKit uses on macOS (`~/Documents/huggingface/models/
-    /// argmaxinc/whisperkit-coreml/<modelName>`), empirically confirmed against the
-    /// macOS `TranscriptionService.isWhisperKitAvailable()` cache check (41-05).
-    private static func whisperKitCacheDir() -> URL? {
-        guard let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
-            return nil
-        }
-        return documentsDir
-            .appendingPathComponent("huggingface/models/argmaxinc/whisperkit-coreml")
-            .appendingPathComponent(AsrModelLoader.modelName)
-    }
-
-    /// Whether the WhisperKit large-v3-turbo model is already cached on disk.
-    private static func checkWhisperKitCache() -> Bool {
-        guard let modelDir = whisperKitCacheDir() else { return false }
-        return (try? FileManager.default.contentsOfDirectory(atPath: modelDir.path))?.isEmpty == false
+    /// Whether the Parakeet TDT v3 model is already cached on disk — FluidAudio's own
+    /// `AsrModels.modelsExist(at:)` over its sandboxed Application Support cache
+    /// directory (`<App Support>/FluidAudio/Models/parakeet-tdt-0.6b-v3-coreml/`,
+    /// identical mechanism on iOS + macOS, no hand-built Documents-dir path logic
+    /// needed unlike WhisperKit's HuggingFace cache — 47.1-RESEARCH.md).
+    private static func checkFluidAudioCache() -> Bool {
+        AsrModels.modelsExist(at: AsrModels.defaultCacheDirectory())
     }
 
     /// Check if models are already downloaded.
     ///
-    /// Re-checks the WhisperKit HuggingFace cache directory on the filesystem — see
-    /// `checkWhisperKitCache()`. Retained for the scenePhase.active foreground re-check
+    /// Re-checks the FluidAudio model cache directory on the filesystem — see
+    /// `checkFluidAudioCache()`. Retained for the scenePhase.active foreground re-check
     /// (DicticusApp) and the warmup()/retry() call sites.
     func checkHasModels() {
-        hasModels = IOSModelWarmupService.checkWhisperKitCache()
+        hasModels = IOSModelWarmupService.checkFluidAudioCache()
     }
 
     // MARK: - First-warmup detection (260815-ait Fix 5)
@@ -209,7 +200,7 @@ class IOSModelWarmupService: ObservableObject {
     /// name, so a future model swap is also honestly flagged as a first warm-up.
     private static var currentWarmupVersionKey: String {
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
-        return "\(build)::\(AsrModelLoader.modelName)"
+        return "\(build)::\(AsrModelLoader.parakeetModelName)"
     }
 
     /// Pure, directly-testable predicate: true when no warm-up has completed
@@ -222,7 +213,7 @@ class IOSModelWarmupService: ObservableObject {
         storedVersionKey != currentVersionKey
     }
 
-    /// Start WhisperKit large-v3-turbo initialization in a background Task via the
+    /// Start Parakeet TDT v3 initialization in a background Task via the
     /// shared bounded-retry `AsrModelLoader` (parity with macOS `ModelWarmupService`).
     /// Pass `force: true` from explicit user actions (Download / Retry button) so the
     /// download path is not blocked by the no-models guard.
@@ -245,10 +236,9 @@ class IOSModelWarmupService: ObservableObject {
         // Honest stage text: on a fresh install this is a large one-time download; on every
         // later launch the model is already on disk and this is just an ANE load. The old copy
         // said "Downloading…" in BOTH cases, which is why a restart showed a misleading state.
-        // Size reconciled to the measured on-disk figure (626,718,238 bytes ≈ 626 MB) —
-        // see 37-02-SUMMARY.md for verification. Matches the model's own filename
-        // (openai_whisper-large-v3-v20240930_626MB), SettingsView, and macOS's
-        // ModelWarmupService/label copy, all of which already say "~626 MB".
+        // Phase 47.1: size updated to the Parakeet TDT v3 CoreML package's ~1.1 GB
+        // (`FluidInference/parakeet-tdt-0.6b-v3-coreml`, 47.1-RESEARCH.md) — the prior
+        // "~626 MB" figure was WhisperKit large-v3-turbo's on-disk size.
         //
         // 260815-ait Fix 5: an on-disk model still pays a one-time ANE recompile
         // (~60–90s observed) the first time a given build/model combination warms
@@ -258,7 +248,7 @@ class IOSModelWarmupService: ObservableObject {
             ? (isFirstWarmupForCurrentVersion
                 ? "First-time setup \u{2014} preparing the speech model. This can take up to a minute."
                 : "Loading speech model\u{2026}")
-            : "Downloading speech model\u{2026} (first run, ~626 MB)"
+            : "Downloading speech model\u{2026} (first run, ~1.1 GB)"
 
         let warmupLog = Logger(subsystem: "com.dicticus", category: "warmup")
         let warmupStart = Date()
@@ -271,11 +261,10 @@ class IOSModelWarmupService: ObservableObject {
             await MemoryProbe.shared.mark("baseline_pre_models")
         }
 
-        // WhisperKit download-progress callback, routed through the shared bounded-retry
-        // AsrModelLoader (parity with macOS). AsrModelLoader.loadWhisperKit's `progress`
-        // parameter is a documented no-op today (its single combined WhisperKitConfig call
-        // doesn't split download from construction) — wired here so the UI hook exists for
-        // whenever granular progress reporting lands, rather than a silent gap.
+        // FluidAudio download-progress callback, routed through the shared bounded-retry
+        // AsrModelLoader (parity with macOS). `AsrModels.downloadAndLoad`'s
+        // `progressHandler` parameter is real (not a no-op like the prior WhisperKit
+        // wrapper's), so this hook now drives genuine granular progress reporting.
         let progressHandler: @Sendable (Double) -> Void = { [weak self] fractionCompleted in
             Task { @MainActor in
                 guard let self else { return }
@@ -286,19 +275,19 @@ class IOSModelWarmupService: ObservableObject {
 
         warmupTask = Task.detached(priority: .userInitiated) { [weak self] in
             do {
-                // Step 1: Download + prewarm + load WhisperKit large-v3-turbo CoreML models
-                // via the shared bounded-retry wrapper (parity with macOS ModelWarmupService).
-                warmupLog.info("Step 1: AsrModelLoader.loadWhisperKit starting")
-                let wk = try await AsrModelLoader.loadWhisperKit(progress: progressHandler)
+                // Step 1: Download + load Parakeet TDT v3 CoreML models via the shared
+                // bounded-retry wrapper (parity with macOS ModelWarmupService).
+                warmupLog.info("Step 1: AsrModelLoader.loadFluidAudio starting")
+                let (am, _) = try await AsrModelLoader.loadFluidAudio(progress: progressHandler)
                 let step1Elapsed = Date().timeIntervalSince(warmupStart)
-                warmupLog.info("Step 1: AsrModelLoader.loadWhisperKit returned (elapsed=\(step1Elapsed, privacy: .public)s)")
+                warmupLog.info("Step 1: AsrModelLoader.loadFluidAudio returned (elapsed=\(step1Elapsed, privacy: .public)s)")
 
                 try Task.checkCancellation()
 
                 await MainActor.run {
                     self?.downloadProgress = 1.0
                     self?.downloadStatus = "Ready"
-                    self?.whisperKit = wk
+                    self?.asrManager = am
                     self?.isWarming = false
                     self?.warmupStartedAt = nil
                     self?.isReady = true
@@ -443,10 +432,10 @@ class IOSModelWarmupService: ObservableObject {
         warmup(force: true)
     }
 
-    /// Expose the initialized WhisperKit instance for IOSTranscriptionService.
+    /// Expose the initialized AsrManager instance for IOSTranscriptionService.
     /// Returns nil until warm-up completes.
-    var whisperKitInstance: WhisperKit? {
-        whisperKit
+    var asrManagerInstance: AsrManager? {
+        asrManager
     }
 
 }
