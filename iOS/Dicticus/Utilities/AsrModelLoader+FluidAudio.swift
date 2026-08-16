@@ -19,12 +19,18 @@ extension AsrModelLoader {
     /// never persisted across transcribe calls).
     static func loadFluidAudio(
         maxAttempts: Int = 3,
-        progress: ((Double) -> Void)? = nil
+        progress: (@Sendable (Double) -> Void)? = nil
     ) async throws -> (AsrManager, TdtDecoderState) {
         var lastError: Error?
+        var progressHandler: ProgressHandler?
+        if let progress {
+            progressHandler = { (downloadProgress: DownloadProgress) in
+                progress(downloadProgress.fractionCompleted)
+            }
+        }
         for attempt in 1...maxAttempts {
             do {
-                let models = try await AsrModels.downloadAndLoad(version: .v3, progressHandler: progress)
+                let models = try await AsrModels.downloadAndLoad(version: .v3, progressHandler: progressHandler)
                 let asrManager = AsrManager(config: .default)
                 try await asrManager.loadModels(models)
                 let decoderState = TdtDecoderState.make(decoderLayers: await asrManager.decoderLayerCount)
