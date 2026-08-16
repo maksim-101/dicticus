@@ -1,5 +1,4 @@
 import SwiftUI
-import WhisperKit
 import ActivityKit
 
 @main
@@ -58,7 +57,7 @@ struct DicticusApp: App {
             if !DeviceCapabilityGate.isCurrentDeviceSupported {
                 // WHISP-05: runtime iPhone 15+ (A16) floor. Short-circuits before
                 // OnboardingView/ContentView ever mount, so warmup() (and its
-                // ~626 MB WhisperKit large-v3-turbo download) never fires on a
+                // ~1.1 GB Parakeet TDT v3 download, Phase 47.1) never fires on a
                 // device that can't run the model.
                 UnsupportedDeviceView()
             } else if hasCompletedOnboarding {

@@ -48,4 +48,22 @@ final class DeviceCapabilityGateTests: XCTestCase {
             "An unrecognized future device identifier should be allowed (forward-compatible default)"
         )
     }
+
+    // Phase 47.1 Task 2: non-"iPhone"-prefixed identifiers (Mac/Simulator) must remain
+    // allowed after the WhisperKit-import removal — this is the machine-verifiable
+    // tripwire for RESEARCH Assumption A1 and the inlined deviceName()'s `#else`
+    // "simulator" placeholder, replacing any manual diff-inspection claim.
+    func testNonIPhonePrefixedIdentifierIsAllowed() {
+        XCTAssertTrue(
+            DeviceCapabilityGate.isSupportedDevice(identifier: "simulator"),
+            "A non-iPhone-prefixed identifier (e.g. the inlined deviceName()'s simulator placeholder) must be allowed"
+        )
+    }
+
+    func testMacModelIdentifierIsAllowed() {
+        XCTAssertTrue(
+            DeviceCapabilityGate.isSupportedDevice(identifier: "MacBookPro18,3"),
+            "A representative Mac model identifier must be allowed (non-iPhone-prefixed default)"
+        )
+    }
 }
