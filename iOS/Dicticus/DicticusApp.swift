@@ -151,8 +151,8 @@ struct DicticusApp: App {
         }
         .onChange(of: warmupService.isReady) { _, isReady in
             if isReady,
-               let whisperKit = warmupService.whisperKitInstance {
-                let service = IOSTranscriptionService(whisperKit: whisperKit)
+               let asrManager = warmupService.asrManagerInstance {
+                let service = IOSTranscriptionService(asrManager: asrManager)
                 transcriptionService = service
                 viewModel.transcriptionService = service
                 // Phase 46-02 (D-05): a recording captured before the model was ready

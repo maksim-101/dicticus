@@ -1,7 +1,8 @@
 import Foundation
 import SwiftUI
-import WhisperKit
+import FluidAudio
 @preconcurrency import AVFoundation
+import Accelerate
 import NaturalLanguage
 import os
 
@@ -35,15 +36,18 @@ protocol TranscriptionProviding: AnyObject {
     func transcribe(wavURL: URL) async throws -> DicticusTranscriptionResult
 }
 
-/// Core ASR pipeline for iOS: transcribe a WAV file via WhisperKit large-v3-turbo,
-/// applying silence-discard checks, and detect language post-hoc with
-/// NLLanguageRecognizer. As of Phase 46-02 this class owns transcription only —
-/// recording moved to `AudioRecorder` so capture no longer requires a loaded model.
+/// Core ASR pipeline for iOS: transcribe a WAV file via FluidAudio/Parakeet TDT v3
+/// (Phase 47.1, D-04 engine swap — replaces WhisperKit large-v3-turbo), applying an
+/// input-energy pre-filter, and detect language post-hoc with NLLanguageRecognizer.
+/// As of Phase 46-02 this class owns transcription only — recording moved to
+/// `AudioRecorder` so capture no longer requires a loaded model.
 /// (See whisper-dictation-dropout debug session for the two-cycle Layer 2 history:
 /// cycle 1 removed the fixed-threshold EnergyVAD pre-filter that misclassified genuine
 /// speech as silence on some microphones; cycle 2 reintroduced Layer 2 as
 /// AdaptiveVoiceGate, a clip-relative energy gate, after cycle 1's removal reopened
-/// D-09 silence-hallucination pastes.)
+/// D-09 silence-hallucination pastes. D-02 (Phase 47.1): `NoSpeechDiscard`, keyed on
+/// WhisperKit's `noSpeechProb`, is dropped — Parakeet's TDT transducer architecture has
+/// no analog and cannot silence-hallucinate the way a seq2seq decoder can.)
 @MainActor
 final class IOSTranscriptionService: TranscriptionProviding {
 
@@ -64,23 +68,34 @@ final class IOSTranscriptionService: TranscriptionProviding {
 
     // MARK: - Private
 
-    private let whisperKit: WhisperKit
+    private let asrManager: AsrManager
     private let sampleRate: Double = 16000
+
+    /// Trailing-silence tail-pad appended before every transcribe call. Parakeet's TDT
+    /// decoder drops terminal punctuation (and occasionally a final word) when the last
+    /// audio chunk ends flush against speech; padding lets it flush its tail token.
+    /// Do NOT exceed 0.8s — longer trailing silence makes Parakeet hallucinate tokens
+    /// out of the silence (validated 2026-06-16, spike 008 Fix B; git ccbad01; restored
+    /// verbatim per Phase 47.1 D-02/RESEARCH Pattern 2).
+    private static let tailPadSeconds: Double = 0.8
 
     // MARK: - Initialization
 
-    /// Initialize with a warm WhisperKit instance from IOSModelWarmupService.
-    /// - Parameter whisperKit: Initialized WhisperKit instance from IOSModelWarmupService.whisperKitInstance
-    init(whisperKit: WhisperKit) {
-        self.whisperKit = whisperKit
+    /// Initialize with a warm AsrManager instance from IOSModelWarmupService.
+    /// - Parameter asrManager: Initialized, warm FluidAudio AsrManager from
+    ///   IOSModelWarmupService.asrManagerInstance. The decoder state is NOT owned here —
+    ///   it is created fresh inside every `transcribe(wavURL:)` call (D-02/Pitfall 5:
+    ///   FluidAudio's own architecture is stateless per-chunk; never persist decoder
+    ///   state across unrelated utterances).
+    init(asrManager: AsrManager) {
+        self.asrManager = asrManager
     }
 
     // MARK: - Transcription
 
     /// Reads a WAV file back into `[Float]` samples at the file's own sample rate.
-    /// Used instead of WhisperKit's file-path-based entry point because it is
-    /// unverified whether that variant still exposes per-segment `noSpeechProb` /
-    /// `avgLogprob` — both drive `NoSpeechDiscard` and the derived confidence below.
+    /// Used instead of FluidAudio's URL-based `transcribe(_:decoderState:language:)`
+    /// entry point to keep the resample + guard-layer pipeline below fully explicit.
     static func readSamples(fromWavAt url: URL) throws -> (samples: [Float], sampleRate: Double) {
         let file = try AVAudioFile(forReading: url)
         let format = file.processingFormat
@@ -117,77 +132,35 @@ final class IOSTranscriptionService: TranscriptionProviding {
         // pre-filter after cycle 1 removed the fixed-threshold EnergyVAD entirely; see
         // whisper-dictation-dropout debug session). The threshold is computed relative
         // to THIS clip's own noise floor, so it self-calibrates across microphones
-        // instead of assuming one fixed RMS ceiling. This exists because Layer 3
-        // (NoSpeechDiscard, below) cannot catch a CONFIDENT Whisper silence
-        // hallucination — a low noSpeechProb by definition — so an energy gate ahead of
-        // WhisperKit is the only mechanism that can.
+        // instead of assuming one fixed RMS ceiling. D-02 (Phase 47.1): kept verbatim —
+        // engine-agnostic, still the only pre-decode silence-hallucination defense now
+        // that NoSpeechDiscard (WhisperKit-specific, no Parakeet analog) is dropped.
         let gateFrameEnergies = Self.frameEnergies(of: resampledSamples, sampleRate: sampleRate)
         let gateDecision = AdaptiveVoiceGate.evaluate(frameEnergies: gateFrameEnergies)
         guard gateDecision.voiceDetected else {
             throw TranscriptionError.silenceOnly
         }
 
-        // Layer 3: Transcribe via WhisperKit large-v3-turbo.
+        // Layer 3: Transcribe via FluidAudio/Parakeet TDT v3.
         //
-        // Whisper's seq2seq decoder does not need the trailing-silence tail-pad Parakeet's
-        // TDT decoder required to flush its final token (spike 008 Fix B) — removed per the
-        // 41-05/41-06 decision (Whisper has no equivalent terminal-punctuation tail-drop
-        // failure mode).
-        let decodeOptions = DecodingOptions(
-            language: nil,
-            detectLanguage: true,
-            withoutTimestamps: true,
-            suppressBlank: true,
-            compressionRatioThreshold: 2.4,
-            logProbThreshold: -1.0,
-            noSpeechThreshold: 0.6,
-            chunkingStrategy: .vad
+        // Restore the trailing-silence tail-pad Parakeet's TDT decoder needs to flush its
+        // final token (spike 008 Fix B, git ccbad01) — WhisperKit's seq2seq decoder never
+        // needed this, but the returning Parakeet path does. Do NOT exceed 0.8s (Self.tailPadSeconds).
+        let asrTailPad = [Float](repeating: 0, count: Int(Self.tailPadSeconds * sampleRate))
+
+        // Fresh decoder state per call (D-02/Pitfall 5) — FluidAudio's own architecture is
+        // documented as stateless per-chunk; never persist decoderState across utterances.
+        var decoderState = TdtDecoderState.make(decoderLayers: await asrManager.decoderLayerCount)
+        let result = try await asrManager.transcribe(
+            resampledSamples + asrTailPad, decoderState: &decoderState, language: nil
         )
-        let results = try await whisperKit.transcribe(audioArray: resampledSamples, decodeOptions: decodeOptions)
-        let allSegments = results.flatMap { $0.segments }
 
-        // No-speech discard: WhisperKit does not auto-blank `text` for pure silence —
-        // noSpeechProb only drives internal decoder fallback, not output suppression.
-        // Inspect segments ourselves before building the result.
-        guard !NoSpeechDiscard.looksLikeSilence(noSpeechProbs: allSegments.map(\.noSpeechProb)) else {
-            throw TranscriptionError.silenceOnly
-        }
-
-        #if DEBUG_RECORDER
-        // Quick task 260719-9a6, MEASURE-FIRST: mirrors the macOS pass-path probe added in
-        // the same task — iOS never had ANY DiscardProbe call before this (the discard
-        // guards above are silent). This has no effect on control flow or the produced
-        // text; it only appends every kept segment to the same discard-*.jsonl writer under
-        // reason: "pass" for a future measurement pass. NOTE: DEBUG_RECORDER is not
-        // currently wired into iOS's project.yml/build configs, so this compiles out to
-        // zero runtime effect today — it exists for source parity and to be ready if/when
-        // an iOS debug-recorder config is added.
-        await DiscardProbe.shared.record(
-            reason: "pass",
-            platform: "iOS",
-            rawSampleCount: samples.count,
-            resampledSampleCount: resampledSamples.count,
-            hwSampleRate: inputSampleRate,
-            durationSeconds: durationSeconds,
-            segments: allSegments.map {
-                DiscardProbe.SegmentInfo(
-                    text: $0.text,
-                    noSpeechProb: $0.noSpeechProb,
-                    avgLogProb: $0.avgLogprob,
-                    startSeconds: $0.start,
-                    endSeconds: $0.end
-                )
-            },
-            lowConfidenceShort: LowConfidenceShort.flag(
-                durationSeconds: durationSeconds,
-                avgLogProbs: allSegments.map(\.avgLogprob)
-            )
-        )
-        #endif
-
-        let combinedText = results.map(\.text).joined(separator: " ")
-
-        var processedText = combinedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        // KNOWN pre-existing quirk (not introduced by this phase, RESEARCH Pitfall 3 /
+        // STATE.md parked review item): the Dictionary/ITN post-processing below runs
+        // again inside TextProcessingService.process() when DictationViewModel feeds this
+        // result's text through it — a pre-existing double-run, D-01 boundary, out of
+        // scope to fix here.
+        var processedText = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !processedText.isEmpty else {
             throw TranscriptionError.noResult
         }
@@ -209,15 +182,13 @@ final class IOSTranscriptionService: TranscriptionProviding {
             processedText = ITNUtility.applyITN(to: processedText, language: detectedLanguage)
         }
 
-        // Confidence derived from segment avgLogprob (WhisperKit has no direct .confidence).
-        let avgLogprobs = allSegments.map(\.avgLogprob)
-        let meanLogprob = avgLogprobs.isEmpty ? 0 : avgLogprobs.reduce(0, +) / Float(avgLogprobs.count)
-        let confidence = exp(meanLogprob)
-
+        // Confidence sourced directly from FluidAudio's ASRResult.confidence (D-02) — a
+        // real Float field, no derivation needed (supersedes the old WhisperKit
+        // avgLogprob-derived stand-in).
         return DicticusTranscriptionResult(
             text: processedText,
             language: detectedLanguage,
-            confidence: confidence
+            confidence: result.confidence
         )
     }
 
@@ -225,9 +196,12 @@ final class IOSTranscriptionService: TranscriptionProviding {
 
     /// Compute per-frame RMS energies for AdaptiveVoiceGate, chunking `samples`
     /// into `frameLengthSeconds`-long windows (default 0.1s, matching the
-    /// removed EnergyVAD's frame length) and reusing WhisperKit's own
-    /// `AudioProcessor.calculateAverageEnergy(of:)` per chunk rather than
-    /// hand-rolling an RMS calculation.
+    /// removed EnergyVAD's frame length). Phase 47.1: WhisperKit's own
+    /// `AudioProcessor.calculateAverageEnergy(of:)` is no longer available (WhisperKit
+    /// removed from iOS); inlined its exact `vDSP_rmsqv` RMS calculation verbatim
+    /// (`argmax-oss-swift/Sources/WhisperKit/Core/Audio/AudioProcessor.swift:698-702`)
+    /// so AdaptiveVoiceGate's input is byte-for-byte identical (D-02: Layer 2 kept
+    /// verbatim, engine-agnostic).
     static func frameEnergies(of samples: [Float], sampleRate: Double, frameLengthSeconds: Float = 0.1) -> [Float] {
         guard !samples.isEmpty else { return [] }
         let frameLengthSamples = max(1, Int(frameLengthSeconds * Float(sampleRate)))
@@ -236,10 +210,18 @@ final class IOSTranscriptionService: TranscriptionProviding {
         var start = 0
         while start < samples.count {
             let end = min(start + frameLengthSamples, samples.count)
-            energies.append(AudioProcessor.calculateAverageEnergy(of: Array(samples[start..<end])))
+            energies.append(Self.calculateAverageEnergy(of: Array(samples[start..<end])))
             start = end
         }
         return energies
+    }
+
+    /// RMS energy of a signal chunk, via `vDSP_rmsqv` — verbatim port of
+    /// WhisperKit's `AudioProcessor.calculateAverageEnergy(of:)` (see doc comment above).
+    private static func calculateAverageEnergy(of signal: [Float]) -> Float {
+        var rmsEnergy: Float = 0.0
+        vDSP_rmsqv(signal, 1, &rmsEnergy, vDSP_Length(signal.count))
+        return rmsEnergy
     }
 
     // MARK: - Resampling
@@ -410,24 +392,22 @@ extension IOSTranscriptionService {
         }
     }
 
-    /// Returns true if the WhisperKit large-v3-turbo model is cached on this machine.
-    /// Used by tests to conditionally skip model-dependent tests.
+    /// Returns true if the Parakeet TDT v3 model is cached on this machine.
+    /// Used by tests to conditionally skip model-dependent tests. Retained under the
+    /// pre-existing `isWhisperKitAvailable` name for source compatibility with
+    /// `IOSTranscriptionServiceTests.swift` (Phase 47.1 Task 3 updates the call sites);
+    /// the implementation itself is now FluidAudio's real `AsrModels.modelsExist(at:)`.
     static func isWhisperKitAvailable() -> Bool {
-        let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
-        guard let base = documentsDir else { return false }
-        let modelDir = base
-            .appendingPathComponent("huggingface/models/argmaxinc/whisperkit-coreml")
-            .appendingPathComponent(AsrModelLoader.modelName)
-        return (try? FileManager.default.contentsOfDirectory(atPath: modelDir.path))?.isEmpty == false
+        AsrModels.modelsExist(at: AsrModels.defaultCacheDirectory())
     }
 
-    /// Attempt to create an IOSTranscriptionService using a WhisperKit-backed instance.
+    /// Attempt to create an IOSTranscriptionService using a warm FluidAudio AsrManager.
     /// Returns nil if initialization fails (model not cached, etc.).
     /// Used by tests that need an actual service instance.
     static func makeForTesting() async throws -> IOSTranscriptionService? {
         do {
-            let wk = try await AsrModelLoader.loadWhisperKit()
-            return IOSTranscriptionService(whisperKit: wk)
+            let (asrManager, _) = try await AsrModelLoader.loadFluidAudio()
+            return IOSTranscriptionService(asrManager: asrManager)
         } catch {
             return nil
         }
