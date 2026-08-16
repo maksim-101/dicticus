@@ -304,6 +304,32 @@ class IOSModelWarmupService: ObservableObject {
                 }
                 warmupLog.info("ASR pipeline ready — UI unblocked")
 
+                // Phase 47.1 Task 2 (D-06, mirrors macOS WHISP-02, inverted direction):
+                // purge the stale WhisperKit HuggingFace cache only AFTER a successful
+                // Parakeet warmup — never before, so a failed Parakeet download leaves
+                // the device's prior state untouched (no data-loss window). Reclaims
+                // ~626 MB on devices upgraded from the pre-47.1 WhisperKit build.
+                // `AsrModelLoader.modelName`/`whisperKitCacheDir()` no longer exist on
+                // iOS after Plan 01's split (the WhisperKit half moved to
+                // macOS/Dicticus/Utilities/AsrModelLoader+WhisperKit.swift, out of this
+                // target) — the path is reconstructed here from the same literal model
+                // identifier ("openai_whisper-large-v3-v20240930_626MB") the pre-swap
+                // iOS build downloaded, per the WhisperKit HuggingFace cache layout
+                // confirmed in 47.1-RESEARCH.md.
+                if let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+                    let staleWhisperKitCache = documentsDir
+                        .appendingPathComponent("huggingface/models/argmaxinc/whisperkit-coreml")
+                        .appendingPathComponent("openai_whisper-large-v3-v20240930_626MB")
+                    if FileManager.default.fileExists(atPath: staleWhisperKitCache.path) {
+                        do {
+                            try FileManager.default.removeItem(at: staleWhisperKitCache)
+                            warmupLog.info("Purged stale WhisperKit cache at \(staleWhisperKitCache.path)")
+                        } catch {
+                            warmupLog.error("Failed to purge WhisperKit cache: \(error.localizedDescription)")
+                        }
+                    }
+                }
+
                 // Phase 44 Plan 14: Whisper is resident, the LLM is not. The gap
                 // between this and `llm_loaded` is the model swap's real cost.
                 await MemoryProbe.shared.mark("asr_ready")
