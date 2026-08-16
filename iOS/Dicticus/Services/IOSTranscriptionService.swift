@@ -182,6 +182,19 @@ final class IOSTranscriptionService: TranscriptionProviding {
             processedText = ITNUtility.applyITN(to: processedText, language: detectedLanguage)
         }
 
+        // Post-processing: conservative filler-strip (D-04, Phase 47.1). Parakeet emits
+        // raw standalone disfluencies ("um"/"uh"/"äh") that WhisperKit's seq2seq LM
+        // suppressed for free — this restores that on the plain path. iOS-local direct
+        // call (mirrors the Dictionary/ITN calls immediately above) so
+        // Shared/Services/TextProcessingService's plain path — and therefore macOS,
+        // which never runs this file — stays byte-identical (RESEARCH Pitfall 2/Open
+        // Question 2). Runs exactly once here, before this result is handed to
+        // TextProcessingService.process(). In aiCleanup mode, TextProcessingService's
+        // RulesCleanupService.clean() also calls FillerWordRemover.strip — idempotent on
+        // already-filler-free text, the same pre-existing double-run class as the
+        // Dictionary/ITN calls above (RESEARCH Pitfall 3), not introduced or fixed here.
+        processedText = FillerWordRemover.strip(processedText, language: detectedLanguage)
+
         // Confidence sourced directly from FluidAudio's ASRResult.confidence (D-02) — a
         // real Float field, no derivation needed (supersedes the old WhisperKit
         // avgLogprob-derived stand-in).

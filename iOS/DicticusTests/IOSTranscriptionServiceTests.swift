@@ -180,4 +180,47 @@ final class IOSTranscriptionServiceTests: XCTestCase {
             return .threw(String(describing: error))
         }
     }
+
+    // MARK: - Filler-strip on the plain path (Phase 47.1 Task 1, D-04)
+    //
+    // `IOSTranscriptionService.transcribe(wavURL:)` now calls `FillerWordRemover.strip`
+    // directly (iOS-local, see the call site's doc comment) with the exact language code
+    // its own `detectLanguage(_:)` produces ("de"/"en"/"other"). A live decode requires
+    // the ~1.1GB Parakeet model (not cached in this execution environment — see
+    // 47.1-01-SUMMARY.md), so these tests exercise the identical
+    // `FillerWordRemover.strip(_:language:)` call shape `transcribe()` now makes, proving
+    // the exact behavior wired into the plain path without needing a live model.
+
+    func testFillerStripRemovesStandaloneEnglishUm() {
+        XCTAssertEqual(
+            FillerWordRemover.strip("I um think that works", language: "en"),
+            "I think that works"
+        )
+    }
+
+    func testFillerStripRemovesStandaloneEnglishUh() {
+        XCTAssertEqual(
+            FillerWordRemover.strip("I uh think that works", language: "en"),
+            "I think that works"
+        )
+    }
+
+    func testFillerStripRemovesStandaloneGermanAeh() {
+        // German fixture (source of truth per project_usage_pattern_english_dominant).
+        XCTAssertEqual(
+            FillerWordRemover.strip("Das ist, äh, ziemlich gut", language: "de"),
+            "Das ist ziemlich gut"
+        )
+    }
+
+    func testFillerStripPreservesGermanUmZuAmbiguousBoundary() {
+        // Negative case: "um" is NOT in FillerWordRemover.germanFillers (only
+        // äh/ähm/ehm/hmm/naja are), so "um … zu" is preserved by construction when
+        // language == "de" — proving the swap never strips this ambiguous German
+        // infinitive-clause connector.
+        XCTAssertEqual(
+            FillerWordRemover.strip("Ich rufe an, um zu fragen", language: "de"),
+            "Ich rufe an, um zu fragen"
+        )
+    }
 }
