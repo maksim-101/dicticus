@@ -374,10 +374,18 @@ class DictationViewModel: ObservableObject {
             case .notRecording:
                 self.error = "Not recording."
             }
-            // Transcription failed — leave the pending row queued (D-10 hold). 46-03
-            // adds markFailed()/retry(); for this plan the row simply stays queued.
+            // The unconditional markTranscribing(pendingRow) above the do block must
+            // be undone here, or the row is stranded at `.transcribing` — invisible to
+            // both queuedInArrivalOrder (the next drainQueue() pass never sees it) and
+            // the History Retry affordance (shown only for `.failed`). This error class
+            // is retriable under the D-10 hold, so the reset is requeue(_:), not
+            // markFailed(_:reason:) — a markFailed would burn a retryCount for nothing.
+            pendingStore.requeue(pendingRow)
         } catch {
             self.error = error.localizedDescription
+            // Same rationale as the TranscriptionError arm above: undo
+            // markTranscribing(pendingRow) via requeue, not markFailed.
+            pendingStore.requeue(pendingRow)
         }
 
         await endLiveActivity()
