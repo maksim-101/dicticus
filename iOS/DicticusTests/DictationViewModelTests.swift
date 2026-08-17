@@ -80,8 +80,15 @@ private final class FakeTranscriptionProvider: TranscriptionProviding {
     /// default so every pre-46-03 test using the fixed-value fields is unaffected.
     var responseQueue: [Result<DicticusTranscriptionResult, Error>] = []
 
+    /// Phase 47.1-03 UAT fix: invoked at the very start of `transcribe(wavURL:)`,
+    /// before any `await` — lets a test observe the `PendingRecordingStore` row's
+    /// status at the exact moment transcription begins, to prove it has already
+    /// transitioned away from `.queued`.
+    var onTranscribeCalled: (() -> Void)?
+
     func transcribe(wavURL: URL) async throws -> DicticusTranscriptionResult {
         callCount += 1
+        onTranscribeCalled?()
         if hangIndefinitely {
             try await Task.sleep(nanoseconds: UInt64.max)
         }
@@ -1340,6 +1347,45 @@ final class DictationViewModelTests: XCTestCase {
         XCTAssertEqual(clipboardValue, "Fake transcript", "Foreground inline delivery must write the clipboard")
         XCTAssertEqual(testStore.pendingRecordings.count, 0,
                        "The pending row must be resolved (deleted) once delivered inline, not left queued")
+
+        // Cleanup
+        if let id = testHistory.entries.first?.id { testHistory.delete(id: id) }
+        try? FileManager.default.removeItem(at: tempContainer)
+    }
+
+    /// Phase 47.1-03 UAT fix: on the inline (foreground, transcriber-already-set)
+    /// path, the pending row must already read `.transcribing` — not `.queued` —
+    /// by the moment `transcribe(wavURL:)` is actually invoked. Before this fix,
+    /// `stopDictation()`'s inline branch never called `markTranscribing(_:)` (only
+    /// `drainQueue()` did), so a solo recording sat at `.queued` — "Waiting for
+    /// model" in the History Pending list — for the entire transcription, even
+    /// though nothing was actually being waited on. Reasoned falsifiability: if
+    /// the `markTranscribing(pendingRow)` call were removed, the captured status
+    /// below would read `.queued.rawValue`, not `.transcribing.rawValue` — this
+    /// test is capable of going red on that specific regression.
+    func testInlineTranscribeMarksRowTranscribingBeforeCallingTranscriber() async throws {
+        let vm = DictationViewModel()
+        let tempContainer = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let testHistory = HistoryService.makeForTesting(containerURLProvider: { tempContainer })
+        let testStore = PendingRecordingStore.makeForTesting(historyService: testHistory)
+        vm.historyService = testHistory
+        vm.pendingStore = testStore
+        vm.audioRecorder = FakeAudioRecorder()
+        vm.isBackgroundedProvider = { false }
+        let fakeTranscriber = FakeTranscriptionProvider()
+        var statusAtTranscribeCallTime: String?
+        fakeTranscriber.onTranscribeCalled = {
+            statusAtTranscribeCallTime = testStore.pendingRecordings.first?.status
+        }
+        vm.transcriptionService = fakeTranscriber
+
+        vm.state = .recording
+        await vm.stopDictation()
+
+        XCTAssertEqual(fakeTranscriber.callCount, 1, "Precondition: the inline transcribe call happened")
+        XCTAssertEqual(statusAtTranscribeCallTime, PendingRecordingStatus.transcribing.rawValue,
+                       "The row must already be .transcribing (not .queued) when transcribe(wavURL:) is called")
 
         // Cleanup
         if let id = testHistory.entries.first?.id { testHistory.delete(id: id) }
