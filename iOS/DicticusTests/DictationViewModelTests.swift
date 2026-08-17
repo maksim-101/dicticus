@@ -2077,4 +2077,103 @@ final class DictationViewModelTests: XCTestCase {
 
         DicticusIPCBridge.defaults?.removeObject(forKey: "isShortcutLaunch")
     }
+
+    // MARK: - 2026-08-17: foreground/inline stopDictation() failure path must requeue,
+    // not strand the row at `.transcribing` (regression from commit 2b4a7c9)
+    //
+    // `2b4a7c9` added `pendingStore.markTranscribing(pendingRow)` immediately before the
+    // inline transcribe call in `stopDictation()`, fixing a real UAT bug (the pending chip
+    // read "Waiting for model" during an active transcription). It also broke the failure
+    // path: both catch arms below that call set `self.error` and return without resetting
+    // the row's status, so a thrown error leaves the row stuck at `.transcribing` forever —
+    // invisible to `queuedInArrivalOrder` (drain never touches it again) and to the History
+    // Retry affordance (only shown for `.failed`). The only recovery was a process relaunch.
+    //
+    // These two tests deliberately set `vm.transcriptionService` BEFORE `stopDictation()` so
+    // the inline path runs instead of the drain (the D-05 guard at DictationViewModel.swift:252
+    // routes to the drain-only path when transcriptionService is nil at call time — every
+    // sibling test in this file sets the fake transcriber AFTER stopDictation() precisely to
+    // exercise the drain, which is why the inline failure branch has never had a test).
+
+    /// A `TranscriptionError` thrown on the inline path must leave the row `.queued`
+    /// (a requeue, not a `markFailed`) — the D-10 hold/retriable distinction survives.
+    func testForegroundTranscriptionErrorLeavesRowQueuedNotStuckTranscribing() async throws {
+        let vm = DictationViewModel()
+        let tempContainer = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let testHistory = HistoryService.makeForTesting(containerURLProvider: { tempContainer })
+        let testStore = PendingRecordingStore.makeForTesting(historyService: testHistory)
+        vm.historyService = testHistory
+        vm.pendingStore = testStore
+        vm.audioRecorder = FakeAudioRecorder()
+        vm.isBackgroundedProvider = { false }
+
+        let fakeTranscriber = FakeTranscriptionProvider()
+        fakeTranscriber.errorToThrow = TranscriptionError.noResult
+        vm.transcriptionService = fakeTranscriber
+
+        vm.state = .recording
+        await vm.stopDictation()
+
+        XCTAssertEqual(fakeTranscriber.callCount, 1,
+                       "Precondition: the inline path must have called the transcriber directly (not the drain)")
+
+        let row = try XCTUnwrap(testStore.pendingRecordings.first)
+        let fileURL = try testStore.fileURL(for: row)
+
+        XCTAssertEqual(row.status, PendingRecordingStatus.queued.rawValue,
+                       "A thrown TranscriptionError on the inline path must leave the row queued, not stuck at transcribing")
+        XCTAssertEqual(testStore.transcribingCount, 0, "No row should remain in the transcribing state")
+        XCTAssertEqual(testStore.queuedInArrivalOrder.count, 1,
+                       "The row must be visible to the next drainQueue() pass, not stranded")
+        XCTAssertEqual(row.retryCount, 0, "A requeue must not burn a retry — that would be markFailed's job, not this path's")
+        XCTAssertNil(row.failureReason, "A requeue clears failureReason — a queued row has no failure reason by definition")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path), "D-10 hold: the WAV must never be dropped here")
+        XCTAssertNotNil(vm.error, "The user must still be told the attempt failed")
+
+        // Cleanup
+        for r in testStore.pendingRecordings { testStore.delete(r) }
+        try? FileManager.default.removeItem(at: tempContainer)
+    }
+
+    /// A non-`TranscriptionError` thrown on the inline path (e.g. file I/O, decode) hits the
+    /// trailing generic catch arm — same mechanism, same regression, same fix.
+    func testForegroundNonTranscriptionErrorAlsoLeavesRowQueued() async throws {
+        let vm = DictationViewModel()
+        let tempContainer = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let testHistory = HistoryService.makeForTesting(containerURLProvider: { tempContainer })
+        let testStore = PendingRecordingStore.makeForTesting(historyService: testHistory)
+        vm.historyService = testHistory
+        vm.pendingStore = testStore
+        vm.audioRecorder = FakeAudioRecorder()
+        vm.isBackgroundedProvider = { false }
+
+        let fakeTranscriber = FakeTranscriptionProvider()
+        fakeTranscriber.errorToThrow = NSError(domain: "DicticusTests.ForegroundGenericError", code: 1, userInfo: nil)
+        vm.transcriptionService = fakeTranscriber
+
+        vm.state = .recording
+        await vm.stopDictation()
+
+        XCTAssertEqual(fakeTranscriber.callCount, 1,
+                       "Precondition: the inline path must have called the transcriber directly (not the drain)")
+
+        let row = try XCTUnwrap(testStore.pendingRecordings.first)
+        let fileURL = try testStore.fileURL(for: row)
+
+        XCTAssertEqual(row.status, PendingRecordingStatus.queued.rawValue,
+                       "A thrown non-TranscriptionError on the inline path must leave the row queued, not stuck at transcribing")
+        XCTAssertEqual(testStore.transcribingCount, 0, "No row should remain in the transcribing state")
+        XCTAssertEqual(testStore.queuedInArrivalOrder.count, 1,
+                       "The row must be visible to the next drainQueue() pass, not stranded")
+        XCTAssertEqual(row.retryCount, 0, "A requeue must not burn a retry — that would be markFailed's job, not this path's")
+        XCTAssertNil(row.failureReason, "A requeue clears failureReason — a queued row has no failure reason by definition")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fileURL.path), "D-10 hold: the WAV must never be dropped here")
+        XCTAssertNotNil(vm.error, "The user must still be told the attempt failed")
+
+        // Cleanup
+        for r in testStore.pendingRecordings { testStore.delete(r) }
+        try? FileManager.default.removeItem(at: tempContainer)
+    }
 }
