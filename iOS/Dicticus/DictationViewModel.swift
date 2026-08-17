@@ -260,6 +260,18 @@ class DictationViewModel: ObservableObject {
             return
         }
 
+        // Phase 47.1-03 UAT fix: this foreground path calls the transcriber
+        // DIRECTLY (not via drainQueue()), so without this call the row sat at
+        // `.queued` — "Waiting for model" — for the entire transcription, even
+        // though nothing was actually being waited on. `drainQueue()` (the
+        // background-drain path) already calls `markTranscribing(_:)` before its
+        // own transcribe call; this mirrors that so both paths agree the row is
+        // `.transcribing` for the full duration a transcription attempt is
+        // in flight, not just the drain path. Parakeet's much shorter decode time
+        // made the stale label visible/noticeable where Whisper's slower pipeline
+        // did not surface it as clearly.
+        pendingStore.markTranscribing(pendingRow)
+
         do {
             let result = try await transcriptionService.transcribe(wavURL: artifact.fileURL)
 
