@@ -306,11 +306,14 @@ final class PendingRecordingStore: ObservableObject {
         }
     }
 
-    /// Returns a previously-failed row to `.queued` — the implementation detail behind
-    /// `DictationViewModel.retryPendingRecording(_:)`'s "reset the row to queued"
-    /// step. Does not touch `retryCount` (the count survives a retry attempt) but
-    /// clears `failureReason`, since a queued row has no failure reason by
-    /// definition.
+    /// Returns a row to `.queued` — the implementation detail behind two callers:
+    /// `DictationViewModel.retryPendingRecording(_:)`'s "reset the row to queued" step
+    /// for a previously-failed row, and `stopDictation()`'s inline transcribe catch
+    /// arms undoing their own `markTranscribing(_:)` call when the attempt throws
+    /// (2026-08-17 — a thrown error must not leave the row stranded at
+    /// `.transcribing`). Does not touch `retryCount` (the count survives a retry
+    /// attempt) but clears `failureReason`, since a queued row has no failure reason
+    /// by definition.
     func requeue(_ recording: PendingRecording) {
         guard recording.id != nil else {
             Self.log.error("requeue() called with nil id for uuid=\(recording.uuid)")
