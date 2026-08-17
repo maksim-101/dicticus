@@ -430,7 +430,25 @@ struct ITNUtility {
             }
 
             // Conditional: dollar (right-flank identifier gate only)
-            if lower == "dollar" && i + 1 < tokens.count && isIdentifierShaped(tokens[i + 1]) {
+            //
+            // Phase 47.1-03 fix (D-04 config-parity follow-up): `isIdentifierShaped`
+            // does not exclude bare-digit tokens (its alphanumeric-content check
+            // treats "50" as identifier-shaped, same as "PATH"), so a currency
+            // amount immediately following the word "dollar" — e.g. "a dollar 50
+            // maybe" (Parakeet's closer-to-spoken raw decode for "a dollar fifty",
+            // vs. Whisper's own internal ITN which rarely emits this exact
+            // "dollar <bare digit>" token sequence) — used to false-fire this
+            // identifier gate and collapse to "a $ 50 maybe", corrupting the
+            // intended value ($1.50) into what reads as $50. The gate exists for
+            // shell/env-var dictation ("dollar PATH" -> "$ PATH"), never for a
+            // bare numeric currency amount, so a numeric right flank is excluded
+            // here via the existing `isNumericFlank` helper (already used by the
+            // "dot" numeric-flank path above) — this is pre-existing, latent
+            // behavior in shared ITNUtility, not new code from the Parakeet swap;
+            // the swap's closer-to-spoken decode style newly exposed it. See
+            // ITNUtilityTests for adversarial digit-flank fixtures (both en/de and
+            // the still-Whisper-shaped macOS positive/negative pairs).
+            if lower == "dollar" && i + 1 < tokens.count && !isNumericFlank(tokens[i + 1]) && isIdentifierShaped(tokens[i + 1]) {
                 result.append("$")
                 i += 1
                 continue

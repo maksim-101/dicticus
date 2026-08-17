@@ -584,6 +584,52 @@ final class ITNUtilitySpokenPunctuationTests: XCTestCase {
         XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "dollar PATH set"), "$ PATH set")
     }
 
+    // MARK: - Phase 47.1-03: dollar + bare-digit flank (config-parity currency
+    // regression). `isIdentifierShaped` treated a bare digit as "identifier-shaped"
+    // (same as "PATH"), so "a dollar 50 maybe" (Parakeet's closer-to-spoken raw
+    // decode for "a dollar fifty") false-fired the dollar->"$" identifier collapse,
+    // corrupting the intended $1.50 into a phrase reading as $50. Reproduced via
+    // the production decode-layer driver (`.planning/spikes/011-.../wer/
+    // parakeet-production-driver`) against TTS fixtures for this exact phrasing.
+
+    func testDollar_bareDigitFlank_doesNotCollapse() {
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "a dollar 50 maybe"), "a dollar 50 maybe")
+    }
+
+    func testDollar_bareDigitFlank_fullUtterance_doesNotCollapse() {
+        XCTAssertEqual(
+            ITNUtility.collapseSpokenPunctuation(to: "a dollar 50 maybe and then five francs 45"),
+            "a dollar 50 maybe and then five francs 45"
+        )
+    }
+
+    func testDollar_singleDigitFlank_doesNotCollapse() {
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "dollar 5"), "dollar 5")
+    }
+
+    // Identifier-shaped flanks that merely CONTAIN a digit (not pure-numeric) must
+    // still collapse — the fix excludes only bare numeric tokens via
+    // `isNumericFlank`, not every token containing a digit character, so the
+    // env-var/model-identifier use case this rule exists for is preserved.
+    func testDollar_alphanumericIdentifierFlank_stillCollapses() {
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "dollar v2 set"), "$ v2 set")
+    }
+
+    // German loanword equivalent — "dollar" is not language-gated in
+    // collapseSpokenPunctuation, so a German utterance using the English loanword
+    // must not regress either.
+    func testDollar_bareDigitFlank_germanUtterance_doesNotCollapse() {
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "ein dollar 50 vielleicht"), "ein dollar 50 vielleicht")
+    }
+
+    // Whisper-shaped fixture (macOS still ships Whisper): Whisper's own internal
+    // ITN typically emits an already-symbolized amount rather than a bare "dollar
+    // <digit>" token sequence, so this must pass through unaffected either way —
+    // confirms the fix does not depend on which ASR engine produced the input.
+    func testDollar_whisperShapedAlreadySymbolized_unaffected() {
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "$1.50 maybe"), "$1.50 maybe")
+    }
+
     func testPipe_neverCollapses() {
         XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "cat pipe grep"), "cat pipe grep")
     }
