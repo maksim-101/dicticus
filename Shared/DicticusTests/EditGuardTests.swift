@@ -206,6 +206,58 @@ final class EditGuardTests: XCTestCase {
         XCTAssertEqual(result.text, fixture.expectedText, "der -> das must still accept when the noun itself is unchanged")
     }
 
+    // MARK: - Quick task 260817-r2u: the negation-substitution gap
+    //
+    // D-02's function<->function substitution allowlist deliberately
+    // includes negation tokens so `nicht`->`kein` reads as a repair — but
+    // step 6 previously accepted ANY pair where both sides were
+    // substitutable, including a one-sided negation flip. The 2026-08-15
+    // production record confirmed this inverted a user's meaning.
+    //
+    func testNegationFlipNoToAnIsRejected() throws {
+        let fixture = try requireFixture("fx-sub-func-en-negation-flip-no-an")
+        let result = EditGuard.apply(rulesCleaned: fixture.baseline, llmOutput: fixture.candidate, language: fixture.language, lexicon: TestSpellLexicon.allKnown)
+        XCTAssertEqual(result.text, fixture.expectedText, "a one-sided negation flip must revert to baseline — the 2026-08-15 production record")
+        guard let edit = result.edits.first(where: { $0.kind == "substitute" }) else {
+            return XCTFail("expected a substitute edit")
+        }
+        XCTAssertFalse(edit.accepted, "negation-polarity flip must be rejected")
+        XCTAssertEqual(edit.rejectClass, EditGuard.RejectionClass.negationChange.rawValue)
+    }
+
+    func testNegationFlipKeinToEinIsRejected() throws {
+        let fixture = try requireFixture("fx-sub-func-de-negation-flip-kein-ein")
+        let result = EditGuard.apply(rulesCleaned: fixture.baseline, llmOutput: fixture.candidate, language: fixture.language, lexicon: TestSpellLexicon.allKnown)
+        XCTAssertEqual(result.text, fixture.expectedText, "DE analogue of the negation-flip gap")
+        guard let edit = result.edits.first(where: { $0.kind == "substitute" }) else {
+            return XCTFail("expected a substitute edit")
+        }
+        XCTAssertFalse(edit.accepted, "negation-polarity flip must be rejected")
+        XCTAssertEqual(edit.rejectClass, EditGuard.RejectionClass.negationChange.rawValue)
+    }
+
+    func testNegationSwapNotToNoStillAccepts() throws {
+        let fixture = try requireFixture("fx-sub-func-en-negation-swap-not-no")
+        let result = EditGuard.apply(rulesCleaned: fixture.baseline, llmOutput: fixture.candidate, language: fixture.language, lexicon: TestSpellLexicon.allKnown)
+        XCTAssertEqual(result.text, fixture.expectedText, "a negation<->negation substitution must still be accepted")
+        guard let edit = result.edits.first(where: { $0.kind == "substitute" }) else {
+            return XCTFail("expected a substitute edit")
+        }
+        XCTAssertTrue(edit.accepted, "negation<->negation substitution must not be blocked wholesale")
+        XCTAssertEqual(edit.acceptClass, EditGuard.AcceptClass.functionWordSubstitution.rawValue)
+    }
+
+    func testNegationSwapNichtToKeineStillAccepts() throws {
+        let fixture = try requireFixture("fx-sub-func-de-negation-swap-nicht-keine")
+        let result = EditGuard.apply(rulesCleaned: fixture.baseline, llmOutput: fixture.candidate, language: fixture.language, lexicon: TestSpellLexicon.allKnown)
+        XCTAssertEqual(result.text, fixture.expectedText, "DE analogue — nicht->keine is D-02's own named repair")
+        guard let edit = result.edits.first(where: { $0.kind == "substitute" }) else {
+            return XCTFail("expected a substitute edit")
+        }
+        XCTAssertTrue(edit.accepted, "negation<->negation substitution must not be blocked wholesale")
+        XCTAssertEqual(edit.acceptClass, EditGuard.AcceptClass.functionWordSubstitution.rawValue)
+    }
+
     // MARK: - The Damerau-OSA leak fixture (introduced typo)
 
     func testIntroducedTypoIsBlockedNotAcceptedAsNearMissRespelling() throws {
