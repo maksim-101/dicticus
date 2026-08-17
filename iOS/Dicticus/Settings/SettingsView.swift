@@ -108,19 +108,19 @@ struct SettingsView: View {
                 NavigationStack {
                     List {
                         Section("Model") {
-                            LabeledContent("Name", value: "Whisper large-v3-turbo")
-                            LabeledContent("Provider", value: "OpenAI / Argmax (WhisperKit)")
-                            LabeledContent("Parameters", value: "~809M")
-                            LabeledContent("Size on Disk", value: "~626 MB (CoreML)")
+                            LabeledContent("Name", value: "Parakeet TDT v3")
+                            LabeledContent("Provider", value: "NVIDIA (via FluidAudio)")
+                            LabeledContent("Parameters", value: "~600M")
+                            LabeledContent("Size on Disk", value: "~1.1 GB (CoreML)")
                         }
                         Section("Capabilities") {
-                            LabeledContent("Languages", value: "99 (incl. DE, EN)")
+                            LabeledContent("Languages", value: "25 (incl. DE, EN)")
                             LabeledContent("German WER", value: "TBD (pending D-07)")
                             LabeledContent("English WER", value: "TBD (pending D-07)")
                             LabeledContent("Compute", value: "Apple Neural Engine")
                         }
                         Section {
-                            Text("Whisper large-v3-turbo is a multilingual speech recognition model optimized for Apple Neural Engine via CoreML. It runs entirely on-device — no audio is sent to any server.")
+                            Text("Parakeet TDT v3 is a multilingual speech recognition model optimized for Apple Neural Engine via CoreML. It runs entirely on-device — no audio is sent to any server.")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }

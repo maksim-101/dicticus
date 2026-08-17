@@ -115,9 +115,9 @@ struct OnboardingView: View {
                     
                     GroupBox {
                         VStack(alignment: .leading, spacing: 8) {
-                            Label("Model: Whisper large-v3-turbo", systemImage: "cpu")
-                            Label("Size: ~626 MB (One-time download)", systemImage: "sdcard")
-                            Label("Type: Multilingual (EN, DE, and 97+ more)", systemImage: "globe")
+                            Label("Model: Parakeet TDT v3", systemImage: "cpu")
+                            Label("Size: ~1.1 GB (One-time download)", systemImage: "sdcard")
+                            Label("Type: Multilingual (EN, DE, and 23+ more)", systemImage: "globe")
                             Label("Compute: Apple Neural Engine (ANE)", systemImage: "bolt.ring.closed")
                         }
                         .fixedSize(horizontal: false, vertical: true)
@@ -182,7 +182,7 @@ struct OnboardingView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This is a large one-time download (~626 MB) and will use your cellular data. Wi-Fi is recommended.")
+            Text("This is a large one-time download (~1.1 GB) and will use your cellular data. Wi-Fi is recommended.")
         }
     }
 
