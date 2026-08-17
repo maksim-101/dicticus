@@ -139,6 +139,21 @@ final class PendingRecordingStore: ObservableObject {
         }.count
     }
 
+    /// The actively-decoding subset of `waitingCount` — rows currently
+    /// `PendingRecordingStatus.transcribing`, as opposed to merely `.queued`. Added
+    /// 2026-08-17 (third checkpoint round on the "waiting for transcription"
+    /// complaint) purely so the Home chip's label text can distinguish "already in
+    /// flight" from "still queued, nothing started yet" — it does NOT change what
+    /// `waitingCount`/`pendingCount`/`unrecoverableCount` count, and those three
+    /// remain the locked definitions from 46-05-PLAN.md. `transcribingCount <=
+    /// waitingCount` always holds: only a `.queued` (or requeued) row can ever
+    /// transition to `.transcribing` (see `markTranscribing(_:)`), so a transcribing
+    /// row always carries a real `durationSeconds` and is already counted in
+    /// `waitingCount`.
+    var transcribingCount: Int {
+        pendingRecordings.filter { $0.status == PendingRecordingStatus.transcribing.rawValue }.count
+    }
+
     private init(historyService: HistoryService) {
         self.historyService = historyService
         load()

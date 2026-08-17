@@ -144,6 +144,42 @@ final class PendingSurfaceTests: XCTestCase {
     func testChipLabelMixedStatesBoth() {
         XCTAssertEqual(PendingQueueChip.label(waiting: 2, unrecoverable: 1), "2 waiting · 1 couldn't be saved")
     }
+
+    // MARK: - PendingQueueChip.label(waiting:unrecoverable:transcribing:) — 2026-08-17
+    // third checkpoint round. The exact case the first two rounds missed: a solo
+    // recording whose status is `.transcribing` (not `.queued`) must NOT read as
+    // "waiting to transcribe" — that wording is the whole complaint.
+
+    func testChipLabelSoloTranscribingIsNotGenericWaitingWording() {
+        let label = PendingQueueChip.label(waiting: 1, unrecoverable: 0, transcribing: 1)
+        XCTAssertEqual(label, "Transcribing 1 recording\u{2026}")
+        XCTAssertNotEqual(label, "1 recording waiting to transcribe",
+                          "an actively-transcribing solo recording must not read as merely waiting")
+    }
+
+    func testChipLabelSoloQueuedStillReadsAsWaiting() {
+        // Nothing has started yet (transcribing: 0, the default) — this is the
+        // pre-existing, still-correct "still queued" case.
+        XCTAssertEqual(PendingQueueChip.label(waiting: 1, unrecoverable: 0, transcribing: 0),
+                       "1 recording waiting to transcribe")
+    }
+
+    func testChipLabelAllTranscribingPluralWording() {
+        XCTAssertEqual(PendingQueueChip.label(waiting: 3, unrecoverable: 0, transcribing: 3),
+                       "Transcribing 3 recordings\u{2026}")
+    }
+
+    func testChipLabelMixedQueuedAndTranscribingWording() {
+        let label = PendingQueueChip.label(waiting: 3, unrecoverable: 0, transcribing: 1)
+        XCTAssertEqual(label, "Transcribing 1 of 3 recordings\u{2026}")
+        XCTAssertNotEqual(label, "3 recordings waiting to transcribe",
+                          "a mix of queued and transcribing must not read as if nothing has started")
+    }
+
+    func testChipLabelTranscribingWithUnrecoverableUsesMixedClause() {
+        XCTAssertEqual(PendingQueueChip.label(waiting: 1, unrecoverable: 1, transcribing: 1),
+                       "1 transcribing · 1 couldn't be saved")
+    }
 }
 
 /// The locked count definition (PendingRecordingStore.pendingCount = queued +
@@ -262,5 +298,36 @@ final class PendingSurfaceCountTests: XCTestCase {
         XCTAssertEqual(store.waitingCount, 2)
         XCTAssertEqual(store.unrecoverableCount, 1)
         XCTAssertEqual(store.pendingCount, 3)
+    }
+
+    /// End-to-end regression for the exact case the first two checkpoint rounds
+    /// missed (2026-08-17): a real store with a single row that has transitioned to
+    /// `.transcribing` — `waitingCount` must stay unchanged (it already includes
+    /// `.transcribing`, per the locked 46-05 definition) while `transcribingCount`
+    /// newly reports the in-flight subset, and the chip label built from both must
+    /// read as actively transcribing, not "waiting to transcribe".
+    func testTranscribingCountReflectsSoloInFlightRecording() throws {
+        let artifact = try writeRealWav()
+        guard let row = store.enqueue(artifact) else {
+            XCTFail("enqueue() must succeed")
+            return
+        }
+
+        XCTAssertEqual(store.waitingCount, 1)
+        XCTAssertEqual(store.transcribingCount, 0, "not yet marked transcribing")
+        XCTAssertEqual(
+            PendingQueueChip.label(waiting: store.waitingCount, unrecoverable: store.unrecoverableCount, transcribing: store.transcribingCount),
+            "1 recording waiting to transcribe"
+        )
+
+        store.markTranscribing(row)
+
+        XCTAssertEqual(store.waitingCount, 1, "waitingCount's locked definition must not change")
+        XCTAssertEqual(store.pendingCount, 1, "pendingCount's locked definition must not change")
+        XCTAssertEqual(store.transcribingCount, 1)
+        XCTAssertEqual(
+            PendingQueueChip.label(waiting: store.waitingCount, unrecoverable: store.unrecoverableCount, transcribing: store.transcribingCount),
+            "Transcribing 1 recording\u{2026}"
+        )
     }
 }
