@@ -167,6 +167,52 @@ final class ClosedListTests: XCTestCase {
         )
     }
 
+    // MARK: - Negation-set invariants (quick task 260817-r2u)
+
+    /// The negation sets must be subsets of their language's substitutable
+    /// set — `FunctionWords.isNegation` gates classifySubstitute's D-02
+    /// branch, which is only ever reached once `isSubstitutable` already
+    /// passed on both sides. If a negation token existed OUTSIDE the
+    /// substitutable set, `isNegation` could never gate a token the D-02
+    /// path actually sees, making the negation check dead code.
+    func testNegationSetsAreSubsetsOfSubstitutable() {
+        XCTAssertTrue(
+            FunctionWords.germanNegation.isSubset(of: FunctionWords.germanSubstitutable),
+            "germanNegation must be a subset of germanSubstitutable"
+        )
+        XCTAssertTrue(
+            FunctionWords.englishNegation.isSubset(of: FunctionWords.englishSubstitutable),
+            "englishNegation must be a subset of englishSubstitutable"
+        )
+    }
+
+    /// No negation token may be blanket-insertable (D-06): inserting a
+    /// negation the speaker never said would invent the strongest possible
+    /// meaning change — an assertion's opposite, not a milder version of
+    /// the dual-role insertion leak this file already locks.
+    func testNoNegationTokenIsInsertable() {
+        for word in FunctionWords.germanNegation {
+            XCTAssertFalse(
+                FunctionWords.germanInsertable.contains(word),
+                "negation '\(word)' must not be in germanInsertable"
+            )
+            XCTAssertFalse(
+                FunctionWords.isInsertable(word, language: "de"),
+                "isInsertable('\(word)', de) must be false — negation"
+            )
+        }
+        for word in FunctionWords.englishNegation {
+            XCTAssertFalse(
+                FunctionWords.englishInsertable.contains(word),
+                "negation '\(word)' must not be in englishInsertable"
+            )
+            XCTAssertFalse(
+                FunctionWords.isInsertable(word, language: "en"),
+                "isInsertable('\(word)', en) must be false — negation"
+            )
+        }
+    }
+
     // MARK: - testGermanPronounShipList / testEnglishPronounShipList
 
     func testGermanPronounShipList() {
@@ -288,7 +334,17 @@ final class ClosedListTests: XCTestCase {
         // function word at all — it's a full finite verb (irregular), not
         // an auxiliary/modal/article/preposition/conjunction.
         Precondition(fixtureID: "fx-mov-func-en-moodlock", mechanism: .finiteVerbCue, tokens: ["can"]),
-        Precondition(fixtureID: "fx-mov-func-de-moodlock", mechanism: .finiteVerbCue, tokens: ["kommt"])
+        Precondition(fixtureID: "fx-mov-func-de-moodlock", mechanism: .finiteVerbCue, tokens: ["kommt"]),
+
+        // MARK: quick task 260817-r2u negation-substitution fixtures — the
+        // precondition checked here is `isSubstitutable`, which is true for
+        // ALL four (that is exactly the pre-existing condition the
+        // negation-polarity gate narrows); it does not assert the guard's
+        // verdict, which `EditGuardTests` covers by name.
+        Precondition(fixtureID: "fx-sub-func-en-negation-flip-no-an", mechanism: .functionWord, tokens: ["no", "an"]),
+        Precondition(fixtureID: "fx-sub-func-de-negation-flip-kein-ein", mechanism: .functionWord, tokens: ["kein", "ein"]),
+        Precondition(fixtureID: "fx-sub-func-en-negation-swap-not-no", mechanism: .functionWord, tokens: ["not", "no"]),
+        Precondition(fixtureID: "fx-sub-func-de-negation-swap-nicht-keine", mechanism: .functionWord, tokens: ["nicht", "keine"])
     ]
 
     func testFixturePreconditions() {

@@ -807,6 +807,67 @@ enum EditGuardFixtures {
             expectedVerdict: .accept, expectedClass: "punctuationOrCasing",
             note: "Plan Task 1 required fixture, EN half of the punctuation + " +
                 "casing pair."
+        ),
+        // Quick task 260817-r2u: the negation-substitution gap. D-02's
+        // function<->function allowlist deliberately includes negation
+        // tokens (`nicht`/`kein`, `not`/`no`) so a genuine negation repair
+        // reads as `functionWordSubstitution` — but `classifySubstitute`
+        // step 6 accepts ANY pair where both sides are substitutable,
+        // including a pair where exactly one side is a negation token. That
+        // lets a negation be swapped for a non-negation function word and
+        // waved through, inverting meaning.
+        Fixture(
+            id: "fx-sub-func-en-negation-flip-no-an",
+            language: "en",
+            baseline: "I don't believe that there's no API to end an activity.",
+            candidate: "I don't believe that there's an API to end an activity.",
+            expectedText: "I don't believe that there's no API to end an activity.",
+            editKind: .substitute, tokenClass: .functionWord, position: .interior,
+            expectedVerdict: .reject, expectedClass: "negationChange",
+            note: "The verbatim 2026-08-15 production record " +
+                "(cleanup-2026-08-15.jsonl): raw 'I don't believe that " +
+                "there's no API to end an activity' -> final 'I don't " +
+                "believe that there's an API ...', accept_class " +
+                "functionWordSubstitution, accepted true. The user's " +
+                "negation was deleted from text pasted at their cursor."
+        ),
+        Fixture(
+            id: "fx-sub-func-de-negation-flip-kein-ein",
+            language: "de",
+            baseline: "Das ist kein Problem.",
+            candidate: "Das ist ein Problem.",
+            expectedText: "Das ist kein Problem.",
+            editKind: .substitute, tokenClass: .functionWord, position: .interior,
+            expectedVerdict: .reject, expectedClass: "negationChange",
+            note: "DE analogue of fx-sub-func-en-negation-flip-no-an: the " +
+                "negation determiner swapped for the indefinite determiner " +
+                "in a short copular sentence — same meaning-inversion shape " +
+                "as the EN production record."
+        ),
+        Fixture(
+            id: "fx-sub-func-en-negation-swap-not-no",
+            language: "en",
+            baseline: "I have not idea what happened.",
+            candidate: "I have no idea what happened.",
+            expectedText: "I have no idea what happened.",
+            editKind: .substitute, tokenClass: .functionWord, position: .interior,
+            expectedVerdict: .accept, expectedClass: "functionWordSubstitution",
+            note: "A genuine EN repair where BOTH sides are negation " +
+                "tokens — proves the fix does not block negation<->negation " +
+                "substitution wholesale."
+        ),
+        Fixture(
+            id: "fx-sub-func-de-negation-swap-nicht-keine",
+            language: "de",
+            baseline: "Ich habe nicht Ahnung davon.",
+            candidate: "Ich habe keine Ahnung davon.",
+            expectedText: "Ich habe keine Ahnung davon.",
+            editKind: .substitute, tokenClass: .functionWord, position: .interior,
+            expectedVerdict: .accept, expectedClass: "functionWordSubstitution",
+            note: "The 'nicht'->'kein...' repair FunctionWords.swift's own " +
+                "doc comment names as the reason negation is in the " +
+                "substitutable set at all ('Negation is included so that " +
+                "nicht->kein reads as a function substitution')."
         )
     ]
 
@@ -1612,10 +1673,12 @@ enum EditGuardFixtures {
         ("substitute|contentWord|terminal|de", "COLLAPSES into substitute|contentWord|interior|de — D-02 lemma-lock classification is position-invariant."),
         ("substitute|contentWord|sentenceInitial|en", "COLLAPSES into substitute|contentWord|interior|en — D-02 lemma-lock classification is position-invariant."),
         ("substitute|contentWord|terminal|en", "COLLAPSES into substitute|contentWord|interior|en — D-02 lemma-lock classification is position-invariant."),
-        // substitute x functionWord — position-invariant once lemma-locked
-        ("substitute|functionWord|interior|de", "COLLAPSES into substitute|functionWord|sentenceInitial|de — functionWordSubstitution classification is position-invariant."),
+        // substitute x functionWord — terminal position collapses; interior
+        // is now genuinely covered (quick task 260817-r2u: the 2026-08-15
+        // negation-substitution production defect lived at interior
+        // position, so the old "position-invariant" prune claim for
+        // interior was never actually true).
         ("substitute|functionWord|terminal|de", "COLLAPSES into substitute|functionWord|sentenceInitial|de — functionWordSubstitution classification is position-invariant."),
-        ("substitute|functionWord|interior|en", "COLLAPSES into substitute|functionWord|sentenceInitial|en — functionWordSubstitution classification is position-invariant."),
         ("substitute|functionWord|terminal|en", "COLLAPSES into substitute|functionWord|sentenceInitial|en — functionWordSubstitution classification is position-invariant."),
         // substitute x filler — always fail-closed regardless of position
         ("substitute|filler|sentenceInitial|de", "COLLAPSES into substitute|filler|interior|de — filler substitution is fail-closed regardless of position."),

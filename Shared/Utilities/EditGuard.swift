@@ -161,6 +161,16 @@ public enum EditGuard {
         /// edits, or a `.move`-bridged pair of such runs) with another edit
         /// that was independently rejected. See that function's doc comment.
         case atomicGroupRevert
+        /// Quick task 260817-r2u: a `.substitute` within the D-02
+        /// function<->function allowlist where exactly one side is a
+        /// negation token (`FunctionWords.isNegation`). Distinct from
+        /// `contentWordIdentityChange` per D-11 forensics — this is a
+        /// meaning-inversion class specific to negation polarity, not a
+        /// generic content-word change, and its cost must stay separately
+        /// visible in scoring. Confirmed production record
+        /// (`cleanup-2026-08-15.jsonl`): a negation deleted from text pasted
+        /// at the user's cursor.
+        case negationChange
     }
 
     /// The log-shaped record: one classified edit, ready to serialize
@@ -556,6 +566,18 @@ public enum EditGuard {
         // 6. Function<->function (D-02 article/agreement repair).
         if FunctionWords.isSubstitutable(a.normalized, language: language),
            FunctionWords.isSubstitutable(b.normalized, language: language) {
+            // Quick task 260817-r2u: a negation swapped for a non-negation
+            // function word (or vice versa) is not an agreement repair — it
+            // flips the assertion. Reject early; a polarity flip must not
+            // fall through to steps 7/8/9's inflection / non-word-repair
+            // classes. Neither side negation, or BOTH sides negation
+            // (nicht->kein..., not<->no), still accepts as
+            // functionWordSubstitution unchanged.
+            let aIsNegation = FunctionWords.isNegation(a.normalized, language: language)
+            let bIsNegation = FunctionWords.isNegation(b.normalized, language: language)
+            if aIsNegation != bIsNegation {
+                return (false, nil, .negationChange)
+            }
             return (true, .functionWordSubstitution, nil)
         }
         // 6.5. Quick task 260723-sx1, criterion A: non-word repair

@@ -227,10 +227,9 @@ public enum FunctionWords {
     /// deletions and permits only acoustic fillers and verbatim repetitions,
     /// never negation.
     public static let germanSubstitutable: Set<String> =
-        germanInsertable.union(germanDualRole).union([
+        germanInsertable.union(germanDualRole).union(germanNegation).union([
             "kann", "können", "könnte", "muss", "müssen", "soll", "sollen",
-            "will", "wollen", "darf", "dürfen", "mag", "mögen",
-            "nicht", "kein", "keine", "keinen"
+            "will", "wollen", "darf", "dürfen", "mag", "mögen"
         ])
 
     /// D-02's function<->function substitution allowlist, English:
@@ -238,10 +237,31 @@ public enum FunctionWords {
     /// negation. Same rationale as `germanSubstitutable`. `"before"` is
     /// deliberately absent (see `englishDualRoleAlsoNotSubstitutable`).
     public static let englishSubstitutable: Set<String> =
-        englishInsertable.union(englishDualRole).union([
-            "can", "could", "must", "should", "will", "would", "may", "might",
-            "not", "no"
+        englishInsertable.union(englishDualRole).union(englishNegation).union([
+            "can", "could", "must", "should", "will", "would", "may", "might"
         ])
+
+    // MARK: - Negation sets (quick task 260817-r2u)
+
+    /// The negation members of `germanSubstitutable`, named so
+    /// `classifySubstitute` can gate on negation POLARITY specifically —
+    /// not just membership in the substitutable set. Extracted from the
+    /// literals that used to be inlined directly in `germanSubstitutable`'s
+    /// union; set MEMBERSHIP of `germanSubstitutable` is unchanged, only
+    /// where the literals live moved.
+    ///
+    /// A negation<->non-negation substitution is not an agreement repair —
+    /// it is the assertion flipped. Confirmed production record
+    /// (`cleanup-2026-08-15.jsonl`): raw "... there's no API to end an
+    /// activity" -> final "... there's an API ...", accepted as
+    /// `functionWordSubstitution`. This set exists so that leak is
+    /// structurally closed while `nicht`->`kein...`/`kein`<->`keine` (both
+    /// sides negation) still reads as a repair.
+    public static let germanNegation: Set<String> = ["nicht", "kein", "keine", "keinen"]
+
+    /// The negation members of `englishSubstitutable`. Same rationale as
+    /// `germanNegation`; EN half of the same confirmed production defect.
+    public static let englishNegation: Set<String> = ["not", "no"]
 
     // MARK: - Public API
 
@@ -264,5 +284,17 @@ public enum FunctionWords {
         let lower = token.lowercased()
         let prefix = language.prefix(2).lowercased()
         return prefix == "en" ? englishSubstitutable.contains(lower) : germanSubstitutable.contains(lower)
+    }
+
+    /// Is `token` one of the negation members of the D-02 substitution
+    /// allowlist (quick task 260817-r2u)? Used by `EditGuard.classifySubstitute`
+    /// to reject a pair where exactly one side is a negation token — a
+    /// negation<->non-negation substitution flips the assertion, not an
+    /// agreement repair. Same lookup convention as `isInsertable`/
+    /// `isSubstitutable`.
+    public static func isNegation(_ token: String, language: String) -> Bool {
+        let lower = token.lowercased()
+        let prefix = language.prefix(2).lowercased()
+        return prefix == "en" ? englishNegation.contains(lower) : germanNegation.contains(lower)
     }
 }
