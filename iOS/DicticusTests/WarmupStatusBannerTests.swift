@@ -170,7 +170,7 @@ final class WarmupStatusBannerTests: XCTestCase {
         XCTAssertEqual(banner.headline, "Downloading speech model\u{2026}")
         XCTAssertEqual(
             banner.bodyText,
-            "One-time download, about 626 MB. You can start recording anytime — we'll transcribe once it's ready."
+            "One-time download, about 1.1 GB. You can start recording anytime — we'll transcribe once it's ready."
         )
         XCTAssertEqual(banner.iconName, "arrow.down.circle")
     }

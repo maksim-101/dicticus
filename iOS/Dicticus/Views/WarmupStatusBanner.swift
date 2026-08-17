@@ -166,7 +166,7 @@ struct WarmupStatusBanner: View {
     var bodyText: String {
         switch stage {
         case .downloading:
-            return "One-time download, about 626 MB. You can start recording anytime — we'll transcribe once it's ready."
+            return "One-time download, about 1.1 GB. You can start recording anytime — we'll transcribe once it's ready."
         case .loading:
             // 260815-ait Fix 5: the first ANE recompile for a build/model can take
             // ~60-90s, not "a few seconds" — the fast-path copy would look like a
