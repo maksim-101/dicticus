@@ -11,7 +11,7 @@ A fully local dictation app for macOS and iOS. Hold a key or trigger a shortcut,
 - **Multi-Platform** — Native apps for macOS (Menu Bar) and iOS (Universal App).
 - **System-wide push-to-talk** — Works in any text field on macOS.
 - **Siri Shortcuts & Action Button** — Trigger iOS dictation from anywhere, even when locked.
-- **On-device ASR** — Whisper large-v3-turbo via WhisperKit on the Apple Neural Engine.
+- **On-device ASR** — Whisper large-v3-turbo via WhisperKit on macOS; Parakeet TDT v3 via FluidAudio on iOS — both run on the Apple Neural Engine.
 - **AI cleanup mode** — Grammar, punctuation, word-order, and filler-word correction via Qwen3.5-4B (llama.cpp), on both macOS and iOS. Optional and opt-in — triggered by its own shortcut, with a deterministic fidelity guard that blocks the model from rewriting what you actually dictated.
 - **Spoken punctuation** — Say "comma", "new line", etc. and it's inserted deterministically before cleanup.
 - **Auto language detection** — German and English, no manual switching.
@@ -29,7 +29,7 @@ A fully local dictation app for macOS and iOS. Hold a key or trigger a shortcut,
 ### iOS / iPadOS
 - iOS 17+
 - iPhone 15 or later (for Action Button optimization), or any modern iPhone/iPad. AI cleanup requires a device with ≥5 GB RAM.
-- ~1 GB disk for the ASR model, plus ~2.7 GB for the optional AI-cleanup model.
+- ~1.2 GB disk for the ASR model (Parakeet TDT v3), plus ~2.7 GB for the optional AI-cleanup model.
 
 ## Installation
 
@@ -87,7 +87,7 @@ All processing happens on-device. No audio or text is ever sent to any server. T
 | Component | Technology |
 |-----------|-----------|
 | App shell | Swift 6 + SwiftUI, MenuBarExtra (macOS) |
-| ASR | WhisperKit + Whisper large-v3-turbo (CoreML, Apple Neural Engine) |
+| ASR | macOS: WhisperKit + Whisper large-v3-turbo · iOS: FluidAudio + Parakeet TDT v3 (both CoreML, Apple Neural Engine) |
 | LLM | llama.cpp + Qwen3.5-4B Instruct Q4_K_M (Metal) — macOS + iOS |
 | Database | GRDB + SQLite (FTS5) |
 | Live Activity | ActivityKit (iOS) |
