@@ -328,8 +328,15 @@ class TranscriptionService: ObservableObject {
                 rms: energy.avg,
                 peak: energy.max,
                 segments: allSegments.map {
-                    DiscardProbe.SegmentInfo(text: $0.text, noSpeechProb: $0.noSpeechProb, avgLogProb: $0.avgLogprob)
-                }
+                    DiscardProbe.SegmentInfo(
+                        text: $0.text,
+                        noSpeechProb: nil,
+                        avgLogProb: $0.avgLogprob,
+                        compressionRatio: $0.compressionRatio,
+                        temperature: $0.temperature
+                    )
+                },
+                noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable
             )
             #endif
             throw TranscriptionError.silenceOnly  // defer resets to .idle
@@ -353,8 +360,10 @@ class TranscriptionService: ObservableObject {
             segments: allSegments.map {
                 DiscardProbe.SegmentInfo(
                     text: $0.text,
-                    noSpeechProb: $0.noSpeechProb,
+                    noSpeechProb: nil,
                     avgLogProb: $0.avgLogprob,
+                    compressionRatio: $0.compressionRatio,
+                    temperature: $0.temperature,
                     startSeconds: $0.start,
                     endSeconds: $0.end
                 )
@@ -362,7 +371,8 @@ class TranscriptionService: ObservableObject {
             lowConfidenceShort: LowConfidenceShort.flag(
                 durationSeconds: durationSeconds,
                 avgLogProbs: allSegments.map(\.avgLogprob)
-            )
+            ),
+            noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable
         )
         #endif
 
@@ -397,8 +407,15 @@ class TranscriptionService: ObservableObject {
                 rms: energy.avg,
                 peak: energy.max,
                 segments: allSegments.map {
-                    DiscardProbe.SegmentInfo(text: $0.text, noSpeechProb: $0.noSpeechProb, avgLogProb: $0.avgLogprob)
-                }
+                    DiscardProbe.SegmentInfo(
+                        text: $0.text,
+                        noSpeechProb: nil,
+                        avgLogProb: $0.avgLogprob,
+                        compressionRatio: $0.compressionRatio,
+                        temperature: $0.temperature
+                    )
+                },
+                noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable
             )
             #endif
             throw TranscriptionError.noResult  // defer resets to .idle

@@ -46,6 +46,33 @@
 // alongside it (both optional, default nil) to carry each segment's position
 // in the clip when available.
 //
+// Cycle 4 (quick task 260825-q2f, HONEST SCHEMA): `SegmentInfo.noSpeechProb`
+// was a fabricated constant, not a measurement. Root cause: `argmax-oss-swift`
+// 1.0.0 `Sources/WhisperKit/Core/TextDecoder.swift:802` contains literally
+// `let noSpeechProb: Float = 0 // TODO: implement no speech prob`, the sole
+// writer of `DecodingResult.noSpeechProb`, which `SegmentSeeker.swift:134,178`
+// then copies onto every `TranscriptionSegment`. The app-side mapping in
+// TranscriptionService was never the defect — it faithfully forwarded a zero
+// the SDK itself never computes. Verified 2026-08-25 against
+// `raw.githubusercontent.com/argmaxinc/argmax-oss-swift/main`: the same stub
+// line is still present on upstream `main`, so an SDK bump alone does not fix
+// this. `noSpeechProb` is now `Float?` with no default, forcing every call
+// site to be explicit, and is omitted from the JSONL entirely rather than
+// written as 0 — an audit now reads absence plus a machine-readable
+// `no_speech_prob_source` reason, not a silent fabrication. Two real
+// per-segment signals WhisperKit does compute — `compressionRatio` (the
+// classical repetitive-hallucination detector) and `temperature` — are added
+// alongside it so the audit still gains signal instead of just losing one.
+// A real value IS theoretically reachable without forking (a pass-through
+// `LogitsFiltering` via the public `WhisperKitConfig(logitsFilters:)` hook
+// reading softmax P(no-speech) at the post-SOT position), but the value is
+// per decode *window* and, under `chunkingStrategy: .vad` with concurrent
+// workers, the window-to-segment mapping is not recoverable from outside the
+// SDK — recorded in `.planning/backlog/whisper-no-speech-prob-unavailable.md`
+// rather than guessed. Scope guard: instrumentation only, no gating logic
+// added or changed; confidence gating was measured and rejected in spike
+// 260805-qx7.
+//
 // Output: ~/Library/Application Support/Dicticus/DebugRecordings/discard-YYYY-MM-DD.jsonl
 // Retention: 14 days, purged once per launch.
 
@@ -79,22 +106,48 @@ public actor DiscardProbe {
     /// One segment's silence-relevant fields, captured at Layer 3.
     public struct SegmentInfo: Sendable {
         public let text: String
-        public let noSpeechProb: Float
+        /// No default value: the caller must state explicitly, at every construction
+        /// site, whether a real value is available. WhisperKit 1.0.0 never populates
+        /// this (see the cycle-4 header note above), so every current call site passes
+        /// `nil` — but that is a call-site decision, not a silent struct default.
+        public let noSpeechProb: Float?
         public let avgLogProb: Float
+        /// Real per-segment signals WhisperKit does compute (TextDecoder.swift:794,
+        /// :796-800), carried on TranscriptionSegment (Models.swift:582-584).
+        /// `compressionRatio` is the classical repetitive-hallucination detector.
+        public let compressionRatio: Float?
+        public let temperature: Float?
         /// Segment position in the clip, when the caller has it (e.g. WhisperKit's
         /// TranscriptionSegment.start/.end). Optional so existing discard-path call
         /// sites (which never captured this) compile unchanged.
         public let startSeconds: Float?
         public let endSeconds: Float?
 
-        public init(text: String, noSpeechProb: Float, avgLogProb: Float, startSeconds: Float? = nil, endSeconds: Float? = nil) {
+        public init(
+            text: String,
+            noSpeechProb: Float?,
+            avgLogProb: Float,
+            compressionRatio: Float? = nil,
+            temperature: Float? = nil,
+            startSeconds: Float? = nil,
+            endSeconds: Float? = nil
+        ) {
             self.text = text
             self.noSpeechProb = noSpeechProb
             self.avgLogProb = avgLogProb
+            self.compressionRatio = compressionRatio
+            self.temperature = temperature
             self.startSeconds = startSeconds
             self.endSeconds = endSeconds
         }
     }
+
+    /// Machine-readable reason a `SegmentInfo.noSpeechProb` is nil, emitted at the
+    /// record level as `no_speech_prob_source`. WhisperKit 1.0.0's decoder never
+    /// computes this value (see the cycle-4 header note above) — this is the sole
+    /// reason string in use today, defined once so call sites reference the constant
+    /// rather than repeating the literal.
+    public static let noSpeechProbUnavailable = "unavailable:whisperkit-1.0.0-decoder-stub"
 
     /// Record one silent discard event. All parameters besides `reason` and
     /// `platform` are optional because each call site has different data
@@ -114,7 +167,8 @@ public actor DiscardProbe {
         gateNoiseFloor: Float? = nil,
         gateThreshold: Float? = nil,
         segments: [SegmentInfo]? = nil,
-        lowConfidenceShort: Bool? = nil
+        lowConfidenceShort: Bool? = nil,
+        noSpeechProbSource: String? = nil
     ) {
         ensureDirectory()
         purgeIfNeeded()
@@ -136,14 +190,17 @@ public actor DiscardProbe {
         if let gateNoiseFloor { line["gate_noise_floor"] = gateNoiseFloor }
         if let gateThreshold { line["gate_threshold"] = gateThreshold }
         if let lowConfidenceShort { line["low_confidence_short"] = lowConfidenceShort }
+        if let noSpeechProbSource { line["no_speech_prob_source"] = noSpeechProbSource }
         if let segments {
             line["segment_count"] = segments.count
             line["segments"] = segments.map { seg -> [String: Any] in
                 var segLine: [String: Any] = [
                     "text": seg.text,
-                    "no_speech_prob": seg.noSpeechProb,
                     "avg_log_prob": seg.avgLogProb
                 ]
+                if let noSpeechProb = seg.noSpeechProb { segLine["no_speech_prob"] = noSpeechProb }
+                if let compressionRatio = seg.compressionRatio { segLine["compression_ratio"] = compressionRatio }
+                if let temperature = seg.temperature { segLine["temperature"] = temperature }
                 if let startSeconds = seg.startSeconds { segLine["start_s"] = startSeconds }
                 if let endSeconds = seg.endSeconds { segLine["end_s"] = endSeconds }
                 return segLine
