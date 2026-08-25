@@ -131,6 +131,17 @@ public enum EditGuard {
         /// class alone can drop the period even when a bundled neighbour edit
         /// in the same atomic group is independently rejected.
         case pauseSplitMerge
+        /// Quick task 260825-q1w (2026-08-25 debug-log audit, D-A/D-B): a
+        /// PURE two-token hyphen join — the candidate token is exactly the
+        /// two ADJACENT baseline tokens joined by a single hyphen, compared
+        /// on `normalized` so no letter can change. Live records:
+        /// `cleanup-2026-08-23.jsonl` #124 (`self`/`evaluation` ->
+        /// `self-evaluation`, delete partner) and #70 (`code`/`wise` ->
+        /// `code-wise`, punctuation partner). Assigned by
+        /// `applyHyphenCompoundJoinExemption`, called at the end of
+        /// `classify` — the ONLY scope holding `dictProtectedLower` and the
+        /// only place that runs before `rebuild`'s coupling passes.
+        case hyphenCompoundJoin
     }
 
     /// D-11's forensics vocabulary — the classes of edit this guard REJECTS.
@@ -452,7 +463,76 @@ public enum EditGuard {
                 rejectClass: rejectClass?.rawValue
             ))
         }
+        applyHyphenCompoundJoinExemption(edits: edits, verdicts: &result, dictProtectedLower: dictProtectedLower)
         return result
+    }
+
+    /// Quick task 260825-q1w (D-A/D-B): accepts a PURE two-token hyphen join
+    /// that `classifyOne` rejected as `derivationalSuffixChange` or
+    /// `contentWordIdentityChange` — a `.substitute` whose candidate token
+    /// is exactly the two ADJACENT baseline tokens joined by a single
+    /// hyphen, immediately followed by the now-redundant second baseline
+    /// token being dropped (a `.delete`, or a `.substitute` against
+    /// prosodic punctuation — landmine 1's two partner shapes). Every join
+    /// in the corpus is this PAIR; accepting only the substitute half would
+    /// render `decision-wise wise`, so both verdicts flip together or
+    /// neither does.
+    ///
+    /// Deliberately narrow: digit-bearing tokens stay under the D-03 hard
+    /// lock (word kind required on both sides), a dictionary-protected
+    /// baseline token on either half never exempts, and the comparison is
+    /// on `normalized` so casing rides along (`json`/`datei` ->
+    /// `JSON-Datei`) but no letter may differ. Three-or-more-token joins are
+    /// excluded by construction (only `i+1` is ever consulted) — the one
+    /// three-token case in the corpus (`delegation-not-script`) reads as a
+    /// mis-repair, not a join to accept (out-of-scope section of the plan).
+    /// No coupling-pass exemption is added here (landmine 3) — a qualifying
+    /// join can still be reverted by `applyAtomicGroupCoupling` when another
+    /// member of its atomic group is independently rejected; that is a
+    /// documented, deliberate limitation, not a bug.
+    private static func applyHyphenCompoundJoinExemption(
+        edits: [Edit],
+        verdicts: inout [ClassifiedEdit],
+        dictProtectedLower: Set<String>
+    ) {
+        for i in edits.indices {
+            guard edits[i].kind == .substitute, !verdicts[i].accepted,
+                  let rejectClass = verdicts[i].rejectClass,
+                  rejectClass == RejectionClass.derivationalSuffixChange.rawValue
+                    || rejectClass == RejectionClass.contentWordIdentityChange.rawValue,
+                  let from = edits[i].from, let to = edits[i].to,
+                  from.kind == .word, to.kind == .word
+            else { continue }
+
+            let j = i + 1
+            guard j < edits.count, !verdicts[j].accepted else { continue }
+
+            let partnerFrom: Token
+            if edits[j].kind == .delete, let pf = edits[j].from, pf.kind == .word {
+                partnerFrom = pf
+            } else if edits[j].kind == .substitute,
+                      let pf = edits[j].from, pf.kind == .word,
+                      let pt = edits[j].to, pt.kind == .punctuation,
+                      prosodicPunctuation.contains(pt.text) {
+                partnerFrom = pf
+            } else {
+                continue
+            }
+
+            guard partnerFrom.index == from.index + 1 else { continue }
+            guard !dictProtectedLower.contains(from.normalized),
+                  !dictProtectedLower.contains(partnerFrom.normalized) else { continue }
+            guard to.normalized == from.normalized + "-" + partnerFrom.normalized else { continue }
+
+            verdicts[i] = ClassifiedEdit(
+                kind: verdicts[i].kind, from: verdicts[i].from, to: verdicts[i].to,
+                accepted: true, acceptClass: AcceptClass.hyphenCompoundJoin.rawValue, rejectClass: nil
+            )
+            verdicts[j] = ClassifiedEdit(
+                kind: verdicts[j].kind, from: verdicts[j].from, to: verdicts[j].to,
+                accepted: true, acceptClass: AcceptClass.hyphenCompoundJoin.rawValue, rejectClass: nil
+            )
+        }
     }
 
     private static func classifyOne(
