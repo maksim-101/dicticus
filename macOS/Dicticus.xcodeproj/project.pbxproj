@@ -81,6 +81,7 @@
 		5B34E8C2269BA3F363CD8AE5 /* TextProcessingServiceContextTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 953986B4EAA40D08A7557B11 /* TextProcessingServiceContextTests.swift */; };
 		5EEB3E797170146D6935991B /* ClosedListTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20BFF7DF7FDD1646B1F5B20 /* ClosedListTests.swift */; };
 		60795956D5DEBDDBCB68CB0B /* starter-pack-brands.csv in Resources */ = {isa = PBXBuildFile; fileRef = 81DE763C61392CC53C40C123 /* starter-pack-brands.csv */; };
+		60EA62FDACC23FA5F249D17A /* EditGuardMoodLockSplitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C382B87D71427E575EE22D2 /* EditGuardMoodLockSplitTests.swift */; };
 		639A284A6F1648C78B7F6676 /* CapitalizationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA3ABD8D43E7EB02B7D002EA /* CapitalizationTests.swift */; };
 		64AA000669A4808A9BC1CA29 /* AppLocalMigrationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A95123FD20501B4871C75668 /* AppLocalMigrationServiceTests.swift */; };
 		64E405E3E3460219E65E39FA /* AudioCaptureProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B2645584469543592036142 /* AudioCaptureProbe.swift */; };
@@ -139,6 +140,7 @@
 		A8FD5249DDEECE32245985D4 /* starter-pack-tech.csv in Resources */ = {isa = PBXBuildFile; fileRef = DCA28F8F142CE72EB85279C5 /* starter-pack-tech.csv */; };
 		A9DD4C7F7B76CC7A2BB7627D /* HistoryPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78D74823919FDBBD572E5BE7 /* HistoryPane.swift */; };
 		AAE74D64DE0010627D22F0CD /* PronounPersonMap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9458B1D730A30CB3CF0F2A07 /* PronounPersonMap.swift */; };
+		AAEF36D568F74634FFE3A05A /* EditGuardHyphenCompoundJoinTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C4ED406D24673A5ECE8C0493 /* EditGuardHyphenCompoundJoinTests.swift */; };
 		AB9F62043493A30CEF428D68 /* PosTaggerProbeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEC46F666F4D931F4C683636 /* PosTaggerProbeTests.swift */; };
 		AD6BB2B4C610E17761BD3EC8 /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = 5D9006B0A2BDDC990FAFD71C /* AppIcon.icon */; };
 		AEDFCADA4B4D169665C8BCCD /* MemoryProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AC7066568B3D2A42647433E /* MemoryProbe.swift */; };
@@ -232,6 +234,7 @@
 		182CA94D990FE68A00A52147 /* PopoverRoot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopoverRoot.swift; sourceTree = "<group>"; };
 		190A391B6BC042BE1B56011B /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		1AD3CE00483F6F398C144B49 /* RulesCleanupService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RulesCleanupService.swift; sourceTree = "<group>"; };
+		1C382B87D71427E575EE22D2 /* EditGuardMoodLockSplitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditGuardMoodLockSplitTests.swift; sourceTree = "<group>"; };
 		1E60BA27B4C9B8FC047449A2 /* HistoryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryService.swift; sourceTree = "<group>"; };
 		1F37F3C64F12A211E9AE403D /* allowlist-en.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "allowlist-en.txt"; sourceTree = "<group>"; };
 		1FB77CC93A12476198D2D3A0 /* NoSpeechDiscardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoSpeechDiscardTests.swift; sourceTree = "<group>"; };
@@ -360,6 +363,7 @@
 		C0781F7C404244283FCD9224 /* Dicticus.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Dicticus.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C30BA4C657A1C41682A689F5 /* CleanupServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CleanupServiceTests.swift; sourceTree = "<group>"; };
 		C454E415EBC55F52775B578C /* SwissDefaultMigration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwissDefaultMigration.swift; sourceTree = "<group>"; };
+		C4ED406D24673A5ECE8C0493 /* EditGuardHyphenCompoundJoinTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditGuardHyphenCompoundJoinTests.swift; sourceTree = "<group>"; };
 		C53EB869E36D2DDA5A7536E9 /* WindowAccessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowAccessor.swift; sourceTree = "<group>"; };
 		C7A81C72EA64FC75CB067CF1 /* MediaControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MediaControllerTests.swift; sourceTree = "<group>"; };
 		C93EA94198EFE7ABD237D816 /* CleanupContextLimitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CleanupContextLimitTests.swift; sourceTree = "<group>"; };
@@ -698,7 +702,9 @@
 				3931C660399C4F5714646B17 /* EditGuardFixtureCoverageTests.swift */,
 				A7D03D036A33A2051FEFAB61 /* EditGuardFixtures.swift */,
 				A79871663647645D625FA964 /* EditGuardGrammarRegressionTests.swift */,
+				C4ED406D24673A5ECE8C0493 /* EditGuardHyphenCompoundJoinTests.swift */,
 				8A147583C4B8BF967D14F2F4 /* EditGuardMergeAtomicityTests.swift */,
+				1C382B87D71427E575EE22D2 /* EditGuardMoodLockSplitTests.swift */,
 				A351140E49E2CE33073A6918 /* EditGuardPauseSplitMergeTests.swift */,
 				216843E09576D99E411462A0 /* EditGuardPipelineTests.swift */,
 				07E8AD126537E7029E61D9DD /* EditGuardTests.swift */,
@@ -1037,7 +1043,9 @@
 				BDC0C44074CD829203DDED3D /* EditGuardFixtureCoverageTests.swift in Sources */,
 				9F89D0D615C50B4212555C98 /* EditGuardFixtures.swift in Sources */,
 				E3A74E4BB36C40A3E2E8AAAC /* EditGuardGrammarRegressionTests.swift in Sources */,
+				AAEF36D568F74634FFE3A05A /* EditGuardHyphenCompoundJoinTests.swift in Sources */,
 				85F0A3D620ADD7BAB4F6071C /* EditGuardMergeAtomicityTests.swift in Sources */,
+				60EA62FDACC23FA5F249D17A /* EditGuardMoodLockSplitTests.swift in Sources */,
 				39766517912B82A7B97E0BBC /* EditGuardPauseSplitMergeTests.swift in Sources */,
 				B84B080262C8BCE1138D388B /* EditGuardPipelineTests.swift in Sources */,
 				17FB04E9771817C360006E70 /* EditGuardTests.swift in Sources */,
