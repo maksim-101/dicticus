@@ -221,6 +221,45 @@ final class EditGuardPipelineTests: XCTestCase {
             "the German verb-final word-order repair must reach the end of the pipeline intact — got: \(output)")
     }
 
+    // MARK: - Quick task 260825-q1w (D-D): number-form policy pinned end-to-end
+
+    /// Live `cleanup-2026-08-23.jsonl` #22, word -> digit direction.
+    /// `EditGuard` ACCEPTS the same-value form change on purpose (D-03 —
+    /// the guard owns VALUE, `NumberRevert` (Step 3a.5) owns FORM); the
+    /// prompt's number rule is enforced downstream by `NumberRevert`. This
+    /// is the EN word->digit sibling of `testStep3aOrdering` (DE, digit->
+    /// word) and the regression net for that contract in EN.
+    func testNumberFormPolicy_wordToDigit_en() async {
+        let rawText = "so maybe check that again and then either opt for option 2 or three depending on what you find"
+        let mock = PipelineMockCleanupProvider()
+        mock.returnValue = "So maybe check that again and then either opt for option 2 or 3 depending on what you find."
+        let service = TextProcessingService(
+            dictionaryService: dictionaryService, cleanupService: mock, historyService: testHistory
+        )
+
+        let output = await service.process(text: rawText, language: "en", mode: .aiCleanup)
+
+        XCTAssertTrue(output.contains("or three"), "final output \"\(output)\" must contain the dictated word form \"or three\"")
+        XCTAssertFalse(output.contains("or 3"), "final output \"\(output)\" must NOT contain the LLM's digit form \"or 3\" — NumberRevert must have reverted it")
+    }
+
+    /// Live `cleanup-2026-08-25.jsonl` #8, digit -> word direction.
+    /// Same D-D contract as above, opposite direction: `NumberRevert`
+    /// reverts the LLM's word form back to the dictated digit form.
+    func testNumberFormPolicy_digitToWord_en() async {
+        let rawText = "for some clients 6 francs for something like this might be questionable"
+        let mock = PipelineMockCleanupProvider()
+        mock.returnValue = "For some clients six francs for something like this might be questionable."
+        let service = TextProcessingService(
+            dictionaryService: dictionaryService, cleanupService: mock, historyService: testHistory
+        )
+
+        let output = await service.process(text: rawText, language: "en", mode: .aiCleanup)
+
+        XCTAssertTrue(output.contains("6 francs"), "final output \"\(output)\" must contain the dictated digit form \"6 francs\"")
+        XCTAssertFalse(output.contains("six francs"), "final output \"\(output)\" must NOT contain the LLM's word form \"six francs\" — NumberRevert must have reverted it")
+    }
+
     // MARK: - testGateEntryCarriesClassifiedEdits
 
     #if DEBUG_RECORDER
