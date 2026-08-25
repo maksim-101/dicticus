@@ -165,18 +165,26 @@ final class BrandMatcher {
             // over a spurious single-token match.
             for w in [2, 1] where i + w <= words.count {
                 let windowWords = Array(words[i ..< i + w])
-                // Sonnet-5 digit-drop guard (260725-debug): no canonical brand
-                // contains digits, so a bare-numeric token (e.g. "5" in "Sonnet
-                // 5") can never legitimately be part of a real brand-name
-                // correction. Without this guard, `normalize` strips the space
-                // between window words while KEEPING digit characters, so
-                // "Sonnet 5" normalizes to "sonnet5" — scoring jw≈0.97/dl=1
-                // against canonical "Sonnet" and clearing the near-exact /
+                // Sonnet-5 digit-drop guard (260725-debug): a STANDALONE
+                // numeral is never itself part of a brand token (the live
+                // canonical pool DOES contain digit-bearing entries — "Fable
+                // 5", "1Password" — corrected 260825-pt5; the guard is sound
+                // because in every one of those the digit is FUSED to the
+                // brand token, never a separate bare-numeral word), so a
+                // bare-numeric token (e.g. "5" in "Sonnet 5") can never
+                // legitimately be part of a real brand-name correction.
+                // Without this guard, `normalize` strips the space between
+                // window words while KEEPING digit characters, so "Sonnet 5"
+                // normalizes to "sonnet5" — scoring jw≈0.97/dl=1 against
+                // canonical "Sonnet" and clearing the near-exact /
                 // strong-ortho accept gates below, which silently ate the
                 // trailing digit ("Sonnet 5" -> "Sonnet", "opus 5" -> "Opus",
                 // "Gemma 4" -> "Gemma"). Reject any window containing a bare
                 // numeric token outright — MISS is the acceptable failure mode
-                // here (HYBRID contract), never corrupt.
+                // here (HYBRID contract), never corrupt. This is the cheaper,
+                // standalone-numeral-only precursor to guard B (digit-sequence
+                // parity, below) — kept exactly as-is since it fires earlier
+                // (before `matchToken`) and is pinned by its own regressions.
                 guard !windowWords.contains(where: isBareNumeric) else { continue }
                 let window = windowWords.joined(separator: " ")
                 let distinctive = windowWords.contains {
@@ -267,6 +275,28 @@ final class BrandMatcher {
                         continue
                     }
                 }
+
+                // Digit-sequence parity guard (quick task 260825-pt5, guard
+                // B): digits inside a brand canonical encode a version or
+                // model identity ("Fable 5", "1Password", "iTerm" versus
+                // "iTerm2") — fabricating or deleting one changes WHICH
+                // product the sentence names, a meaning change, not a
+                // spelling repair. This generalizes the bare-numeric window
+                // guard above (which only ever saw STANDALONE numerals) to
+                // the canonical-aware case: reject the match unless the
+                // ordered digit sequence spoken matches the ordered digit
+                // sequence in the canonical EXACTLY, catching both
+                // directions — a canonical that adds digits the speaker
+                // never said ("FIBAL." -> "Fable 5") and a canonical that
+                // drops digits the speaker did say ("a USB-5" -> "USB-A",
+                // "iTerm2." -> "iTerm"). Ordered-SEQUENCE equality, not set
+                // membership or presence, so "iTerm2" vs "iTerm21" would
+                // still be caught. Placed last (needs `m.canon`, so it
+                // cannot move above `matchToken`) — the last check before
+                // the rewrite is emitted.
+                let wDigits = wnorm.filter(\.isNumber)
+                let cDigits = cnorm.filter(\.isNumber)
+                guard wDigits == cDigits else { continue }
 
                 let lead = leadingNonCore(windowWords.first!)
                 let trail = trailingNonCore(windowWords.last!)
