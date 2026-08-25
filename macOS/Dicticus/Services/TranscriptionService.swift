@@ -215,12 +215,15 @@ class TranscriptionService: ObservableObject {
     /// without an audio engine. The live caller owns `lastResult`/`state`; this function
     /// is pure with respect to service state so a replay cannot perturb it.
     ///
-    /// Returns the per-segment `avgLogprob`/`noSpeechProb` alongside the result — the
-    /// live path discards them, the replay harness records them.
+    /// Returns the per-segment `avgLogprob`/`compressionRatio` alongside the result — the
+    /// live path discards them, the replay harness records them. `compressionRatio`
+    /// replaces the former `noSpeechProbs` element (quick task 260825-q2f): WhisperKit
+    /// 1.0.0 never computes a real no-speech probability (see DiscardProbe.swift's
+    /// cycle-4 header note), so that array only ever held fabricated zeros.
     private func transcribe(
         rawSamples samples: [Float],
         inputSampleRate: Double
-    ) async throws -> (result: DicticusTranscriptionResult, avgLogprobs: [Float], noSpeechProbs: [Float]) {
+    ) async throws -> (result: DicticusTranscriptionResult, avgLogprobs: [Float], compressionRatios: [Float]) {
         // Resample to 16kHz mono if hardware sample rate differs.
         // WhisperKit requires 16kHz Float32 mono input.
         let resampledSamples: [Float]
@@ -443,7 +446,7 @@ class TranscriptionService: ObservableObject {
             confidence: confidence
         )
 
-        return (transcriptionResult, avgLogprobs, allSegments.map(\.noSpeechProb))
+        return (transcriptionResult, avgLogprobs, allSegments.map(\.compressionRatio))
     }
 
     // MARK: - Adaptive voice gate support
@@ -725,7 +728,7 @@ extension TranscriptionService {
     func testTranscribe(
         samples: [Float],
         inputSampleRate: Double
-    ) async throws -> (result: DicticusTranscriptionResult, avgLogprobs: [Float], noSpeechProbs: [Float]) {
+    ) async throws -> (result: DicticusTranscriptionResult, avgLogprobs: [Float], compressionRatios: [Float]) {
         try await transcribe(rawSamples: samples, inputSampleRate: inputSampleRate)
     }
 }

@@ -22,6 +22,20 @@ import Foundation
 /// Kept pure over `[Float]` (no `import WhisperKit`) so callers pass
 /// `segments.map(\.noSpeechProb)` and the predicate is directly unit-testable
 /// with plain arrays — no live WhisperKit instance or segment type required.
+///
+/// **Finding, deliberately left unfixed here (quick task 260825-q2f):** the pinned
+/// `argmax-oss-swift` 1.0.0 supplies a constant `0` for every segment's
+/// `noSpeechProb` (`TextDecoder.swift:802`, `// TODO: implement no speech prob` —
+/// see `DiscardProbe.swift`'s cycle-4 header note for the full trace). Since every
+/// segment's value is `0`, and `0 > threshold` is false for any positive
+/// `threshold`, `allSatisfy` is false for any non-empty `noSpeechProbs` array — with
+/// WhisperKit 1.0.0, this layer can only ever fire on an EMPTY segment array (the
+/// vacuous-true default already documented above), never on real speech-vs-silence
+/// evidence. Layer 2 (`AdaptiveVoiceGate`) is therefore the live, load-bearing
+/// silence defense; this layer is currently inert against non-empty input. The
+/// predicate below is intentionally left exactly as-is: this task is
+/// instrumentation only (an honest debug-log schema), and confidence gating on
+/// these values was measured and explicitly rejected in spike 260805-qx7.
 enum NoSpeechDiscard {
     /// Returns `true` (discard as silence) when every segment's `noSpeechProb`
     /// exceeds `threshold`. Default `0.6` matches WhisperKit's own

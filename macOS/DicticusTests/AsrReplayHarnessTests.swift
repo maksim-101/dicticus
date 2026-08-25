@@ -90,7 +90,7 @@ final class AsrReplayHarnessTests: XCTestCase {
                 row["language"] = out.result.language
                 row["confidence"] = out.result.confidence
                 row["avg_logprobs"] = out.avgLogprobs
-                row["no_speech_probs"] = out.noSpeechProbs
+                row["compression_ratios"] = out.compressionRatios
                 // Quick task 260805-qx7: exercise the shipped predicate on this row's own
                 // duration + avg_logprobs, making the replay a real runtime cross-check of
                 // avg_log_prob stability rather than a synthetic re-derivation.
