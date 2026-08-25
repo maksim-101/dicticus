@@ -2034,6 +2034,47 @@ public enum EditGuard {
         tokens.first { $0.sentenceIndex == sentenceIndex && $0.kind == .word }
     }
 
+    /// Quick task 260825-q1w (D-C, landmine 5): the mood lock's `violates`
+    /// check compares `firstWordToken(baseline, sentenceIndex:)` against
+    /// `firstWordToken(tokens, sentenceIndex:)` BY SENTENCE INDEX. A
+    /// candidate-side sentence SPLIT shifts every later candidate sentence
+    /// index by one, so the check can silently compare two DIFFERENT
+    /// sentences — the root cause of the 2026-08-23 false positive
+    /// (`cleanup-2026-08-23.jsonl` #11: a no-reorder split before "Does"
+    /// tripped the lock because the shifted comparison landed on an
+    /// unrelated later baseline sentence).
+    ///
+    /// This is the fix's ONE guard: a mood-flip violation requires a
+    /// REORDER. A verb that still sits directly behind the same word it sat
+    /// behind when dictated has not been fronted, no matter which sentence
+    /// index the comparison happened to land on — so both German mood
+    /// fixtures (`fx-mov-func-en-moodlock`, `fx-mov-func-de-moodlock`) stay
+    /// blocked by MECHANISM (the verb's baseline left-neighbour changed),
+    /// not by a language check, and a split does not buy a genuine
+    /// verb-fronting reorder a free pass (a split+reorder still loses its
+    /// baseline left-neighbour, so this returns `false` for that shape too).
+    ///
+    /// - Parameters:
+    ///   - rebuiltIndex: the verb's index in `tokens` (the in-progress
+    ///     rebuilt stream).
+    ///   - tokens: the in-progress rebuilt stream.
+    ///   - baseline: the original baseline token stream.
+    /// - Returns: `true` when the verb is still in baseline word order (no
+    ///   revert should count as a violation for this occurrence).
+    private static func verbKeptBaselineOrder(
+        rebuiltIndex: Int, tokens: [WorkToken], baseline: [Token]
+    ) -> Bool {
+        let verb = tokens[rebuiltIndex]
+        let outputPrev = tokens[..<rebuiltIndex].last { $0.kind != .punctuation }
+        for (idx, t) in baseline.enumerated() where t.kind != .punctuation && t.normalized == verb.normalized {
+            let baselinePrev = baseline[..<idx].last { $0.kind != .punctuation }
+            if baselinePrev?.normalized == outputPrev?.normalized {
+                return true
+            }
+        }
+        return false
+    }
+
     /// Diffs already computed (`edits`) and classified (`classified`)
     /// elsewhere — `rebuild` reconstructs the final text from the baseline
     /// plus only the approved edits, and runs the mood-lock second pass
@@ -2083,9 +2124,11 @@ public enum EditGuard {
             var moodLockFiredForSentence = false
 
             for attempt in 0..<2 {
-                guard let rebuiltFirst = firstWordToken(tokens, sentenceIndex: sentenceIndex) else { break }
+                guard let rebuiltIndex = tokens.firstIndex(where: { $0.sentenceIndex == sentenceIndex && $0.kind == .word }) else { break }
+                let rebuiltFirst = tokens[rebuiltIndex]
                 let violates = FiniteVerbCues.isFiniteOrModal(rebuiltFirst.normalized, language: language) && !baselineIsFiniteOrModal
                 guard violates else { break }
+                if verbKeptBaselineOrder(rebuiltIndex: rebuiltIndex, tokens: tokens, baseline: baseline) { break }
                 moodLockFiredForSentence = true
 
                 for i in edits.indices {
