@@ -199,6 +199,102 @@ class CleanupService: ObservableObject, CleanupProvider {
     /// that would race on the shared llama.cpp C pointers (model, context, sampler).
     private var isInferring = false
 
+    // MARK: - Warm-up (quick-260825-q2i)
+
+    /// In-flight background warm-up task, if any. `cleanup()` and
+    /// `cleanupWithExplicitPrompt()` await this BEFORE checking `isInferring` — see
+    /// the handshake note at each call site. Stored so `warmUp()` can also treat
+    /// "a warm-up is already scheduled" as a no-op.
+    private var warmUpTask: Task<Void, Never>?
+
+    /// Timestamp of the most recent inference completion (real cleanup OR warm-up).
+    /// nil means "never inferred" — always cold, so the first warm-up always fires.
+    private var lastInferenceAt: Date?
+
+    /// How long the service must sit idle before a fresh warm-up is worth spending
+    /// speaking-time on. 300 s (5 min) is a judgment call sized from the 2026-08-25
+    /// debug-log audit evidence (three consecutive cold dictations at 03:45–03:52,
+    /// then warm for the rest of the day) — it is a tunable knob, not a measured
+    /// optimum. Exposed as a named constant plus the pure predicate below so both
+    /// are visible and testable rather than buried inline.
+    nonisolated static let warmUpIdleThreshold: TimeInterval = 300
+
+    /// Pure predicate: should a warm-up run given when the service last inferred?
+    /// Free of every other input (no `self`, no I/O) so it is trivially unit-testable.
+    nonisolated static func shouldWarmUp(lastInferenceAt: Date?, now: Date, idleThreshold: TimeInterval) -> Bool {
+        guard let lastInferenceAt else { return true }
+        return now.timeIntervalSince(lastInferenceAt) >= idleThreshold
+    }
+
+    /// Kick off a tiny background inference so the LLM is hot (Metal pipeline warm,
+    /// mmap'd weight pages resident) by the time a real `cleanup()` call arrives —
+    /// spending the cold-inference cost during the user's speaking time instead of
+    /// on the critical path after they release the hotkey.
+    ///
+    /// `@MainActor`, synchronous, returns immediately — never blocks the caller
+    /// (the hotkey/audio path). No-op when: the model isn't loaded; a real
+    /// inference is already running; a warm-up is already scheduled; or
+    /// `shouldWarmUp` says the service inferred recently enough to skip it.
+    /// Deliberately does NOT touch `state` — leaving it at `.idle` keeps the
+    /// menu-bar / pipeline icon from showing a cleaning indication while the user
+    /// is still speaking.
+    func warmUp() {
+        guard isLoaded, let model = model, let context = context, let sampler = sampler else { return }
+        guard !isInferring else { return }
+        guard warmUpTask == nil else { return }
+        guard Self.shouldWarmUp(lastInferenceAt: lastInferenceAt, now: Date(), idleThreshold: Self.warmUpIdleThreshold) else { return }
+
+        // Same nonisolated(unsafe) C-pointer capture pattern as cleanup() below —
+        // required so the inference itself runs off the MainActor executor.
+        nonisolated(unsafe) let unsafeModel = model
+        nonisolated(unsafe) let unsafeContext = context
+        nonisolated(unsafe) let unsafeSampler = sampler
+        let timeout = self.inferenceTimeoutSeconds
+        // A short fixed placeholder — real prefill shape/weight-paging without
+        // touching user speech or DEBUG_RECORDER (runInference is called directly,
+        // never through cleanup(), which is the sole writer of lastDebugTrace).
+        let prompt = CleanupPrompt.build(text: "warm up")
+
+        isInferring = true
+        warmUpTask = Task { [weak self] in
+            defer {
+                // Runs in this Task's inherited MainActor isolation (Task.init
+                // inherits the actor context it was created in) — safe to touch
+                // self's MainActor state directly here, on every exit path
+                // including timeout/cancellation.
+                self?.isInferring = false
+                self?.lastInferenceAt = Date()
+                self?.warmUpTask = nil
+            }
+            // Timeout is load-bearing, not decoration: without it a hung warm-up
+            // would wedge isInferring and then block the cleanup() handshake below,
+            // losing the user's dictation.
+            _ = try? await withThrowingTaskGroup(of: String.self) { group in
+                group.addTask {
+                    try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                    throw CleanupError.timeout
+                }
+                group.addTask {
+                    // Discards the result — a warm-up's only purpose is to pay the
+                    // prefill cost, not to produce usable output.
+                    Self.runInference(
+                        prompt: prompt,
+                        model: unsafeModel,
+                        context: unsafeContext,
+                        sampler: unsafeSampler,
+                        maxTokens: 1,
+                        stopSequences: []
+                    )
+                }
+                guard let firstResult = try await group.next() else { return "" }
+                group.cancelAll()
+                return firstResult
+            }
+            // Swallow all errors (including timeout) — a failed warm-up is a
+            // non-event, never a user-visible failure.
+        }
+    }
+
     /// ChatML turn markers (CLEANRD-01, Qwen2.5-Instruct) plus off-topic
     /// scaffold markers, applied both mid-generation (runInference's
     /// incremental check) and as a final post-strip. "In:"/"Original:"/
@@ -296,6 +392,16 @@ class CleanupService: ObservableObject, CleanupProvider {
             return text  // D-19: Fallback to raw text
         }
 
+        // quick-260825-q2i: await any in-flight warm-up HERE — strictly BEFORE the
+        // `isInferring` guard below. This ordering is the whole reason a pre-warm
+        // triggered by hotkey-down cannot downgrade this real cleanup to the
+        // `.alreadyRunning` raw-text fallback: a late key-release waits for the
+        // warm-up to finish rather than bailing. Do not move this await below the
+        // guard — that would reintroduce the exact regression this exists to avoid.
+        if let warmUpTask {
+            await warmUpTask.value
+        }
+
         // Reject concurrent calls — C pointers are not thread-safe
         guard !isInferring else {
             log.warning("cleanup: inference already in progress, returning raw text")
@@ -309,6 +415,10 @@ class CleanupService: ObservableObject, CleanupProvider {
         defer {
             state = .idle
             isInferring = false
+            // quick-260825-q2i: mark this a real inference so warmUp()'s
+            // shouldWarmUp check correctly suppresses redundant warm-ups in a busy
+            // session.
+            lastInferenceAt = Date()
             // Phase 44 Plan 14: fires after inference, when the KV cache is at its
             // widest — the app's true high-water mark for this utterance.
             Task { await MemoryProbe.shared.mark("cleanup_done", model: inferenceModelName) }
@@ -1435,6 +1545,14 @@ extension CleanupService {
         guard isLoaded, let model = model, let context = context, let sampler = sampler else {
             log.warning("cleanupWithExplicitPrompt: model not loaded")
             return ""
+        }
+
+        // quick-260825-q2i: same handshake as cleanup() — await any in-flight
+        // warm-up strictly BEFORE the isInferring guard below, so this spike call
+        // path cannot be downgraded to the "already running" empty-string fallback
+        // by a warm-up that started when an AI-cleanup recording began.
+        if let warmUpTask {
+            await warmUpTask.value
         }
 
         guard !isInferring else {
