@@ -629,6 +629,63 @@ final class CleanupServiceTests: XCTestCase {
             "Phase 36.4 D-06 Pitfall 2: space must not be inserted before '.claude'"
         )
     }
+
+    // MARK: - quick-260825-q2i: warm-up no-op contract
+
+    func testShouldWarmUpIsTrueWhenNeverInferred() {
+        let now = Date()
+        XCTAssertTrue(
+            CleanupService.shouldWarmUp(lastInferenceAt: nil, now: now, idleThreshold: 300),
+            "nil lastInferenceAt means never inferred — always cold, should warm up"
+        )
+    }
+
+    func testShouldWarmUpIsFalseWhenRecentlyInferred() {
+        let now = Date()
+        let tenSecondsAgo = now.addingTimeInterval(-10)
+        XCTAssertFalse(
+            CleanupService.shouldWarmUp(lastInferenceAt: tenSecondsAgo, now: now, idleThreshold: 300),
+            "recently-warm service (10s ago, 300s threshold) must not re-warm"
+        )
+    }
+
+    func testShouldWarmUpIsTrueWhenLongIdle() {
+        let now = Date()
+        let anHourAgo = now.addingTimeInterval(-3600)
+        XCTAssertTrue(
+            CleanupService.shouldWarmUp(lastInferenceAt: anHourAgo, now: now, idleThreshold: 300),
+            "idle long enough (1h ago, 300s threshold) should re-warm"
+        )
+    }
+
+    /// Pins the exact boundary value so the 300s idle-threshold constant cannot
+    /// drift silently. The predicate is documented as `>=` (inclusive at the
+    /// threshold): elapsed time exactly equal to idleThreshold counts as cold.
+    func testShouldWarmUpBoundaryIsInclusive() {
+        let now = Date()
+        let exactlyAtThreshold = now.addingTimeInterval(-300)
+        XCTAssertTrue(
+            CleanupService.shouldWarmUp(lastInferenceAt: exactlyAtThreshold, now: now, idleThreshold: 300),
+            "elapsed time exactly equal to idleThreshold must count as cold (inclusive boundary)"
+        )
+    }
+
+    func testWarmUpOnUnloadedServiceLeavesStateIdle() {
+        let service = CleanupService()
+        XCTAssertFalse(service.isLoaded)
+        service.warmUp()
+        XCTAssertEqual(service.state, .idle,
+            "warmUp() on an unloaded service must be a no-op — no cleaning state, no scheduled task")
+    }
+
+    func testRepeatedWarmUpOnUnloadedServiceStaysInert() {
+        let service = CleanupService()
+        service.warmUp()
+        service.warmUp()
+        service.warmUp()
+        XCTAssertEqual(service.state, .idle,
+            "repeated warmUp() calls on an unloaded service must remain inert and not crash")
+    }
 }
 
 // MARK: - Phase 28 Plan 03 / Phase 36.6 Plan 03: Contraction Gate Tests
