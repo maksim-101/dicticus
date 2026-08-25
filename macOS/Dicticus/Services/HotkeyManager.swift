@@ -353,6 +353,15 @@ class HotkeyManager: ObservableObject {
             if pauseEnabled {
                 mediaController.pauseMediaIfPlaying()
             }
+            // quick-260825-q2i: kick off a background LLM warm-up the moment an
+            // AI-cleanup recording starts, so the cold-inference cost lands during
+            // the user's speaking time instead of after they release the hotkey.
+            // Fire-and-forget: warmUp() itself returns immediately and re-checks
+            // isLoaded, so no extra readiness guard is needed here. Never fires for
+            // .plain — the LLM must not be touched on that path.
+            if mode == .aiCleanup {
+                cleanupService?.warmUp()
+            }
         } catch {
             let notification = DicticusNotification.recordingFailed(error)
             lastPostedNotification = notification
