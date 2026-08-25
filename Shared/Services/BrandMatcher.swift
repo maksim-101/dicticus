@@ -42,6 +42,40 @@ final class BrandMatcher {
     static let nearExactDL: Int = 1                // near-exact compound admission
     static let minDistinctiveChars: Int = 4        // a token shorter than this never fires
 
+    // MARK: - Function-word window veto (quick task 260825-pt5, guard A)
+    //
+    // `FunctionWords` (Shared/Utilities/FunctionWords.swift) is structurally
+    // pronoun-free by design (`ClosedListTests.testFunctionWordsContainNoPronouns`
+    // enforces it) because its consumer is EditGuard's INSERTION test — widening
+    // it there would change EditGuard's insertion/substitution behaviour. The
+    // 2026-08-21 false fire ("IP and" -> "iPad") needs pronoun coverage too, so
+    // this supplement is local to BrandMatcher and does not touch that file.
+    // Unioned unconditionally across EN+DE (not switched on `language`):
+    // dictation code-switches mid-utterance, and an over-broad rejection here
+    // costs only a MISS (HYBRID contract), never a corruption.
+    private static let pronounSupplement: Set<String> = [
+        // English personal / possessive / demonstrative / reflexive
+        "i", "me", "my", "mine", "myself", "you", "your", "yours",
+        "he", "him", "his", "she", "her", "hers", "we", "us", "our", "ours",
+        "they", "them", "their", "theirs", "it", "its", "this", "these", "those",
+        // German personal / possessive / demonstrative / reflexive
+        "ich", "mich", "mir", "mein", "meine", "meinen", "meinem", "meiner",
+        "du", "dich", "dir", "dein", "deine",
+        "er", "ihn", "ihm", "sie", "ihr", "ihnen", "es",
+        "wir", "uns", "unser",
+        "dies", "diese", "dieser", "dieses", "diesem", "diesen"
+    ]
+
+    /// Closed set of tokens that can end a fuzzy window's 2-token span without
+    /// being part of the brand: the D-02 substitution allowlists (both
+    /// languages, which already union in the dual-role tokens, negation, and
+    /// modals) plus the local pronoun supplement above.
+    private static let functionWordWindowGuardSet: Set<String> =
+        FunctionWords.englishSubstitutable
+            .union(FunctionWords.germanSubstitutable)
+            .union(FunctionWords.englishDualRoleAlsoNotSubstitutable)
+            .union(pronounSupplement)
+
     // MARK: - State (immutable after init)
 
     private let baseCanonicals: [String]
@@ -172,6 +206,33 @@ final class BrandMatcher {
                     && normalize(window).count >= BrandMatcher.minDistinctiveChars
                 guard distinctive || nearExact else { continue }
 
+                // Function-word window veto (quick task 260825-pt5, guard A):
+                // a 2-token window is only a genuine COMPOUND match ("cell
+                // guard" -> Cellguard, "Swift bar" -> SwiftBar) if its
+                // constituents are actually PART of the brand. When one
+                // constituent is a closed-class function word / pronoun that
+                // is NOT itself present in the matched canonical, the window
+                // has crossed a word boundary onto ordinary prose the speaker
+                // said ("IP and" -> iPad: "and" is not part of "iPad").
+                // `continue` (not an abort) so the loop falls through to the
+                // 1-token window at the SAME position — that is what lets
+                // "TALESCAL IP and" still repair TALESCAL -> Tailscale in the
+                // SAME utterance while "IP and" itself is left untouched.
+                // Split `m.canon` on WHITESPACE only, never on hyphens: a
+                // canonical that genuinely contains a function word (or a
+                // hyphenated compound like "USB-A") must stay reachable, and
+                // splitting on hyphens would let the article in "a USB-5"
+                // exempt itself via the hyphen in "USB-A". Restricted to
+                // `w >= 2` — a single-token function word is already blocked
+                // by the `guardCommon` lexicon check in `matchToken`.
+                if w == 2 {
+                    let canonWords = Set(m.canon.lowercased().split(separator: " ").map(String.init))
+                    let crossesFunctionWordBoundary = windowWords.contains { token in
+                        isFunctionWordConstituent(token) && !canonWords.contains(depunct(token))
+                    }
+                    if crossesFunctionWordBoundary { continue }
+                }
+
                 // Defect-B swallow guard (260809-g7h): a 2-token window is only a
                 // genuine COMPOUND match ("cell guard" -> Cellguard, "Swift bar" ->
                 // SwiftBar) if neither word alone already IS the brand. When one
@@ -284,6 +345,13 @@ final class BrandMatcher {
         }
         guard let b = best else { return nil }
         return (b.canon, b.jw, b.dl)
+    }
+
+    /// True when `word` (lowercased, edge-punctuation-stripped) is a member of
+    /// the closed function-word/pronoun set guarding a 2-token fuzzy window
+    /// (quick task 260825-pt5, guard A).
+    private func isFunctionWordConstituent(_ word: String) -> Bool {
+        BrandMatcher.functionWordWindowGuardSet.contains(depunct(word))
     }
 
     /// True when `word` ALONE (normalized) already scores near-exact against
