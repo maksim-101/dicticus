@@ -245,10 +245,19 @@ final class EditGuardMergeAtomicityTests: XCTestCase {
         assertNeitherSourceClean(out, baseline, llm)
     }
 
+    /// Quick task 260825-q1w updated `expected`: this fixture's baseline
+    /// "TQL relevanten" -> candidate "TQL-relevanten" is a pure two-token
+    /// hyphen join (D-A/D-B), now correctly ACCEPTED by
+    /// `AcceptClass.hyphenCompoundJoin` — the same predicate that accepts
+    /// `json datei` -> `JSON-Datei` (`EditGuardHyphenCompoundJoinTests`).
+    /// This detail was always incidental filler in a fixture whose actual
+    /// regression-net purpose is the crossed-substitute restore of "was
+    /// für" -> "welche" (still correctly rejected/restored below); only the
+    /// join half of `expected` changed.
     func testCrossedSubstituteRestore_wasFuerStichwoerter() {
         let baseline = "Ich würde erst noch interessieren, wie du nach TQL relevanten Themen suchst. Also was für Stichwörter oder Regeln verwendest du da? Und das sollte optimalerweise auch durch den jeweiligen User konfigurierbar sein."
         let llm = "\nIch würde erst noch interessieren, wie du nach TQL-relevanten Themen suchst. Also, welche Stichwörter oder Regeln verwendest du dafür? Und das sollte optimalerweise auch durch den jeweiligen User konfigurierbar sein.\n</corrected_text>"
-        let expected = "Ich würde erst noch interessieren, wie du nach TQL relevanten Themen suchst. Also was für Stichwörter oder Regeln verwendest du da? Und das sollte optimalerweise auch durch den jeweiligen User konfigurierbar sein."
+        let expected = "Ich würde erst noch interessieren, wie du nach TQL-relevanten Themen suchst. Also was für Stichwörter oder Regeln verwendest du da? Und das sollte optimalerweise auch durch den jeweiligen User konfigurierbar sein."
         let out = guardOut(baseline, llm, "de")
         XCTAssertEqual(out, expected)
         assertNeitherSourceClean(out, baseline, llm)
