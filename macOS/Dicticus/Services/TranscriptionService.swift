@@ -238,7 +238,13 @@ class TranscriptionService: ObservableObject {
         // Layer 1: Minimum duration guard (D-11)
         guard durationSeconds >= minimumDurationSeconds else {
             #if DEBUG_RECORDER
+            // The Layer 2 gate has not run yet at this point in the function (it sits
+            // below this guard), so this site recomputes the same metrics purely to
+            // observe them — quick task 260826-8ec. The resulting decision is written
+            // to the log and read by nothing; no branch below consults it.
             let energy = AudioProcessor.calculateEnergy(of: resampledSamples)
+            let probeFrameEnergies = Self.frameEnergies(of: resampledSamples, sampleRate: sampleRate)
+            let probeDecision = AdaptiveVoiceGate.evaluate(frameEnergies: probeFrameEnergies)
             await DiscardProbe.shared.record(
                 reason: "tooShort",
                 platform: "macOS",
@@ -247,7 +253,13 @@ class TranscriptionService: ObservableObject {
                 hwSampleRate: inputSampleRate,
                 durationSeconds: durationSeconds,
                 rms: energy.avg,
-                peak: energy.max
+                peak: energy.max,
+                vadFrameCount: probeFrameEnergies.count,
+                vadTrueFrameCount: probeDecision.framesAboveThreshold(in: probeFrameEnergies),
+                vadMaxFrameEnergy: probeDecision.maxFrameEnergy,
+                gateNoiseFloor: probeDecision.noiseFloor,
+                gateThreshold: probeDecision.threshold,
+                energyMetricsSource: DiscardProbe.energyMetricsSourceProbeRecompute
             )
             #endif
             throw TranscriptionError.tooShort  // defer resets to .idle
@@ -263,6 +275,12 @@ class TranscriptionService: ObservableObject {
         // so an energy gate ahead of WhisperKit is the only mechanism that can.
         let gateFrameEnergies = Self.frameEnergies(of: resampledSamples, sampleRate: sampleRate)
         let gateDecision = AdaptiveVoiceGate.evaluate(frameEnergies: gateFrameEnergies)
+        #if DEBUG_RECORDER
+        // Single-sourced frames-above-threshold count (quick task 260826-8ec) — bound once
+        // here so non-recorder builds emit no unused binding, and reused at every discard-log
+        // call site at or below this point in the function rather than recomputed per site.
+        let gateFramesAboveThreshold = gateDecision.framesAboveThreshold(in: gateFrameEnergies)
+        #endif
         guard gateDecision.voiceDetected else {
             #if DEBUG_RECORDER
             // Discard-path regression net only — the temporary pass-path probe used to
@@ -280,10 +298,11 @@ class TranscriptionService: ObservableObject {
                 rms: gateEnergy.avg,
                 peak: gateEnergy.max,
                 vadFrameCount: gateFrameEnergies.count,
-                vadTrueFrameCount: gateFrameEnergies.filter { $0 > gateDecision.threshold }.count,
+                vadTrueFrameCount: gateFramesAboveThreshold,
                 vadMaxFrameEnergy: gateDecision.maxFrameEnergy,
                 gateNoiseFloor: gateDecision.noiseFloor,
-                gateThreshold: gateDecision.threshold
+                gateThreshold: gateDecision.threshold,
+                energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate
             )
             #endif
             throw TranscriptionError.silenceOnly  // defer resets to .idle
@@ -330,6 +349,11 @@ class TranscriptionService: ObservableObject {
                 durationSeconds: durationSeconds,
                 rms: energy.avg,
                 peak: energy.max,
+                vadFrameCount: gateFrameEnergies.count,
+                vadTrueFrameCount: gateFramesAboveThreshold,
+                vadMaxFrameEnergy: gateDecision.maxFrameEnergy,
+                gateNoiseFloor: gateDecision.noiseFloor,
+                gateThreshold: gateDecision.threshold,
                 segments: allSegments.map {
                     DiscardProbe.SegmentInfo(
                         text: $0.text,
@@ -339,7 +363,8 @@ class TranscriptionService: ObservableObject {
                         temperature: $0.temperature
                     )
                 },
-                noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable
+                noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable,
+                energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate
             )
             #endif
             throw TranscriptionError.silenceOnly  // defer resets to .idle
@@ -353,6 +378,12 @@ class TranscriptionService: ObservableObject {
         // its own per-segment signals. This call has no effect on control flow or the
         // produced text; it only appends every kept segment to the same discard-*.jsonl
         // writer under reason: "pass" for a future measurement pass.
+        //
+        // Quick task 260826-8ec: this was the one reason with no energy/VAD fields at
+        // all — the 7th confirmed live "Thank you." hallucination landed here with none.
+        // rms/peak use the identical AudioProcessor.calculateEnergy(of:) call the other
+        // sites already use, so the value is comparable across every historical record.
+        let passEnergy = AudioProcessor.calculateEnergy(of: resampledSamples)
         await DiscardProbe.shared.record(
             reason: "pass",
             platform: "macOS",
@@ -360,6 +391,13 @@ class TranscriptionService: ObservableObject {
             resampledSampleCount: resampledSamples.count,
             hwSampleRate: inputSampleRate,
             durationSeconds: durationSeconds,
+            rms: passEnergy.avg,
+            peak: passEnergy.max,
+            vadFrameCount: gateFrameEnergies.count,
+            vadTrueFrameCount: gateFramesAboveThreshold,
+            vadMaxFrameEnergy: gateDecision.maxFrameEnergy,
+            gateNoiseFloor: gateDecision.noiseFloor,
+            gateThreshold: gateDecision.threshold,
             segments: allSegments.map {
                 DiscardProbe.SegmentInfo(
                     text: $0.text,
@@ -375,7 +413,8 @@ class TranscriptionService: ObservableObject {
                 durationSeconds: durationSeconds,
                 avgLogProbs: allSegments.map(\.avgLogprob)
             ),
-            noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable
+            noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable,
+            energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate
         )
         #endif
 
@@ -409,6 +448,11 @@ class TranscriptionService: ObservableObject {
                 durationSeconds: durationSeconds,
                 rms: energy.avg,
                 peak: energy.max,
+                vadFrameCount: gateFrameEnergies.count,
+                vadTrueFrameCount: gateFramesAboveThreshold,
+                vadMaxFrameEnergy: gateDecision.maxFrameEnergy,
+                gateNoiseFloor: gateDecision.noiseFloor,
+                gateThreshold: gateDecision.threshold,
                 segments: allSegments.map {
                     DiscardProbe.SegmentInfo(
                         text: $0.text,
@@ -418,7 +462,8 @@ class TranscriptionService: ObservableObject {
                         temperature: $0.temperature
                     )
                 },
-                noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable
+                noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable,
+                energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate
             )
             #endif
             throw TranscriptionError.noResult  // defer resets to .idle
