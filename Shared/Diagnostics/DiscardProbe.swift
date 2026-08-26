@@ -73,6 +73,23 @@
 // added or changed; confidence gating was measured and rejected in spike
 // 260805-qx7.
 //
+// Cycle 5 (quick task 260826-8ec, UNIFORM ENERGY/VAD METRICS): the 7th confirmed live
+// case landed 2026-08-26T03:53:35.649Z in discard-2026-08-26.jsonl — a 1.9s recording
+// in which the user said nothing, decoded to a single segment "Thank you." with
+// avg_log_prob -0.293 and compression_ratio 0.857, reason `pass`, and pasted at the
+// cursor. That record carried NO energy fields at all: `rms`/`peak`/`vad_true_frame_count`
+// previously appeared only on the `silenceOnly_energyGate` discard record, so the
+// working hypothesis for a future rule — a genuine spoken "Thank you." has real speech
+// frames, a hallucinated one has near-zero — could not be tested against the pass path,
+// because the pass path never wrote the data. This cycle adds the same seven energy/VAD
+// fields to all five discard-log reasons (`tooShort`, `silenceOnly_energyGate`,
+// `silenceOnly_noSpeechDiscard`, `pass`, `noResult`) plus a record-level
+// `energy_metrics_source` marker distinguishing values reused from the clip's live gate
+// evaluation from values recomputed inside the probe block because the gate had not run
+// yet. This cycle adds OBSERVATION ONLY — the discriminator it enables does not exist
+// and is not proposed here; confidence gating was separately measured and rejected in
+// spike 260805-qx7.
+//
 // Output: ~/Library/Application Support/Dicticus/DebugRecordings/discard-YYYY-MM-DD.jsonl
 // Retention: 14 days, purged once per launch.
 
@@ -149,6 +166,17 @@ public actor DiscardProbe {
     /// rather than repeating the literal.
     public static let noSpeechProbUnavailable = "unavailable:whisperkit-1.0.0-decoder-stub"
 
+    /// Machine-readable source marker for a record's energy/VAD fields, emitted at the
+    /// record level as `energy_metrics_source` (quick task 260826-8ec). Four of the five
+    /// call sites reuse `gateFrameEnergies`/`gateDecision` already computed by the live
+    /// Layer 2 gate evaluation earlier in `transcribe()`; the `tooShort` site sits before
+    /// the gate has been consulted and must recompute the same metrics purely to observe
+    /// them. Defined once so call sites reference the constant rather than repeating a
+    /// literal, and so an audit can tell a live-gate reuse apart from a pre-gate probe
+    /// recompute instead of assuming they are the same measurement.
+    public static let energyMetricsSourceLiveGate = "live_gate"
+    public static let energyMetricsSourceProbeRecompute = "probe_recompute"
+
     /// Record one silent discard event. All parameters besides `reason` and
     /// `platform` are optional because each call site has different data
     /// available at the point of recording.
@@ -168,7 +196,8 @@ public actor DiscardProbe {
         gateThreshold: Float? = nil,
         segments: [SegmentInfo]? = nil,
         lowConfidenceShort: Bool? = nil,
-        noSpeechProbSource: String? = nil
+        noSpeechProbSource: String? = nil,
+        energyMetricsSource: String? = nil
     ) {
         ensureDirectory()
         purgeIfNeeded()
@@ -191,6 +220,7 @@ public actor DiscardProbe {
         if let gateThreshold { line["gate_threshold"] = gateThreshold }
         if let lowConfidenceShort { line["low_confidence_short"] = lowConfidenceShort }
         if let noSpeechProbSource { line["no_speech_prob_source"] = noSpeechProbSource }
+        if let energyMetricsSource { line["energy_metrics_source"] = energyMetricsSource }
         if let segments {
             line["segment_count"] = segments.count
             line["segments"] = segments.map { seg -> [String: Any] in
