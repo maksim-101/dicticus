@@ -107,3 +107,15 @@ enum AdaptiveVoiceGate {
         return sorted[lowerIndex] * (1 - fraction) + sorted[upperIndex] * fraction
     }
 }
+
+extension AdaptiveVoiceGate.Decision {
+    /// Frames-above-threshold count for a clip's frame energies against this
+    /// decision's own `threshold`, single-sourcing what was previously an inline
+    /// `frameEnergies.filter { $0 > gateDecision.threshold }.count` expression at
+    /// the `TranscriptionService.transcribe()` call site (quick task 260826-8ec).
+    /// Diagnostic-only: its sole consumer is discard-log instrumentation, and it
+    /// participates in no gating decision.
+    func framesAboveThreshold(in frameEnergies: [Float]) -> Int {
+        frameEnergies.filter { $0 > threshold }.count
+    }
+}
