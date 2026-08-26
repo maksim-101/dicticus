@@ -77,4 +77,53 @@ final class AdaptiveVoiceGateTests: XCTestCase {
         let decision = AdaptiveVoiceGate.evaluate(frameEnergies: [])
         XCTAssertFalse(decision.voiceDetected, "Empty frame energies should discard (fail-safe default)")
     }
+
+    // MARK: - framesAboveThreshold (quick task 260826-8ec)
+    //
+    // Single-sources the frames-above-threshold count previously computed inline at
+    // TranscriptionService ~283 (`gateFrameEnergies.filter { $0 > gateDecision.threshold }.count`).
+    // Diagnostic-only — this helper participates in no gating decision.
+
+    func testFramesAboveThresholdCountsSpeechFrames() {
+        // Two frames (0.01, 0.015) clearly above the resulting threshold, six frames
+        // (0.001-0.002) well below it. Hand-counted expectation: 2.
+        let frameEnergies: [Float] = [0.001, 0.002, 0.001, 0.002, 0.01, 0.015, 0.001, 0.002]
+        let decision = AdaptiveVoiceGate.evaluate(frameEnergies: frameEnergies)
+        XCTAssertEqual(
+            decision.framesAboveThreshold(in: frameEnergies), 2,
+            "Exactly the two frames strictly above threshold (0.01, 0.015) should be counted"
+        )
+    }
+
+    func testFramesAboveThresholdReturnsZeroForSilence() {
+        // Reuses testAllSilenceDiscards' true-silence frame energies: every frame
+        // sits below the computed threshold, so the count must be 0.
+        let frameEnergies: [Float] = [0.0011, 0.0015, 0.0012, 0.0017, 0.0013, 0.0016, 0.0014, 0.00175]
+        let decision = AdaptiveVoiceGate.evaluate(frameEnergies: frameEnergies)
+        XCTAssertEqual(
+            decision.framesAboveThreshold(in: frameEnergies), 0,
+            "A true-silence clip has no frame above threshold"
+        )
+    }
+
+    func testFramesAboveThresholdReturnsZeroForEmptyInput() {
+        let decision = AdaptiveVoiceGate.evaluate(frameEnergies: [])
+        XCTAssertEqual(
+            decision.framesAboveThreshold(in: []), 0,
+            "Empty frame-energy array must return 0, not trap"
+        )
+    }
+
+    func testFramesAboveThresholdPassInvariant() {
+        // Reuses testQuietSpeechPasses' frame energies, on which the gate reports
+        // voice activity. This is the invariant a `pass`-reason discard-log record
+        // relies on: a kept clip must show at least one frame above threshold.
+        let frameEnergies: [Float] = [0.0012, 0.0015, 0.0093, 0.0088, 0.0011, 0.0014, 0.0095, 0.0013]
+        let decision = AdaptiveVoiceGate.evaluate(frameEnergies: frameEnergies)
+        XCTAssertTrue(decision.voiceDetected, "Precondition: this clip must pass the gate")
+        XCTAssertGreaterThanOrEqual(
+            decision.framesAboveThreshold(in: frameEnergies), 1,
+            "A clip on which the gate reports voice activity must have at least one frame above threshold"
+        )
+    }
 }
