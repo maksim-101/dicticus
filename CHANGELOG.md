@@ -6,6 +6,15 @@ Dicticus is a fully local, on-device dictation app (ASR via WhisperKit/Whisper l
 
 ---
 
+## Unreleased — dictation-pipeline fixes from the 2026-08-25 log audit
+
+- **Fixed: fuzzy brand-matching could corrupt meaning** — the phonetic brand matcher could rewrite spans crossing word boundaries ("…my Tailscale IP and not…" became "…my Tailscale iPad, not…") or swallow digits ("Opus 5" → "USB-A"). Two new vetoes (function-word boundary, digit-sequence parity) make all traced cases inert while keeping genuine brand fixes. macOS + iOS.
+- **Fixed: AI cleanup rejected legitimate hyphen joins** — compounds dictated as two words ("code wise", "self evaluation") now come through as "code-wise" / "self-evaluation" instead of being blocked; a sentence-split bookkeeping bug that could strip a correct sentence-start capital is also fixed. macOS + iOS.
+- **Faster first dictation** (macOS) — the cleanup model is pre-warmed the moment recording starts, removing the ~5 s cold-start on the first AI cleanup after launch or idle (~1 s now).
+- **Debug logs stop fabricating a confidence signal** — the per-segment no-speech probability (never actually computed by WhisperKit) is no longer logged as a fake 0; compression ratio and temperature are recorded instead (macOS Debug-Recorder builds).
+
+---
+
 ## 1.0.2 — Starter packs + media-pause fix — 2026-08-05
 
 - **Starter packs expanded** — added brand and tech dictation corrections to the bundled starter packs (Dictionary → Starter Packs), macOS + iOS.
