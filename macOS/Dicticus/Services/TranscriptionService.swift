@@ -64,7 +64,8 @@ final class AudioSampleBuffer: @unchecked Sendable {
 /// after cycle 1's removal reopened D-09 silence-hallucination pastes):
 ///   1. Minimum duration guard: discard clips shorter than 0.3s (D-11 in 02.1-CONTEXT.md)
 ///   2. Adaptive voice-activity gate: discard if no frame's energy dwarfs the clip's own noise floor (AdaptiveVoiceGate)
-///   3. No-speech discard: discard if every segment's noSpeechProb exceeds threshold (NoSpeechDiscard, WHISP-03)
+///   3. Boilerplate-hallucination discard: discard a whole-utterance closed-list match, e.g. "Thank you." (BoilerplateHallucination, quick task 260827-81z)
+///   4. No-speech discard: discard if every segment's noSpeechProb exceeds threshold (NoSpeechDiscard, WHISP-03)
 ///
 /// Consumes ModelWarmupService.whisperKitInstance directly.
 /// Does NOT create its own WhisperKit instances outside of test support.
@@ -176,9 +177,10 @@ class TranscriptionService: ObservableObject {
     ///   3. Check minimum duration (D-11: reject clips shorter than 0.3s)
     ///   4. Adaptive voice-activity gate: reject if no frame dwarfs the clip's own noise floor
     ///   5. Transcribe via WhisperKit large-v3-turbo
-    ///   6. No-speech discard: reject if every segment's noSpeechProb exceeds threshold
-    ///   7. Detect language post-hoc with NLLanguageRecognizer (D-13)
-    ///   8. Build DicticusTranscriptionResult
+    ///   6. Boilerplate-hallucination discard: reject a whole-utterance closed-list match, e.g. "Thank you."
+    ///   7. No-speech discard: reject if every segment's noSpeechProb exceeds threshold
+    ///   8. Detect language post-hoc with NLLanguageRecognizer (D-13)
+    ///   9. Build DicticusTranscriptionResult
     ///
     /// - Returns: DicticusTranscriptionResult with text, language, and confidence
     /// - Throws: TranscriptionError for pipeline failures (tooShort, silenceOnly, noResult)
@@ -333,6 +335,49 @@ class TranscriptionService: ObservableObject {
         )
         let results = try await whisperKit.transcribe(audioArray: resampledSamples, decodeOptions: decodeOptions)
         let allSegments = results.flatMap { $0.segments }
+        let combinedText = results.map(\.text).joined(separator: " ")
+
+        // Whole-utterance boilerplate-hallucination discard (quick task 260827-81z): a
+        // small closed list of Whisper subtitle-boilerplate strings ("Thank you." etc.)
+        // that Whisper sometimes hallucinates into a pause with high confidence —
+        // NoSpeechDiscard below cannot catch these because a confident hallucination has
+        // a LOW noSpeechProb by construction. This guard is placed BEFORE the
+        // `reason: "pass"` DiscardProbe block further down: a guard placed after it would
+        // log the same utterance twice, once as "pass" (false — it was discarded) and once
+        // as the discard.
+        if let matchedPhrase = BoilerplateHallucination.match(combinedText) {
+            #if DEBUG_RECORDER
+            let boilerplateEnergy = AudioProcessor.calculateEnergy(of: resampledSamples)
+            await DiscardProbe.shared.record(
+                reason: "boilerplateHallucination",
+                platform: "macOS",
+                rawSampleCount: samples.count,
+                resampledSampleCount: resampledSamples.count,
+                hwSampleRate: inputSampleRate,
+                durationSeconds: durationSeconds,
+                rms: boilerplateEnergy.avg,
+                peak: boilerplateEnergy.max,
+                vadFrameCount: gateFrameEnergies.count,
+                vadTrueFrameCount: gateFramesAboveThreshold,
+                vadMaxFrameEnergy: gateDecision.maxFrameEnergy,
+                gateNoiseFloor: gateDecision.noiseFloor,
+                gateThreshold: gateDecision.threshold,
+                segments: allSegments.map {
+                    DiscardProbe.SegmentInfo(
+                        text: $0.text,
+                        noSpeechProb: nil,
+                        avgLogProb: $0.avgLogprob,
+                        compressionRatio: $0.compressionRatio,
+                        temperature: $0.temperature
+                    )
+                },
+                noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable,
+                energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate
+            )
+            #endif
+            _ = matchedPhrase
+            throw TranscriptionError.silenceOnly  // defer resets to .idle
+        }
 
         // No-speech discard (WHISP-03 Pitfall 2): WhisperKit does not auto-blank `text` for
         // pure silence — noSpeechProb only drives internal decoder fallback, not output
@@ -417,8 +462,6 @@ class TranscriptionService: ObservableObject {
             energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate
         )
         #endif
-
-        let combinedText = results.map(\.text).joined(separator: " ")
 
         #if DEBUG_RECORDER
         // Spike 008's Fix A/B distinction was Parakeet-specific (tail-drop vs capture-cut).
