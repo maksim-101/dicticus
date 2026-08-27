@@ -42,8 +42,12 @@ import Foundation
 /// field didn't exist; plain-mode emission near-zero couldn't be distinguished
 /// from "user dictates AI mode only" without a monotonic counter). No
 /// detection-layer change: TranscriptionService.detectLanguage (D-13) is
-/// still the sole source — Parakeet TDT v3 emits no language code per
-/// `macOS/Dicticus/Services/TranscriptionService.swift:395`.
+/// still the sole source. Neither engine's native language code is used for
+/// this field — as of quick task 260827-81z, macOS runs WhisperKit / Whisper
+/// large-v3-turbo and iOS runs FluidAudio / Parakeet TDT v3, and both
+/// platforms detect language post-hoc from the decoded text with Apple's
+/// `NLLanguageRecognizer`, constrained to {de, en}, in each platform's own
+/// `detectLanguage(_:)`.
 @MainActor
 class TextProcessingService: ObservableObject {
 

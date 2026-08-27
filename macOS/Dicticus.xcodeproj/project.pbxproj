@@ -130,6 +130,7 @@
 		9B88CE1891F4D8BADD684F72 /* BrandMatcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 99CFDF36F2F09B56AA22DD55 /* BrandMatcherTests.swift */; };
 		9BA32438B0BD5B32F6E6C80D /* ModelDownloadService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E33C8ABCB6D20C1919ADA580 /* ModelDownloadService.swift */; };
 		9D5A440895E06CC137824451 /* LowConfidenceShortTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD1E40CC69DC1A856E64C7D4 /* LowConfidenceShortTests.swift */; };
+		9D7A21E2A8257707109AACED /* EditGuardPauseSplitParakeetAuditTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E29AE36115156F5CFED4B1D5 /* EditGuardPauseSplitParakeetAuditTests.swift */; };
 		9DAA166333118D8A52D40CD0 /* DictionaryEntryEditTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9307719330E20141175DCB2A /* DictionaryEntryEditTests.swift */; };
 		9F89D0D615C50B4212555C98 /* EditGuardFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7D03D036A33A2051FEFAB61 /* EditGuardFixtures.swift */; };
 		9FCDDE8A350F06BCA92EB097 /* BrandContractionInflectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9583443B5090F875947F23B9 /* BrandContractionInflectionTests.swift */; };
@@ -386,6 +387,7 @@
 		DCA28F8F142CE72EB85279C5 /* starter-pack-tech.csv */ = {isa = PBXFileReference; path = "starter-pack-tech.csv"; sourceTree = "<group>"; };
 		DFFEAB556B3C35592C49E77D /* LowConfidenceShort.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LowConfidenceShort.swift; sourceTree = "<group>"; };
 		E09C1D66A0C3F4875FA7680F /* ModelDownloadServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadServiceTests.swift; sourceTree = "<group>"; };
+		E29AE36115156F5CFED4B1D5 /* EditGuardPauseSplitParakeetAuditTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditGuardPauseSplitParakeetAuditTests.swift; sourceTree = "<group>"; };
 		E33C8ABCB6D20C1919ADA580 /* ModelDownloadService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelDownloadService.swift; sourceTree = "<group>"; };
 		E42E060ECE60AB0017B697E7 /* DefaultLexicon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DefaultLexicon.swift; sourceTree = "<group>"; };
 		E6599AE23EF7ABF7DD28B116 /* BrandPhoneticsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandPhoneticsTests.swift; sourceTree = "<group>"; };
@@ -712,6 +714,7 @@
 				8A147583C4B8BF967D14F2F4 /* EditGuardMergeAtomicityTests.swift */,
 				1C382B87D71427E575EE22D2 /* EditGuardMoodLockSplitTests.swift */,
 				A351140E49E2CE33073A6918 /* EditGuardPauseSplitMergeTests.swift */,
+				E29AE36115156F5CFED4B1D5 /* EditGuardPauseSplitParakeetAuditTests.swift */,
 				216843E09576D99E411462A0 /* EditGuardPipelineTests.swift */,
 				07E8AD126537E7029E61D9DD /* EditGuardTests.swift */,
 				F80DDF0ECF58FEA139E28FDF /* EditGuardTokenizerTests.swift */,
@@ -1055,6 +1058,7 @@
 				85F0A3D620ADD7BAB4F6071C /* EditGuardMergeAtomicityTests.swift in Sources */,
 				60EA62FDACC23FA5F249D17A /* EditGuardMoodLockSplitTests.swift in Sources */,
 				39766517912B82A7B97E0BBC /* EditGuardPauseSplitMergeTests.swift in Sources */,
+				9D7A21E2A8257707109AACED /* EditGuardPauseSplitParakeetAuditTests.swift in Sources */,
 				B84B080262C8BCE1138D388B /* EditGuardPipelineTests.swift in Sources */,
 				17FB04E9771817C360006E70 /* EditGuardTests.swift in Sources */,
 				4E8963527065DC1D3A1511EB /* EditGuardTokenizerTests.swift in Sources */,
