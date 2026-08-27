@@ -7,17 +7,21 @@
 //   (A) capture-cut   — AVAudioEngine.stop() dropped the in-flight tap buffer
 //   (B) ASR tail-drop — Parakeet TDT under-decoded the final un-padded chunk
 //
-// On a suspected clip (ASR text not ending in terminal punctuation) it dumps the
-// exact 16kHz buffer handed to ASR as a WAV, and the caller re-transcribes that
-// same buffer with trailing silence appended. Both texts land in capture-<day>.jsonl
-// alongside the WAV path:
-//   - WAV audibly cut mid-word            → (A)
-//   - WAV intact + padded recovers tail   → (B), and the pad IS the fix
-//   - WAV intact + padded still clipped   → deeper ASR issue
+// On a suspected clip (ASR text not ending in terminal punctuation) it appends one
+// JSONL line recording the decode's timing, sample counts, duration and a
+// trailing-silence estimate for the 16kHz buffer handed to ASR, plus the caller's
+// re-transcription of that same buffer with trailing silence appended:
+//   - near-zero trailing silence + padded recovers tail → (A) capture-cut
+//   - healthy trailing silence  + padded still clipped  → (B) ASR tail-drop
+//
+// Audio dumping was removed on 2026-08-27 (quick task 260827-81z) because the
+// corpus was complete; this probe no longer writes any audio file to disk. The
+// 187 captures gathered before that date were moved by the user to
+// ~/Library/Application Support/Dicticus/ReplayCorpus/ as a preserved experiment
+// corpus and are untouched by this probe.
 //
 // Output: ~/Library/Application Support/Dicticus/DebugRecordings/
 //   capture-YYYY-MM-DD.jsonl   (one line per suspected clip)
-//   capture-<ISO8601>.wav      (16kHz mono PCM16)
 // Retention: 14 days, purged once per launch.
 
 #if DEBUG_RECORDER
@@ -70,9 +74,6 @@ public actor AudioCaptureProbe {
         purgeIfNeeded()
 
         let ts = Self.iso8601Timestamp()
-        let wavName = "capture-\(ts.replacingOccurrences(of: ":", with: "-")).wav"
-        let wavURL = directoryURL.appendingPathComponent(wavName)
-        writeWav16(samples16k, to: wavURL)
 
         let durationS = Double(samples16k.count) / sampleRate
         let trailingSilenceMs = Self.trailingSilenceMs(samples16k, sampleRate: sampleRate)
@@ -80,7 +81,6 @@ public actor AudioCaptureProbe {
 
         let line: [String: Any] = [
             "ts": ts,
-            "wav": wavName,
             "hw_sample_rate": hwSampleRate,
             "n_samples_raw": rawSampleCount,
             "n_samples_16k": samples16k.count,
@@ -117,26 +117,6 @@ public actor AudioCaptureProbe {
             i = lo
         }
         return Double(trailing) / sampleRate * 1000
-    }
-
-    // MARK: - WAV (16-bit PCM mono)
-
-    private func writeWav16(_ samples: [Float], to url: URL) {
-        let rate = UInt32(sampleRate)
-        let pcm = samples.map { f -> Int16 in
-            let clamped = max(-1.0, min(1.0, f))
-            return Int16(clamped * 32767.0)
-        }
-        let dataBytes = pcm.count * 2
-        var d = Data()
-        func u32(_ v: UInt32) { var x = v.littleEndian; d.append(Data(bytes: &x, count: 4)) }
-        func u16(_ v: UInt16) { var x = v.littleEndian; d.append(Data(bytes: &x, count: 2)) }
-        d.append("RIFF".data(using: .ascii)!); u32(UInt32(36 + dataBytes)); d.append("WAVE".data(using: .ascii)!)
-        d.append("fmt ".data(using: .ascii)!); u32(16); u16(1); u16(1)
-        u32(rate); u32(rate * 2); u16(2); u16(16)
-        d.append("data".data(using: .ascii)!); u32(UInt32(dataBytes))
-        pcm.withUnsafeBytes { d.append(contentsOf: $0) }
-        try? d.write(to: url)
     }
 
     // MARK: - Plumbing (mirrors DebugRecorder)
