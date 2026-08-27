@@ -90,6 +90,13 @@
 // and is not proposed here; confidence gating was separately measured and rejected in
 // spike 260805-qx7.
 //
+// Cycle 6 (quick task 260827-81z, BOILERPLATE-HALLUCINATION REASON): adds a sixth
+// discard-log reason, `boilerplateHallucination`, for BoilerplateHallucination's
+// whole-utterance closed-list exact-match discard (e.g. "Thank you.") on the macOS
+// decode path. It carries the same energy/VAD fields as the other five reasons; the
+// matched phrase itself is not a separate field — it is already visible in the
+// record's `segments` text.
+//
 // Output: ~/Library/Application Support/Dicticus/DebugRecordings/discard-YYYY-MM-DD.jsonl
 // Retention: 14 days, purged once per launch.
 
