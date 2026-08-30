@@ -328,6 +328,19 @@ public enum EditGuard {
     /// Winner: a sentence-terminal mark (`.!?`) beats a non-terminal (`,;:`); otherwise the later
     /// mark wins. The required whitespace BETWEEN the marks is what makes this precise — legitimate
     /// runs like `...`, `?!`, or `etc.,` have no interior space and never match.
+    ///
+    /// The interior-space requirement is DELIBERATE, not an oversight — do not widen it. Quick
+    /// task 260830-dc4 (2026-08-30 "und.," defect) found an unspaced mixed-source sibling of this
+    /// bug that this string-level pass is STRUCTURALLY BLIND to: when a rejected `.move` restores
+    /// a baseline mark that itself came from a multi-mark baseline run (e.g. one dot out of a
+    /// dictated "..."), that restored mark's OWN baseline trailing is empty — it sat directly
+    /// against another mark in the source, never a space — so no interior whitespace is ever
+    /// produced between it and whatever candidate-sourced mark ends up next to it, and this regex
+    /// never matches. Widening the pattern to also match the unspaced case would destroy `etc.,`
+    /// and a leading `...`, both pinned by `testCollapseUnit`. That unspaced mixed-source shape is
+    /// owned upstream, at the token level where provenance is still known, by
+    /// `collapseMixedProvenancePunctuationRuns` (see its doc comment) — this pass keeps owning
+    /// exactly the spaced same-source case it always has.
     static func collapseDanglingPunctuation(_ text: String) -> String {
         guard let regex = try? NSRegularExpression(pattern: " *([.,;:!?]) +([.,;:!?])") else { return text }
         let terminals: Set<Character> = [".", "!", "?"]
@@ -897,6 +910,15 @@ public enum EditGuard {
         // baseline token at its own position and drops the unmatched
         // candidate token, exactly like two independently-rejected
         // delete/insert edits would — never a blanket accept.
+        //
+        // Quick task 260830-dc4 (2026-08-30 "und.," defect): that
+        // restoration is now DROPPED at rendering time, by
+        // `collapseMixedProvenancePunctuationRuns`, when it lands inside a
+        // punctuation run alongside a candidate-sourced mark — the
+        // restoration described above still happens (the edit's verdict in
+        // the forensics log is unchanged, still `unclassified`/rejected),
+        // only the RENDERING of an otherwise-orphaned restored mark next to
+        // a candidate mark changes.
         if a.kind == .punctuation {
             return (false, nil, .unclassified)
         }
@@ -1082,6 +1104,26 @@ public enum EditGuard {
 
     // MARK: - Part C: rebuild + apply
 
+    /// Records WHICH INPUT a `WorkToken`'s `text` came from. Added for the
+    /// 2026-08-30 "und.," defect (quick task 260830-dc4,
+    /// `.planning/todos/resolved/editguard-splices-worse-than-both-inputs.md`):
+    /// `materialize` can render a punctuation run made of tokens from BOTH
+    /// sources adjacent to each other (a rejected `.move`/`.substitute`
+    /// restores a baseline mark right next to an accepted candidate mark),
+    /// synthesising a mark sequence present in neither input. The only
+    /// consumer of this field is `collapseMixedProvenancePunctuationRuns`
+    /// below, which uses it to detect exactly that shape and keep only the
+    /// candidate-sourced marks.
+    private enum TokenSource: Equatable {
+        /// Rendered from the LLM candidate stream (a keep, or an accepted
+        /// substitute/insert/move).
+        case candidate
+        /// Rendered from the rules-cleaned baseline stream via a restoration
+        /// (a rejected delete/move, or a rejected substitute that restores
+        /// the baseline token in place).
+        case restoredBaseline
+    }
+
     /// An emitted token in the rebuilt output — a lightweight projection of
     /// `Token` (no `index`, since restored/rebuilt tokens don't occupy a
     /// stable position in either source stream).
@@ -1091,6 +1133,11 @@ public enum EditGuard {
         let kind: TokenKind
         let trailing: String
         let sentenceIndex: Int
+        /// WHICH INPUT `text` came from. Non-defaulted deliberately: the
+        /// 2026-08-30 defect this field exists to fix was caused by
+        /// provenance being implicit, so every construction site must
+        /// declare it explicitly rather than silently inheriting a default.
+        let source: TokenSource
         /// Set only when `text` was accepted via the casing-only substitute
         /// path (`AcceptClass.punctuationOrCasing`, `a.normalized ==
         /// b.normalized`) AND the candidate token was itself its sentence's
@@ -1633,7 +1680,7 @@ public enum EditGuard {
         }.sorted { $0.bIdx < $1.bIdx }
 
         for (bIdx, a) in restorationTargets {
-            let restored = WorkToken(text: a.text, normalized: a.normalized, kind: a.kind, trailing: a.trailing, sentenceIndex: a.sentenceIndex, baselineCasingAlternative: nil)
+            let restored = WorkToken(text: a.text, normalized: a.normalized, kind: a.kind, trailing: a.trailing, sentenceIndex: a.sentenceIndex, source: .restoredBaseline, baselineCasingAlternative: nil)
 
             var anchor: Int?
             var scan = bIdx - 1
@@ -1733,7 +1780,7 @@ public enum EditGuard {
                 switch edit.kind {
                 case .keep:
                     if let b = edit.to {
-                        output.append(WorkToken(text: b.text, normalized: b.normalized, kind: b.kind, trailing: trailingFor(candidateIndex: i, ownTrailing: b.trailing), sentenceIndex: b.sentenceIndex, baselineCasingAlternative: nil))
+                        output.append(WorkToken(text: b.text, normalized: b.normalized, kind: b.kind, trailing: trailingFor(candidateIndex: i, ownTrailing: b.trailing), sentenceIndex: b.sentenceIndex, source: .candidate, baselineCasingAlternative: nil))
                     }
                 case .substitute:
                     if v.accepted, let a = edit.from, let b = edit.to {
@@ -1742,7 +1789,7 @@ public enum EditGuard {
                             && candidateFirstWordIndex[b.sentenceIndex] == b.index
                         output.append(WorkToken(
                             text: b.text, normalized: b.normalized, kind: b.kind, trailing: trailingFor(candidateIndex: i, ownTrailing: b.trailing), sentenceIndex: b.sentenceIndex,
-                            baselineCasingAlternative: isCasingOnly ? a.text : nil
+                            source: .candidate, baselineCasingAlternative: isCasingOnly ? a.text : nil
                         ))
                     } else if let a = edit.from, let b = edit.to {
                         // Gap-local remap (260724-j96): render the token
@@ -1779,17 +1826,17 @@ public enum EditGuard {
                         let restoredTrailing = (candidateDerivedTrailing.isEmpty && renderToken.kind == .punctuation)
                             ? renderToken.trailing
                             : candidateDerivedTrailing
-                        output.append(WorkToken(text: renderToken.text, normalized: renderToken.normalized, kind: renderToken.kind, trailing: restoredTrailing, sentenceIndex: b.sentenceIndex, baselineCasingAlternative: nil))
+                        output.append(WorkToken(text: renderToken.text, normalized: renderToken.normalized, kind: renderToken.kind, trailing: restoredTrailing, sentenceIndex: b.sentenceIndex, source: .restoredBaseline, baselineCasingAlternative: nil))
                     }
                 case .insert:
                     if v.accepted, let b = edit.to {
-                        output.append(WorkToken(text: b.text, normalized: b.normalized, kind: b.kind, trailing: trailingFor(candidateIndex: i, ownTrailing: b.trailing), sentenceIndex: b.sentenceIndex, baselineCasingAlternative: nil))
+                        output.append(WorkToken(text: b.text, normalized: b.normalized, kind: b.kind, trailing: trailingFor(candidateIndex: i, ownTrailing: b.trailing), sentenceIndex: b.sentenceIndex, source: .candidate, baselineCasingAlternative: nil))
                     }
                     // rejected insert -> omit entirely; `trailingFor` on
                     // the PRECEDING emitted token already bridges this gap.
                 case .move:
                     if v.accepted, let b = edit.to {
-                        output.append(WorkToken(text: b.text, normalized: b.normalized, kind: b.kind, trailing: trailingFor(candidateIndex: i, ownTrailing: b.trailing), sentenceIndex: b.sentenceIndex, baselineCasingAlternative: nil))
+                        output.append(WorkToken(text: b.text, normalized: b.normalized, kind: b.kind, trailing: trailingFor(candidateIndex: i, ownTrailing: b.trailing), sentenceIndex: b.sentenceIndex, source: .candidate, baselineCasingAlternative: nil))
                     }
                     // rejected move -> omit here; restored separately at
                     // its baseline anchor, and the gap this leaves is
@@ -1803,7 +1850,7 @@ public enum EditGuard {
             }
         }
 
-        return revertSpuriousSentenceInitialCapitalization(bindPunctuationLeft(bridgeGluedWordTokens(output)))
+        return revertSpuriousSentenceInitialCapitalization(bindPunctuationLeft(collapseMixedProvenancePunctuationRuns(bridgeGluedWordTokens(output))))
     }
 
     /// Post-process (SC#3 gap closure, bug 2 — 44-FIDELITY-REPLAY.md §2/§3):
@@ -1852,8 +1899,93 @@ public enum EditGuard {
             result[i] = WorkToken(
                 text: result[i].text, normalized: result[i].normalized, kind: result[i].kind,
                 trailing: " ", sentenceIndex: result[i].sentenceIndex,
-                baselineCasingAlternative: result[i].baselineCasingAlternative
+                source: result[i].source, baselineCasingAlternative: result[i].baselineCasingAlternative
             )
+        }
+        return result
+    }
+
+    /// Post-process (quick task 260830-dc4, 2026-08-30 "und.," defect —
+    /// `.planning/todos/resolved/editguard-splices-worse-than-both-inputs.md`):
+    /// runs between `bridgeGluedWordTokens` and `bindPunctuationLeft` in the
+    /// post-pass chain — order is LOAD-BEARING. Running this AFTER
+    /// `bindPunctuationLeft` would be too late: that pass deliberately
+    /// declines to bind a mark to a PRECEDING punctuation token (see its own
+    /// doc comment, "never to a preceding punctuation token"), so a
+    /// mixed-provenance run would already be glued together with no interior
+    /// space by the time this pass ran, and it would have nothing left to
+    /// detect.
+    ///
+    /// A punctuation RUN (2+ adjacent punctuation tokens) can be assembled
+    /// from tokens sourced from BOTH inputs: a rejected `.move`/`.substitute`
+    /// restores a baseline mark at its own anchor immediately next to an
+    /// accepted candidate mark. The rendered sequence is then a
+    /// character-level interleaving of both sources that exists in NEITHER
+    /// the baseline nor the candidate — worse than either input, and
+    /// invisible to any check that only looks at one input at a time. Walk
+    /// every maximal run of consecutive punctuation tokens; a run that is
+    /// entirely single-source is left untouched — this is what protects a
+    /// literal ellipsis, a "?!" pair, an abbreviation-then-comma, and the
+    /// pre-existing SPACED same-source case `collapseDanglingPunctuation`
+    /// already owns (a keep plus an accepted insert are both
+    /// candidate-sourced, so that shape never enters the mixed branch here).
+    ///
+    /// For a genuinely mixed run, keep only the CANDIDATE-sourced tokens and
+    /// drop the restored baseline ones. Candidate-sourced marks win rather
+    /// than restored ones: punctuation is explicitly excluded from
+    /// `multisetInvariantHolds` ("this invariant is about WORDS, not
+    /// formatting") and `classifyDelete` already discards baseline
+    /// punctuation unconditionally, so dropping a restored mark cannot
+    /// change meaning-bearing content — and the candidate mark is the one
+    /// that actually won classification for this span. Dropping the
+    /// candidate mark instead would leave only the baseline's own
+    /// (still-incomplete) punctuation, a form present in neither input
+    /// either (see the quick task's PLAN.md diagnosis for why "und." is not
+    /// an acceptable output any more than "und.," is).
+    ///
+    /// A mixed run always contains at least one candidate-sourced token by
+    /// definition (it is not single-source), so a run can never be emptied
+    /// by this pass. The surviving tokens' LAST element inherits the run's
+    /// ORIGINAL final token's `trailing`, so no separator before the next
+    /// word is ever lost even when the dropped tokens were not the run's
+    /// last element.
+    ///
+    /// Invariant-safety: `multisetInvariantHolds` (its own doc comment,
+    /// below) excludes punctuation entirely, so dropping a punctuation token
+    /// can never trip it. `renderingInvariantHolds` only fires between two
+    /// NON-punctuation tokens; this pass always leaves at least one
+    /// punctuation token standing between the run's word/numeric neighbours
+    /// (a mixed run has 2+ tokens and at least one candidate-sourced token
+    /// always survives), so it can never trip that check either.
+    private static func collapseMixedProvenancePunctuationRuns(_ tokens: [WorkToken]) -> [WorkToken] {
+        guard tokens.count > 1 else { return tokens }
+        var result: [WorkToken] = []
+        var i = 0
+        while i < tokens.count {
+            guard tokens[i].kind == .punctuation else {
+                result.append(tokens[i])
+                i += 1
+                continue
+            }
+            var runEnd = i
+            while runEnd + 1 < tokens.count, tokens[runEnd + 1].kind == .punctuation {
+                runEnd += 1
+            }
+            let run = Array(tokens[i...runEnd])
+            if run.count < 2 || run.allSatisfy({ $0.source == run[0].source }) {
+                result.append(contentsOf: run)
+            } else {
+                var survivors = run.filter { $0.source == .candidate }
+                if let originalLastTrailing = run.last?.trailing, let last = survivors.last {
+                    survivors[survivors.count - 1] = WorkToken(
+                        text: last.text, normalized: last.normalized, kind: last.kind,
+                        trailing: originalLastTrailing, sentenceIndex: last.sentenceIndex,
+                        source: last.source, baselineCasingAlternative: last.baselineCasingAlternative
+                    )
+                }
+                result.append(contentsOf: survivors)
+            }
+            i = runEnd + 1
         }
         return result
     }
@@ -1905,7 +2037,7 @@ public enum EditGuard {
             result[i] = WorkToken(
                 text: result[i].text, normalized: result[i].normalized, kind: result[i].kind,
                 trailing: "", sentenceIndex: result[i].sentenceIndex,
-                baselineCasingAlternative: result[i].baselineCasingAlternative
+                source: result[i].source, baselineCasingAlternative: result[i].baselineCasingAlternative
             )
         }
         return result
@@ -1977,7 +2109,7 @@ public enum EditGuard {
             let isGenuinelySentenceInitial = i == 0 ||
                 (tokens[i - 1].kind == .punctuation && sentenceTerminalMarks.contains(tokens[i - 1].text))
             guard !isGenuinelySentenceInitial else { return t }
-            return WorkToken(text: alt, normalized: t.normalized, kind: t.kind, trailing: t.trailing, sentenceIndex: t.sentenceIndex, baselineCasingAlternative: nil)
+            return WorkToken(text: alt, normalized: t.normalized, kind: t.kind, trailing: t.trailing, sentenceIndex: t.sentenceIndex, source: t.source, baselineCasingAlternative: nil)
         }
     }
 

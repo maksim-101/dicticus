@@ -233,7 +233,7 @@ enum EditGuardFixtures {
         language: "en",
         baseline: "Because to be fair, as of now we're not 100% sure and we will be surfacing what we suspect of course, but then I would also argue it's not my job to fix Apple's problems, at least not at my own expense, which is what has happened here. And I think some kind of......goodshine......that roughly covers a new iPhone would be......appropriate.",
         candidate: "Because to be fair, as of now we're not 100% sure, and we will be surfacing what we suspect. However, I would also argue it's not my job to fix Apple's problems, at least not at my own expense, which is what has happened here. And I think some kind of \"goodshine\" — that roughly covers a new iPhone — would be appropriate.",
-        expectedText: "Because to be fair, as of now we're not 100% sure, and we will be surfacing what we suspect of course, but then I would also argue it's not my job to fix Apple's problems, at least not at my own expense, which is what has happened here. And I think some kind of.\"goodshine\" — that roughly covers a new iPhone — would be appropriate.",
+        expectedText: "Because to be fair, as of now we're not 100% sure, and we will be surfacing what we suspect of course, but then I would also argue it's not my job to fix Apple's problems, at least not at my own expense, which is what has happened here. And I think some kind of \"goodshine\" — that roughly covers a new iPhone — would be appropriate.",
         editKind: .move,
         tokenClass: .contentWord,
         position: .interior,
@@ -249,14 +249,23 @@ enum EditGuardFixtures {
             "EditGuard.classifyMove rejects every `kind == .punctuation` " +
             "move unconditionally (never a genuine word-order repair — " +
             "punctuation is fungible and the most repetitive token class in " +
-            "any text). Previously a known residual, NOT a meaning " +
-            "corruption: the rejected move's punctuation token restored " +
-            "with a leading space (\"of .\\\"goodshine\\\"\" instead of the " +
-            "exact baseline dot-run spacing). 2026-07-17: " +
-            "EditGuard.bindPunctuationLeft closes this at the root — the " +
-            "kept token immediately before a restored single-char mark no " +
-            "longer keeps its candidate-calibrated trailing space, so the " +
-            "residual space is gone (\"of.\\\"goodshine\\\"\")."
+            "any text). 2026-07-17: EditGuard.bindPunctuationLeft removed " +
+            "the leading space before the restored mark, producing " +
+            "\"of.\\\"goodshine\\\"\" — at the time documented as \"a known " +
+            "residual, NOT a meaning corruption\". Quick task 260830-dc4 " +
+            "(2026-08-30 \"und.,\" defect) reclassified that residual: a " +
+            "restored baseline period glued with ZERO separator directly " +
+            "in front of the candidate's own opening quote mark is the " +
+            "SAME mixed-provenance-punctuation-run shape as \"und.,\" — a " +
+            "sequence present in NEITHER the baseline (a 6-dot pause-dot " +
+            "run, never a lone period abutting a quote) nor the candidate " +
+            "(no period there at all). `collapseMixedProvenancePunctuationRuns` " +
+            "now drops the restored period from this run (the candidate's " +
+            "opening quote is the sole survivor), and the normal word/quote " +
+            "spacing repair gives \"of \\\"goodshine\\\"\" — genuinely " +
+            "BETTER than the prior expectation, not merely different: it " +
+            "matches the candidate's own punctuation exactly, with nothing " +
+            "synthesized from neither input."
     )
 
     /// The flagship-class counter-proof this fix must NOT break: a genuine

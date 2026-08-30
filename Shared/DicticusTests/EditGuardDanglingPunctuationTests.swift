@@ -59,6 +59,12 @@ final class EditGuardDanglingPunctuationTests: XCTestCase {
         XCTAssertEqual(EditGuard.collapseDanglingPunctuation("wait... really?!"), "wait... really?!")
         XCTAssertEqual(EditGuard.collapseDanglingPunctuation("see etc., and more"), "see etc., and more")
         XCTAssertEqual(EditGuard.collapseDanglingPunctuation("no change here."), "no change here.")
+        // Deliberate non-behavior (260830-dc4): the unspaced mixed-source glued pair is NOT this
+        // pass's job — it is structurally invisible to a string-level regex requiring interior
+        // whitespace, and is owned upstream by `collapseMixedProvenancePunctuationRuns` at the
+        // token level. This locks that this string-level pass was never, and is still not, the
+        // owner of the unspaced case.
+        XCTAssertEqual(EditGuard.collapseDanglingPunctuation("und., wenn"), "und., wenn")
     }
 
     // MARK: - Space-before-single-mark (2026-07-17 root-cause fix: bindPunctuationLeft)
