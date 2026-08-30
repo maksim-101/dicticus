@@ -126,4 +126,78 @@ final class EditGuardDanglingPunctuationTests: XCTestCase {
         let out = guardOut("Wait... really?", "Wait... really?")
         XCTAssertTrue(out.contains("Wait..."), out)
     }
+
+    // MARK: - Mixed-provenance punctuation-run splice (quick task 260830-dc4)
+    //
+    // Regression net for `.planning/todos/pending/editguard-splices-worse-than-both-inputs.md`
+    // (now resolved). Production record 2026-08-30T04:54:30.157Z, mode=aiCleanup, lang=de,
+    // prompt_version=v-transcriptionist. Root cause (traced against the live record, not
+    // re-derived here): the dictated ellipsis "und..." is split by `EditDiff` across three
+    // separate edit kinds. One dot is paired as a `.move` against a textually-identical `.`
+    // elsewhere in the stream; `classifyMove` rejects every punctuation move unconditionally,
+    // so that dot is RESTORED at its baseline anchor immediately after "und". A second dot's
+    // substitute to "," is ACCEPTED, rendering the candidate's comma at the immediately
+    // following slot. The two adjacent tokens — one baseline-restored, one candidate-accepted
+    // — glue into "und.," in the shipped output, a two-mark sequence present in NEITHER the
+    // baseline ("und...") nor the candidate ("und,"). `collapseDanglingPunctuation` does not
+    // catch this: its interior-space requirement is deliberate (protects "...", "?!", "etc.,")
+    // and the restored dot's own baseline trailing is empty (it sat directly against another
+    // dot in "und..."), so no space is ever produced for the string-level pass to match.
+    //
+    // The trailing product name ("Resistance Band") is swapped for a same-shape invented token
+    // ("Tension Strap") per the project's fixture-anonymization rule (memory
+    // `reference_dicticus_release_publish`) — everything else is common-noun German with no
+    // identifiers and is kept VERBATIM, because the defect depends on the global token stream
+    // (`EditDiff.pairMovesFirst` pairs punctuation moves stream-globally; changing token counts
+    // or sentence boundaries elsewhere can silently stop the defect from reproducing). The swap
+    // was re-verified post-hoc to still reproduce the glued pair.
+    func testNoSplicedPunctuation_langweiligUnd_2026_08_30() {
+        let baseline = "Also ich möchte, dass du noch einmal genau recherchierst und mir einen Nahrungsergänzungsmittel sowie beispielhaften Trainingsplan zusammenstellst. Wie viel Resistancetraining braucht es wirklich? Ich bin zum Beispiel auch kein Fitnessstudio-Gänger. Ich finde das zu langweilig und... wenn nicht unbedingt notwendig dann möchte ich auch nicht einfach nur 30 minuten resistance training machen normalerweise mache ich so fünf minuten pro tag mit dem eigenen körpergewicht oder mit dem Tension Strap. Ich bin aber offen für Veränderung."
+        let candidate = "Ich möchte, dass du noch einmal genau recherchierst und mir ein Nahrungsergänzungsmittel sowie einen beispielhaften Trainingsplan zusammenstellst. Wie viel Resistenztraining braucht es wirklich? Ich bin zum Beispiel auch kein Fitnessstudio-Gänger. Ich finde das zu langweilig und, wenn nicht unbedingt notwendig, möchte ich auch nicht einfach nur 30 Minuten Resistenztraining machen. Normalerweise mache ich so fünf Minuten pro Tag mit dem eigenen Körpergewicht oder mit dem Tension Strap. Ich bin aber offen für Veränderung."
+
+        let out = guardOut(baseline, candidate, "de")
+        assertNoDoubledPunct(out)
+
+        guard let range = out.range(of: "langweilig und") else {
+            XCTFail("expected 'langweilig und' to survive in the output verbatim: \(out)")
+            return
+        }
+        let after = out[range.upperBound...]
+        let baselineForm = "... wenn"
+        let candidateForm = ", wenn"
+        XCTAssertTrue(
+            after.hasPrefix(baselineForm) || after.hasPrefix(candidateForm),
+            "span immediately after 'langweilig und' is neither the baseline's ellipsis nor " +
+            "the candidate's comma — a neither-input splice: '\(after.prefix(24))' — full output: \(out)"
+        )
+    }
+
+    /// Minimal single-sentence reduction of the record above. Attempted per plan Task 1's
+    /// instruction to reduce and delete if it does not reproduce — verified (RED-confirmed
+    /// before the fix landed) that this single defect-carrying sentence, isolated from the rest
+    /// of the record, still reproduces: the same `.move`-pairing shape only needs two textually-
+    /// identical baseline "." tokens to pair against each other, and this sentence's own
+    /// ellipsis supplies both, so the reduction does not depend on any other sentence's
+    /// punctuation. Kept alongside the full-record test because it isolates the defect from the
+    /// record's unrelated edits (Nahrungsergänzungsmittel, Resistenztraining casing, etc.).
+    func testNoSplicedPunctuation_langweiligUnd_minimalReduction() {
+        let baseline = "Ich finde das zu langweilig und... wenn nicht unbedingt notwendig dann möchte ich auch nicht einfach nur 30 minuten resistance training machen normalerweise mache ich so fünf minuten pro tag mit dem eigenen körpergewicht oder mit dem Tension Strap."
+        let candidate = "Ich finde das zu langweilig und, wenn nicht unbedingt notwendig, möchte ich auch nicht einfach nur 30 Minuten Resistenztraining machen. Normalerweise mache ich so fünf Minuten pro Tag mit dem eigenen Körpergewicht oder mit dem Tension Strap."
+
+        let out = guardOut(baseline, candidate, "de")
+        assertNoDoubledPunct(out)
+
+        guard let range = out.range(of: "langweilig und") else {
+            XCTFail("expected 'langweilig und' to survive in the output verbatim: \(out)")
+            return
+        }
+        let after = out[range.upperBound...]
+        let baselineForm = "... wenn"
+        let candidateForm = ", wenn"
+        XCTAssertTrue(
+            after.hasPrefix(baselineForm) || after.hasPrefix(candidateForm),
+            "span immediately after 'langweilig und' is neither the baseline's ellipsis nor " +
+            "the candidate's comma — a neither-input splice: '\(after.prefix(24))' — full output: \(out)"
+        )
+    }
 }
