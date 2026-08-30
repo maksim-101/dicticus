@@ -59,6 +59,13 @@ class TextInjector {
         }
 
         // Step 3: Synthesize Cmd+V
+        #if DEBUG_RECORDER
+        // Quick task 260830-si1: read Carbon's secure-input flag immediately
+        // before the synthesized keystroke — macOS silently drops CGEventTap
+        // keystrokes while secure input is active, a candidate root cause for
+        // the unexplained "history has it, cursor doesn't" paste failure.
+        let secureInputEnabled = PasteProbe.secureInputEnabled()
+        #endif
         synthesizePaste()
 
         // Step 4: Wait for target app to process paste
@@ -67,6 +74,9 @@ class TextInjector {
 
         // Step 5: Restore original clipboard
         restoreClipboard(pasteboard, saved: saved)
+        #if DEBUG_RECORDER
+        await PasteProbe.shared.record(secureInputEnabled: secureInputEnabled, injectionSucceeded: true)
+        #endif
         return true
     }
 
