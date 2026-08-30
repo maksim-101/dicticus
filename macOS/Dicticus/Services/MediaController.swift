@@ -24,14 +24,27 @@ private let mrSendCommandFn: MRSendCommandFn? = {
     return unsafeBitCast(sym, to: MRSendCommandFn.self)
 }()
 
-/// kMRTogglePlayPause — the only MediaRemote command this bridge ever sends.
-private let kMRTogglePlayPause = 2
+/// kMRPlay / kMRPause — the only two MediaRemote commands this bridge sends
+/// (260830-pm5). Discrete, not the ambiguous `kMRTogglePlayPause` (2): a bare
+/// PAUSE has no "start something" interpretation when nothing is playing, so it
+/// cannot fall back to launching the system default player the way a
+/// play/pause TOGGLE does when no app owns the current Now Playing session —
+/// exactly the mechanism spike 003a-send already validated audibly (signed
+/// app, real pause + real resume) before 260725-b4f swapped tier-2b to the
+/// single ambiguous toggle for symmetry. Values match the SDK's private
+/// `MRMediaRemoteCommand` enum (also used unmodified by tier-1's AppleScript
+/// equivalent `pause`/`play`, and by spikes 002/003's `kMRPlay = 0, kMRPause = 1`).
+private let kMRPlay = 0
+private let kMRPause = 1
 
 /// Pauses/resumes the currently-audible desktop media player while PTT is held.
 ///
 /// Tier-1: ScriptingBridge / Apple events (validated signed in Spike 003d) control
 /// Apple Music and Spotify. Tier-2b: for non-scriptable sources (browser/YouTube/
-/// podcast), a CoreAudio running-guard gates a MediaRemote `togglePlayPause` send
+/// podcast), a measured-RMS guard gates a discrete MediaRemote PAUSE send on press
+/// / PLAY send on resume (260830-pm5 — not the ambiguous `togglePlayPause`, which
+/// launched Apple Music when the audible source had no Now Playing session to
+/// target; see quick task 260830-pm5 for the fix)
 /// (Spike 2026-07-25, all 4 scenarios / both output devices, LOCKED design — see
 /// `260725-b4f-PLAN.md`). Tier-2: CoreAudio default-output mute is the last resort
 /// (dead on hardware without a software mute, e.g. the JDS Labs Element IV DAC).
@@ -69,9 +82,10 @@ final class MediaController {
     /// One-shot guard so a CoreAudio mute failure logs once, not on every press.
     private var didWarnMute = false
 
-    /// True when WE sent a MediaRemote togglePlayPause this hold (tier-2b). A latch,
-    /// not a re-read — release decides purely from this flag because MediaRemote's
-    /// now-playing state cannot be read from the signed app (entitlement-gated).
+    /// True when WE sent a MediaRemote PAUSE this hold (tier-2b — 260830-pm5:
+    /// discrete PAUSE, not togglePlayPause). A latch, not a re-read — release
+    /// decides purely from this flag because MediaRemote's now-playing state
+    /// cannot be read from the signed app (entitlement-gated).
     private var didToggleMediaRemote = false
 
     /// One-shot guard so a MediaRemote dlopen/dlsym/send failure logs once, not on
@@ -106,9 +120,10 @@ final class MediaController {
     /// `OutputLevelSampler` timeout/failure.
     private let outputRMSOverride: (() -> Double?)?
 
-    /// When non-nil, substitutes the MediaRemote togglePlayPause send (both press and
-    /// resume use the same seam — mirrors the real bridge being called twice).
-    private let mediaRemoteToggleOverride: (() -> Bool)?
+    /// When non-nil, substitutes the MediaRemote command send. Receives the command
+    /// constant (`kMRPause` on press, `kMRPlay` on resume — 260830-pm5) so tests can
+    /// assert which discrete command fired without ever calling the real bridge.
+    private let mediaRemoteToggleOverride: ((Int) -> Bool)?
 
     /// When non-nil, substitutes the default-output mute read.
     private let isOutputMutedOverride: (() -> Bool?)?
@@ -130,7 +145,7 @@ final class MediaController {
     private init(
         tier1RunningPlayers: @escaping () -> Set<String>,
         outputRMS: @escaping () -> Double?,
-        mediaRemoteToggle: @escaping () -> Bool,
+        mediaRemoteToggle: @escaping (Int) -> Bool,
         isOutputMuted: @escaping () -> Bool?,
         setOutputMuted: @escaping (Bool) -> Bool,
         verifyDelaySeconds: TimeInterval
@@ -152,7 +167,7 @@ final class MediaController {
     static func makeForTesting(
         tier1RunningPlayers: @escaping () -> Set<String> = { [] },
         outputRMS: @escaping () -> Double? = { nil },
-        mediaRemoteToggle: @escaping () -> Bool = { false },
+        mediaRemoteToggle: @escaping (Int) -> Bool = { _ in false },
         isOutputMuted: @escaping () -> Bool? = { false },
         setOutputMuted: @escaping (Bool) -> Bool = { _ in false },
         verifyDelaySeconds: TimeInterval = 0
@@ -386,11 +401,20 @@ final class MediaController {
             return
 
         case .stillPlaying:
-            // Undo the collateral toggle first. If the send itself fails, leave the
-            // press latch set exactly as it was — release still unwinds the press
-            // toggle exactly as today, and no mute can be stranded.
-            let undoSent = sendMediaRemoteToggle()
-            guard undoSent else {
+            // Our press-side PAUSE had no measurable effect: either the target
+            // ignored it, or nothing was really listening. Unlike the old
+            // toggle-based design (pre-260830-pm5), a bare PAUSE has no side
+            // effect to "undo" — the previous code's undo-toggle here was
+            // masking a launch, not preventing one (a second ambiguous toggle
+            // just flipped an accidentally-launched player back off, leaving it
+            // open). Clear the latch — there is nothing WE paused for release
+            // to resume — and fall straight through to the mute last-resort,
+            // same "only latch output WE muted" contract as the press-side
+            // tier-2 fallback.
+            didToggleMediaRemote = false
+
+            guard let muted = isOutputMuted() else {
+                handleMuteFailure()
                 #if DEBUG_RECORDER
                 logTier2bVerify(pressRMS: pressRMS, verifyRMS: postRMS, verifyTapStatus: tapStatus,
                                  outcome: "still_playing", undoToggleSent: false,
@@ -399,24 +423,10 @@ final class MediaController {
                 #endif
                 return
             }
-            didToggleMediaRemote = false
-
-            // Mute fallback: same "only latch output WE muted" contract as the
-            // press-side tier-2 last resort.
-            guard let muted = isOutputMuted() else {
-                handleMuteFailure()
-                #if DEBUG_RECORDER
-                logTier2bVerify(pressRMS: pressRMS, verifyRMS: postRMS, verifyTapStatus: tapStatus,
-                                 outcome: "still_playing", undoToggleSent: true,
-                                 fallbackMuteAttempted: false, fallbackMuteResult: nil,
-                                 isOutputMutedResult: nil)
-                #endif
-                return
-            }
             guard !muted else {
                 #if DEBUG_RECORDER
                 logTier2bVerify(pressRMS: pressRMS, verifyRMS: postRMS, verifyTapStatus: tapStatus,
-                                 outcome: "still_playing", undoToggleSent: true,
+                                 outcome: "still_playing", undoToggleSent: false,
                                  fallbackMuteAttempted: false, fallbackMuteResult: nil,
                                  isOutputMutedResult: muted)
                 #endif
@@ -430,7 +440,7 @@ final class MediaController {
             }
             #if DEBUG_RECORDER
             logTier2bVerify(pressRMS: pressRMS, verifyRMS: postRMS, verifyTapStatus: tapStatus,
-                             outcome: "still_playing", undoToggleSent: true,
+                             outcome: "still_playing", undoToggleSent: false,
                              fallbackMuteAttempted: true, fallbackMuteResult: muteWriteSucceeded,
                              isOutputMutedResult: muted)
             #endif
@@ -439,23 +449,23 @@ final class MediaController {
 
     /// True when the real MediaRemote bridge resolved a send function (dlopen +
     /// dlsym both succeeded), or a test override is installed. Used only for probe
-    /// logging — never gates behavior (behavior is entirely `sendMediaRemoteToggle()`'s
+    /// logging — never gates behavior (behavior is entirely `sendMediaRemoteCommand(_:)`'s
     /// return value).
     private var mediaRemoteBridgeAvailable: Bool {
         mediaRemoteToggleOverride != nil || mrSendCommandFn != nil
     }
 
-    /// Send `MRMediaRemoteSendCommand(kMRTogglePlayPause, nil)` via the lazily-resolved
+    /// Send `MRMediaRemoteSendCommand(command, nil)` via the lazily-resolved
     /// private-framework bridge. Returns `false` — a graceful degrade, never a crash —
     /// when dlopen/dlsym failed to resolve the symbol OR the send itself returns false.
     /// Callers fall through to the tier-2 mute fallback on `false`.
-    private func sendMediaRemoteToggle() -> Bool {
-        if let override = mediaRemoteToggleOverride { return override() }
+    private func sendMediaRemoteCommand(_ command: Int) -> Bool {
+        if let override = mediaRemoteToggleOverride { return override(command) }
         guard let send = mrSendCommandFn else {
             handleMediaRemoteFailure()
             return false
         }
-        let sent = send(kMRTogglePlayPause, nil)
+        let sent = send(command, nil)
         if !sent { handleMediaRemoteFailure() }
         return sent
     }
@@ -566,9 +576,11 @@ final class MediaController {
             return
         }
 
-        // Tier 2b: MediaRemote togglePlayPause — only attempted once we've measured
-        // genuinely playing audio.
-        let toggleSent = sendMediaRemoteToggle()
+        // Tier 2b: MediaRemote PAUSE (260830-pm5: discrete, not the ambiguous
+        // TOGGLE — a bare pause can never fall back to "start something" when
+        // nothing owns the Now Playing session) — only attempted once we've
+        // measured genuinely playing audio.
+        let toggleSent = sendMediaRemoteCommand(kMRPause)
         if toggleSent {
             didToggleMediaRemote = true
             #if DEBUG_RECORDER
@@ -635,7 +647,7 @@ final class MediaController {
     ///
     /// Branch order is tier-1 → tier-2b → tier-2, mirroring press: tiers are mutually
     /// exclusive per hold. Tier-2b MUST be checked before tier-2 (mute) so a latched
-    /// MediaRemote toggle always resumes via a second toggle, never via an unmute.
+    /// MediaRemote pause always resumes via a discrete PLAY, never via an unmute.
     func resumeMediaIfPaused() {
         pendingVerifyTask?.cancel()
         pendingVerifyTask = nil
@@ -658,7 +670,13 @@ final class MediaController {
         // BEFORE sending so a degraded resume send never re-fires on the next press.
         if didToggleMediaRemote {
             didToggleMediaRemote = false
-            let toggleSent = sendMediaRemoteToggle()
+            // Discrete PLAY (260830-pm5), mirroring the press-side PAUSE. Reached
+            // only when `didToggleMediaRemote` is still latched: either the verify
+            // step already confirmed the press PAUSE measurably stopped the audio
+            // (the common case — a real paused session exists for this PLAY to
+            // resume), or release raced verify and cancelled it (rare — the latch
+            // is honored as-is, same race the pre-fix code also had).
+            let toggleSent = sendMediaRemoteCommand(kMRPlay)
             #if DEBUG_RECORDER
             logResume(resumedPlayer: nil, resumeErrorNumber: nil,
                        unmuteAttempted: false, unmuteResult: nil, didMuteOutputBefore: false,
