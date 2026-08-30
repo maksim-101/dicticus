@@ -41,6 +41,39 @@ final class BrandMatcher {
     static let nearExactJW: Double = 0.95          // near-exact compound admission
     static let nearExactDL: Int = 1                // near-exact compound admission
     static let minDistinctiveChars: Int = 4        // a token shorter than this never fires
+    // Quick task 260830-fm2 investigated raising this 4 -> 5 (the todo's
+    // hypothesis) and REJECTED it: the live "as BCAA." -> "USB-C" incident
+    // traces to a 2-token WINDOW ("asbcaa", 6 normalized chars vs canonical
+    // "usbc"), not the bare 4-char token — "bcaa" alone against "usbc"
+    // already fails every accept threshold (dl=4/jw=0.0). Raising this floor
+    // to 5 was tried and reverted: it broke an existing accept-control
+    // (`BrandFunctionWordWindowTests.testRecallKageeToKagi`, canonical "Kagi"
+    // normalizes to exactly 4 chars) via `matchToken`'s `phonOk` canonical-
+    // length check. The floor is sound as-is; the actual defect was the
+    // function-word window-veto gap below.
+
+    // MARK: - Co-occurring-trigger context gate (quick task 260830-fm2, change 2)
+    //
+    // Additional, OPT-IN precision narrowing for specific SHORT canonicals in
+    // the bundled `canonical-brands.txt` where a fuzzy match is required to
+    // co-occur with a real trigger term for that brand — derived from this
+    // project's own usage context (GSD workflow vocabulary, the Zed/Xcode
+    // editor pairing, the Claude/Sonnet/Opus model family), never invented.
+    // Deliberately scoped to ONLY the canonicals listed here: a canonical
+    // NOT in this map is entirely unaffected by this gate (falls through to
+    // the existing accept logic unchanged) — gating unregistered short
+    // canonicals unconditionally was tried and reverted for the same reason
+    // as the floor above: it silently blocked `Kagi` (not in this map, not
+    // in the bundled list, but a legitimate live-dictionary-style short
+    // brand exercised by `BrandFunctionWordWindowTests`/
+    // `BrandLoggedRewriteReplayTests`). This gate can therefore only make
+    // the matcher fire LESS for the three brands it names, never more, and
+    // never touches recall for any canonical it doesn't know about.
+    static let shortCanonicalTriggers: [String: Set<String>] = [
+        "gsd": ["phase", "plan", "planning", "milestone", "roadmap", "workflow", "execute", "spike"],
+        "zed": ["editor", "code", "ide"],
+        "opus": ["claude", "sonnet", "haiku", "model", "anthropic"]
+    ]
 
     // MARK: - Function-word window veto (quick task 260825-pt5, guard A)
     //
@@ -66,15 +99,32 @@ final class BrandMatcher {
         "dies", "diese", "dieser", "dieses", "diesem", "diesen"
     ]
 
+    // MARK: - Preposition/conjunction window-veto supplement (quick task 260830-fm2)
+    //
+    // Live evidence (2026-08-30): "as BCAA." -> "USB-C". `FunctionWords`'
+    // substitution sets are scoped to EditGuard's insertion/substitution
+    // semantics and do not carry plain prepositions like "as" (German "als"
+    // IS covered, via `germanInsertable`). "as" preceding a distinctive token
+    // let the 2-token window "as BCAA." concatenate to "asbcaa" and score
+    // dl=3/jw=0.75 against the canonical "USB-C" ("usbc") — inside the
+    // phonetic-accept floor — while bare "bcaa" alone already fails every
+    // threshold (dl=4/jw=0.0). Same class as the 260825-pt5 pronoun fix
+    // ("IP and" -> "iPad"), different word. Local to BrandMatcher, same
+    // reasoning as `pronounSupplement` above: touching `FunctionWords` itself
+    // would change EditGuard's insertion/substitution behaviour.
+    private static let prepositionConjunctionSupplement: Set<String> = ["as"]
+
     /// Closed set of tokens that can end a fuzzy window's 2-token span without
     /// being part of the brand: the D-02 substitution allowlists (both
     /// languages, which already union in the dual-role tokens, negation, and
-    /// modals) plus the local pronoun supplement above.
+    /// modals) plus the local pronoun and preposition/conjunction supplements
+    /// above.
     private static let functionWordWindowGuardSet: Set<String> =
         FunctionWords.englishSubstitutable
             .union(FunctionWords.germanSubstitutable)
             .union(FunctionWords.englishDualRoleAlsoNotSubstitutable)
             .union(pronounSupplement)
+            .union(prepositionConjunctionSupplement)
 
     // MARK: - State (immutable after init)
 
@@ -298,6 +348,22 @@ final class BrandMatcher {
                 let cDigits = cnorm.filter(\.isNumber)
                 guard wDigits == cDigits else { continue }
 
+                // Co-occurring-trigger context gate (quick task 260830-fm2,
+                // change 2): for the SPECIFIC canonicals registered in
+                // `shortCanonicalTriggers` (GSD/Zed/Opus — all short bundled
+                // brands we can name real triggers for), a fuzzy match also
+                // requires a co-occurring trigger term to appear anywhere in
+                // the utterance (natter's `ContextualTranscriptCorrector.
+                // correctTechnical` pattern: "gitter"->"GitHub" fires only
+                // near repo/commit/branch/pull-request/issue). A canonical
+                // NOT in the map (e.g. a live-dictionary short brand like
+                // "Kagi", "USB-C") is UNAFFECTED — see the doc comment on
+                // `shortCanonicalTriggers` for why an unconditional block was
+                // tried and reverted (it broke `testRecallKageeToKagi`).
+                if let triggers = BrandMatcher.shortCanonicalTriggers[cnorm] {
+                    guard textContainsAnyTrigger(text, triggers) else { continue }
+                }
+
                 let lead = leadingNonCore(windowWords.first!)
                 let trail = trailingNonCore(windowWords.last!)
                 out += lead + m.canon + trail
@@ -459,6 +525,16 @@ final class BrandMatcher {
     private func depunct(_ w: String) -> String {
         let punct = CharacterSet(charactersIn: ".,!?;:'\"()[]")
         return w.lowercased().trimmingCharacters(in: punct)
+    }
+
+    /// True when any word of `text` (depunct + lowercased) is a member of
+    /// `triggers` — the co-occurring-trigger context gate (quick task
+    /// 260830-fm2). Scans the WHOLE utterance, not just the matched window:
+    /// dictation is typically one sentence, and a trigger word can precede
+    /// or follow the brand mention anywhere in it.
+    private func textContainsAnyTrigger(_ text: String, _ triggers: Set<String>) -> Bool {
+        let (words, _) = splitPreservingWhitespace(text)
+        return words.contains { triggers.contains(depunct($0)) }
     }
 
     /// True when `w` is a bare digit run after stripping surrounding punctuation
