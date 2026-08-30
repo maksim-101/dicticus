@@ -413,6 +413,21 @@ class TextProcessingService: ObservableObject {
                 output: processedText,
                 language: language
             ).text
+
+            // Step 3a.7 (quick task 260830-pf3): independent fact-
+            // preservation backstop. Runs AFTER NumberRevert so a
+            // legitimate digit<->word form change (EditGuard's
+            // numberFormChange accept class) is already reverted to the
+            // baseline's own form by the time this check runs — see
+            // FactPreservationGuard's placement doc comment. Extracts
+            // URLs/emails/paths/numbers from rulesCleanedText and vetoes
+            // the WHOLE result back to rulesCleanedText if any protected
+            // literal went missing — independent of EditGuard's per-edit
+            // verdicts, so it catches corruption EditDiff's alignment can
+            // miss (e.g. a multi-token merge).
+            if !FactPreservationGuard.check(baseline: rulesCleanedText, output: processedText).preserved {
+                processedText = rulesCleanedText
+            }
         }
 
         // Step 3a.6 (42-07/MLANG-01): deterministic post-gate capitalization.
