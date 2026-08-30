@@ -815,7 +815,13 @@ public enum SelfCorrectionResolver {
     /// real `"… at 9 a.m. No, actually it's 8 a.m."` capture, whose `a.m.`
     /// period would otherwise shatter the sentence. Ported verbatim from
     /// spike 012 `split_sentences`.
-    private static func boundarySentenceSpans(_ text: String) -> [NSRange] {
+    ///
+    /// Bumped from `private` to package-internal (quick task 260830-fp4,
+    /// item 2): `EditGuard.sentenceSegments` reuses this exact splitter for
+    /// its own sub-utterance segmentation, rather than duplicating a second
+    /// abbreviation-aware sentence boundary regex. No logic changed — access
+    /// level only.
+    static func boundarySentenceSpans(_ text: String) -> [NSRange] {
         let nsText = text as NSString
         let fullLength = nsText.length
         guard
