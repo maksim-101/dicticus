@@ -206,4 +206,103 @@ final class EditGuardDanglingPunctuationTests: XCTestCase {
             "the candidate's comma — a neither-input splice: '\(after.prefix(24))' — full output: \(out)"
         )
     }
+
+    /// Corpus-wide punctuation-run provenance invariant (quick task 260830-dc4, Task 3): for
+    /// every fixture in `EditGuardFixtures.all` (87 fixtures, 50 German), plus the 2026-08-30
+    /// production record above, every maximal punctuation-mark run of length >= 2 in the guard's
+    /// output must occur as a punctuation run in EITHER the fixture's baseline OR its candidate.
+    /// A run present in neither is the character-level-interleaving defect this quick task fixes.
+    ///
+    /// SCOPE (documented as a decision, not a convenience — see the plan's `<diagnosis>` "Why the
+    /// invariant is scoped to punctuation runs, not to every span"): word-level interleaving is
+    /// already prevented by `multisetInvariantHolds`, which excludes punctuation entirely — this
+    /// sweep closes exactly that hole. It does NOT assert "every span equals one full input",
+    /// which is false by design for `EditGuard` (D-01: the guard CONSTRUCTS output from baseline
+    /// plus individually-approved edits, so any span with one accepted and one rejected edit
+    /// equals neither input on purpose).
+    ///
+    /// Single-mark runs are deliberately not checked: a lone mark cannot be an interleaving of two
+    /// sources, and checking it would flag ordinary punctuation normalisation (e.g. a baseline "."
+    /// legitimately becoming a candidate "," is a length-1-vs-length-1 substitution, not a run).
+    ///
+    /// Non-vacuity (memory `feedback_gate_blind_to_firing_path`: this project has shipped a gate
+    /// that reported "0 corruptions" against a corpus with 0 true positives): the sweep counts how
+    /// many fixtures actually produced at least one length>=2 output run and asserts that count is
+    /// greater than zero, so a corpus that never exercises this shape cannot pass vacuously.
+    func testPunctuationRunsAreSingleSourced_acrossFixtureCorpus() {
+        // Extracts every maximal run of 2+ adjacent punctuation-kind tokens from `text`, using
+        // EditGuard's own tokenizer so "adjacent" matches the guard's own definition (interior
+        // horizontal whitespace between two punctuation tokens does not break a run — the
+        // tokenizer stores it as the PRECEDING token's `trailing`, not as a separate token, so
+        // consecutive array entries are still "adjacent" regardless of interior spacing). Each run
+        // is returned as its concatenated mark text (token `.text` never includes whitespace, so
+        // this is already whitespace-free by construction).
+        func punctuationRuns(_ text: String) -> [String] {
+            let tokens = EditGuardTokenizer.tokenize(text)
+            var runs: [String] = []
+            var current = ""
+            var count = 0
+            for t in tokens {
+                if t.kind == .punctuation {
+                    current += t.text
+                    count += 1
+                } else {
+                    if count >= 2 { runs.append(current) }
+                    current = ""
+                    count = 0
+                }
+            }
+            if count >= 2 { runs.append(current) }
+            return runs
+        }
+
+        struct SweepCase { let id: String; let language: String; let baseline: String; let candidate: String }
+
+        // The two fixtures the plan flagged as most likely to interact (both combine pause-dot
+        // runs with punctuation moves) were checked individually and are NOT exempted:
+        // fx-mov-punct-en-goodshine-fullrecord-spuriousmove was a genuine second instance of this
+        // defect (fixed in Task 2, its expectedText corrected — see EditGuardFixtures.swift's
+        // updated note) and now passes this sweep with its corrected output;
+        // fx-sub-punct-en-goodshine-pausedots-emdash also passes without modification. No fixture
+        // exemption was needed.
+        let exemptIDs: Set<String> = []
+
+        var cases: [SweepCase] = EditGuardFixtures.all.map {
+            SweepCase(id: $0.id, language: $0.language, baseline: $0.baseline, candidate: $0.candidate)
+        }
+        cases.append(SweepCase(
+            id: "record-2026-08-30T04-54-30-157Z",
+            language: "de",
+            baseline: "Also ich möchte, dass du noch einmal genau recherchierst und mir einen Nahrungsergänzungsmittel sowie beispielhaften Trainingsplan zusammenstellst. Wie viel Resistancetraining braucht es wirklich? Ich bin zum Beispiel auch kein Fitnessstudio-Gänger. Ich finde das zu langweilig und... wenn nicht unbedingt notwendig dann möchte ich auch nicht einfach nur 30 minuten resistance training machen normalerweise mache ich so fünf minuten pro tag mit dem eigenen körpergewicht oder mit dem Tension Strap. Ich bin aber offen für Veränderung.",
+            candidate: "Ich möchte, dass du noch einmal genau recherchierst und mir ein Nahrungsergänzungsmittel sowie einen beispielhaften Trainingsplan zusammenstellst. Wie viel Resistenztraining braucht es wirklich? Ich bin zum Beispiel auch kein Fitnessstudio-Gänger. Ich finde das zu langweilig und, wenn nicht unbedingt notwendig, möchte ich auch nicht einfach nur 30 Minuten Resistenztraining machen. Normalerweise mache ich so fünf Minuten pro Tag mit dem eigenen Körpergewicht oder mit dem Tension Strap. Ich bin aber offen für Veränderung."
+        ))
+
+        var nonVacuousCount = 0
+        for c in cases where !exemptIDs.contains(c.id) {
+            let out = EditGuard.apply(rulesCleaned: c.baseline, llmOutput: c.candidate, language: c.language, lexicon: TestSpellLexicon.allKnown).text
+            let outputRuns = punctuationRuns(out)
+            guard !outputRuns.isEmpty else { continue }
+            nonVacuousCount += 1
+            let baselineRuns = Set(punctuationRuns(c.baseline))
+            let candidateRuns = Set(punctuationRuns(c.candidate))
+            for run in outputRuns {
+                XCTAssertTrue(
+                    baselineRuns.contains(run) || candidateRuns.contains(run),
+                    "[\(c.id)] punctuation run '\(run)' in the guard's output occurs in NEITHER " +
+                    "the baseline nor the candidate — a character-level interleaving of both " +
+                    "sources. baseline runs: \(baselineRuns.sorted()), candidate runs: " +
+                    "\(candidateRuns.sorted()) — full output: \(out)"
+                )
+            }
+        }
+
+        print("[260830-dc4 sweep] \(nonVacuousCount)/\(cases.count) cases produced a length>=2 output punctuation run")
+        XCTAssertGreaterThan(
+            nonVacuousCount, 0,
+            "corpus sweep produced ZERO fixtures with a length>=2 output punctuation run — the " +
+            "invariant above never fired on anything, so it is VACUOUS (memory " +
+            "feedback_gate_blind_to_firing_path: this project has shipped exactly this kind of " +
+            "blind gate before). Widen the corpus before trusting this test."
+        )
+    }
 }
