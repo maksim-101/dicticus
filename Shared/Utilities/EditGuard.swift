@@ -283,12 +283,54 @@ public enum EditGuard {
             return GuardResult(text: safe.text, edits: [], failedClosed: true, failClosedReason: "prefilter")
         }
 
+        let whole = applySingleWindow(
+            rulesCleaned: rulesCleaned, llmOutput: llmOutput, language: language,
+            dictProtected: dictProtected, lexicon: lexicon
+        )
+        guard whole.failedClosed else { return whole }
+
+        // Quick task 260830-fp4 (items 1+2): reached only when the
+        // whole-window classify/rebuild pipeline above could not reconcile
+        // the two token streams AT ALL (`degenerateAlignment` /
+        // `rebuildInvariant`). Every fixture in `EditGuardFixtures.all`
+        // still returns above, at `guard whole.failedClosed else { return
+        // whole }` — see that file's own note on why the corpus is
+        // deliberately shaped to never trip `isDegenerate`, and
+        // `EditGuardTests.testRebuildNeverReturnsNilOnAnyFixture` for the
+        // `rebuildInvariant` side — so nothing below this guard changes ANY
+        // existing fixture's rebuilt text; it only widens what happens on
+        // the residual class of inputs that were ALREADY reverting to
+        // `rulesCleaned` wholesale.
+        if let projected = salvageWithProjection(source: rulesCleaned, candidate: llmOutput) {
+            return projected
+        }
+        if let segmented = applySegmented(
+            rulesCleaned: rulesCleaned, llmOutput: llmOutput, language: language,
+            dictProtected: dictProtected, lexicon: lexicon
+        ) {
+            return segmented
+        }
+        return whole
+    }
+
+    /// The pre-260830-fp4 body of `apply` — diffs, classifies, and rebuilds
+    /// ONE window (either the whole utterance, or one sentence segment from
+    /// `applySegmented`). Byte-identical logic to what `apply` used to do
+    /// inline; extracted so `applySegmented` can call it once per segment
+    /// without duplicating it.
+    private static func applySingleWindow(
+        rulesCleaned: String,
+        llmOutput: String,
+        language: String,
+        dictProtected: Set<String>,
+        lexicon: any SpellLexicon
+    ) -> GuardResult {
         let baselineTokens = EditGuardTokenizer.tokenize(rulesCleaned)
         let candidateTokens = EditGuardTokenizer.tokenize(llmOutput)
         let edits = EditDiff.diff(baseline: baselineTokens, candidate: candidateTokens)
         let confidence = EditDiff.confidence(baseline: baselineTokens, candidate: candidateTokens, edits: edits)
         guard !EditDiff.isDegenerate(confidence) else {
-            return GuardResult(text: safe.text, edits: [], failedClosed: true, failClosedReason: "degenerateAlignment")
+            return GuardResult(text: rulesCleaned, edits: [], failedClosed: true, failClosedReason: "degenerateAlignment")
         }
 
         let classified = classify(
@@ -307,10 +349,175 @@ public enum EditGuard {
             classified: classified,
             language: language
         ) else {
-            return GuardResult(text: safe.text, edits: [], failedClosed: true, failClosedReason: "rebuildInvariant")
+            return GuardResult(text: rulesCleaned, edits: [], failedClosed: true, failClosedReason: "rebuildInvariant")
         }
 
         return GuardResult(text: collapseDanglingPunctuation(rebuilt.text), edits: rebuilt.classified, failedClosed: false, failClosedReason: nil)
+    }
+
+    // MARK: - Quick task 260830-fp4, item 1: formatting-projection salvage
+
+    /// Ported from natter's `TranscriptFormattingProjection.project`
+    /// (Apache 2.0, read for approach only — see this quick task's
+    /// SUMMARY.md for the exact source read). Deliberately narrower than
+    /// this file's own `classify`/`rebuild`: fires only when `source` and
+    /// `candidate` have the SAME COUNT of content tokens (`.word`/
+    /// `.numeric` — punctuation is never counted, matching natter's
+    /// letter-or-number token class) and at least
+    /// `formattingProjectionMatchThreshold` of them already match verbatim
+    /// (`normalized`, so casing differences don't count as mismatches). AN
+    /// INSERTION OR A DELETION CHANGES THE CONTENT-TOKEN COUNT, so it is
+    /// unconditionally excluded by the guard below and must still take the
+    /// existing reject-to-`rulesCleaned` route — this function can only
+    /// ever salvage a pure word-substitution difference. See
+    /// `EditGuardProjectionSalvageTests.testInsertionNeverTakesProjectionPath`
+    /// / `testDeletionNeverTakesProjectionPath` for the proof.
+    ///
+    /// Within that gate: emit `candidate`'s own punctuation/spacing/casing
+    /// verbatim (via each token's own `trailing` — the same
+    /// lossless-reconstruction contract `EditGuardTokenizer` guarantees
+    /// everywhere else in this file), but substitute `source`'s ORIGINAL
+    /// surface text back wherever a content token's `normalized` form
+    /// differs from `source`'s token at that position. This is what makes
+    /// the salvage safe under D-03/D-04 even without running `classify`: a
+    /// digit-value change or a pronoun swap always differs in `normalized`,
+    /// so it is always reverted to the dictated original here, never
+    /// silently kept.
+    private static let formattingProjectionMatchThreshold = 0.8
+
+    static func projectFormatting(source: String, candidate: String) -> String? {
+        let sourceContent = EditGuardTokenizer.tokenize(source).filter { $0.kind != .punctuation }
+        let candidateAll = EditGuardTokenizer.tokenize(candidate)
+        let candidateContentCount = candidateAll.reduce(0) { $0 + ($1.kind == .punctuation ? 0 : 1) }
+        guard !sourceContent.isEmpty, sourceContent.count == candidateContentCount else { return nil }
+
+        var matching = 0
+        var contentIndex = 0
+        var result = ""
+        for token in candidateAll {
+            if token.kind == .punctuation {
+                result += token.text + token.trailing
+                continue
+            }
+            let sourceToken = sourceContent[contentIndex]
+            contentIndex += 1
+            if sourceToken.normalized == token.normalized {
+                matching += 1
+                result += token.text + token.trailing
+            } else {
+                result += sourceToken.text + token.trailing
+            }
+        }
+        guard Double(matching) / Double(sourceContent.count) >= formattingProjectionMatchThreshold else { return nil }
+        return result
+    }
+
+    /// Wires `projectFormatting` into a `GuardResult`: on success, tags a
+    /// single synthetic `ClassifiedEdit` marker (`acceptClass:
+    /// "formattingProjection"`) so D-11's forensics log and this task's own
+    /// non-vacuity count can see the salvage fired. Deliberately NOT a new
+    /// `AcceptClass` case — that enum's own doc comment says "do not rename
+    /// cases without updating every consumer," and this is a whole-text
+    /// transform, not a single classified edit, so it does not belong in
+    /// that per-edit wire vocabulary; `ClassifiedEdit.acceptClass` is a
+    /// plain `String?`, so tagging it here widens no enum.
+    private static func salvageWithProjection(source: String, candidate: String) -> GuardResult? {
+        guard let projected = projectFormatting(source: source, candidate: candidate) else { return nil }
+        let marker = ClassifiedEdit(
+            kind: "projection", from: nil, to: nil,
+            accepted: true, acceptClass: "formattingProjection", rejectClass: nil
+        )
+        return GuardResult(text: collapseDanglingPunctuation(projected), edits: [marker], failedClosed: false, failClosedReason: nil)
+    }
+
+    // MARK: - Quick task 260830-fp4, item 2: sub-utterance revert granularity
+
+    /// Splits BOTH `rulesCleaned` and `llmOutput` into sentence segments
+    /// using `SelfCorrectionResolver`'s own regex-based sentence-boundary
+    /// splitter (`boundarySentenceSpans`, bumped from `private` to
+    /// package-internal for this reuse) rather than `SentenceAligner`'s
+    /// NLTokenizer-based one: this pipeline's post-ASR text carries
+    /// "a.m."/decimal-point shapes `boundarySentenceSpans` is already built
+    /// to protect against splitting on (see its own doc comment).
+    ///
+    /// Only ever called from `apply` AFTER the whole-utterance pipeline
+    /// (`applySingleWindow` + the whole-text `salvageWithProjection`
+    /// attempt) has ALREADY failed. This ordering is deliberate, not
+    /// incidental: running per-segment BEFORE the whole-utterance attempt
+    /// would change `EditDiff`'s alignment for every multi-sentence fixture
+    /// in `EditGuardFixtures.all` — its move-pairing is GLOBAL across the
+    /// whole diffed text (`classifyMove`'s own doc comment: `pairMovesFirst`'s
+    /// unbounded cross-sentence matching is exactly the mechanism
+    /// `fx-mov-punct-en-goodshine-fullrecord-spuriousmove` exists to pin),
+    /// and this task's constraints forbid touching `EditDiff.swift` or any
+    /// classification rule. Gating this behind the whole-utterance
+    /// pipeline's own failure means every existing fixture's diff/classify/
+    /// rebuild path is COMPLETELY UNCHANGED — this can only ever fire on the
+    /// residual class of inputs that were already reverting to
+    /// `rulesCleaned` wholesale.
+    ///
+    /// Deliberately conservative on alignment, for the same reason: returns
+    /// `nil` (caller falls through to the existing whole-text fail-closed
+    /// revert) whenever the two sides split into a DIFFERENT number of
+    /// sentences, or into one or fewer — it does not attempt any
+    /// merge/split reconciliation. `SentenceAligner`'s existing
+    /// greedy-monotonic aligner already solves that harder problem for the
+    /// (retired) per-sentence phonetic gate; reusing it here would mean
+    /// running TWO different sentence-boundary definitions against the same
+    /// text for a benefit this task's scope did not ask for, and this
+    /// project's own gate-policy history warns against reaching for without
+    /// measurement (`feedback_spike_corpus_adversarial_breadth`,
+    /// `project_cleanup_fidelity_crisis`). The equal-count case is exactly
+    /// the "SIMPLE CASE" `SentenceAligner` itself documents as its most
+    /// common, highest-confidence case.
+    private static func applySegmented(
+        rulesCleaned: String,
+        llmOutput: String,
+        language: String,
+        dictProtected: Set<String>,
+        lexicon: any SpellLexicon
+    ) -> GuardResult? {
+        let baselineSegments = sentenceSegments(rulesCleaned)
+        let candidateSegments = sentenceSegments(llmOutput)
+        guard baselineSegments.count > 1, baselineSegments.count == candidateSegments.count else { return nil }
+
+        var text = ""
+        var edits: [ClassifiedEdit] = []
+        var anySucceeded = false
+        for (segmentBaseline, segmentCandidate) in zip(baselineSegments, candidateSegments) {
+            let segmentResult = applySingleWindow(
+                rulesCleaned: segmentBaseline, llmOutput: segmentCandidate, language: language,
+                dictProtected: dictProtected, lexicon: lexicon
+            )
+            if segmentResult.failedClosed, let salvaged = salvageWithProjection(source: segmentBaseline, candidate: segmentCandidate) {
+                text += salvaged.text
+                edits.append(contentsOf: salvaged.edits)
+                anySucceeded = true
+            } else {
+                text += segmentResult.text
+                edits.append(contentsOf: segmentResult.edits)
+                if !segmentResult.failedClosed { anySucceeded = true }
+            }
+        }
+        // If every segment ALSO fell back to its own baseline, the
+        // concatenation above is byte-identical to `rulesCleaned` (each
+        // segment is a lossless span of the original text) — return `nil`
+        // so the caller's existing `whole` fail-closed result stands
+        // unchanged, preserving its more informative `failClosedReason`
+        // ("degenerateAlignment"/"rebuildInvariant") instead of masking it.
+        guard anySucceeded else { return nil }
+        return GuardResult(text: text, edits: edits, failedClosed: false, failClosedReason: nil)
+    }
+
+    /// Lossless-reconstruction sentence split: `sentenceSegments(s)
+    /// .joined() == s` for any `s` (inherited from
+    /// `SelfCorrectionResolver.boundarySentenceSpans`'s own contract), so
+    /// concatenating each segment's independently-rebuilt (or reverted)
+    /// text in `applySegmented` always reproduces the correct whitespace
+    /// between segments — no extra glue step needed.
+    private static func sentenceSegments(_ text: String) -> [String] {
+        let nsText = text as NSString
+        return SelfCorrectionResolver.boundarySentenceSpans(text).map { nsText.substring(with: $0) }
     }
 
     /// Collapse two punctuation marks separated ONLY by whitespace (e.g. `worked , . So`) into a
