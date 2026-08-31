@@ -1095,6 +1095,16 @@ public enum EditGuard {
 
     // MARK: - move (D-04 — MOVES ARE PERMITTED)
 
+    /// Quick task 260831-q2r: experiment-only seam. Defaults to `false`
+    /// (current production policy — punctuation moves rejected
+    /// unconditionally, see the doc comment on `classifyMove` below).
+    /// Flipped ONLY by the offline replay harness
+    /// (`.planning/quick/260831-q2r-punctuation-move-replay/`) to measure
+    /// the counterfactual of accepting punctuation moves; no production
+    /// call site ever sets this to `true`. `internal`, not `public` — not
+    /// reachable from outside the module, so no app target can flip it.
+    internal static var experimentalAllowPunctuationMove = false
+
     private static func classifyMove(
         _ edit: Edit,
         language: String
@@ -1127,7 +1137,13 @@ public enum EditGuard {
         // only the RENDERING of an otherwise-orphaned restored mark next to
         // a candidate mark changes.
         if a.kind == .punctuation {
-            return (false, nil, .unclassified)
+            // 260831-q2r experiment: when relaxed, fall through to the same
+            // accept path an ordinary word move takes below (`.wordOrderRepair`)
+            // instead of rejecting. Production behavior (`false`) is
+            // unchanged by this branch.
+            if !experimentalAllowPunctuationMove {
+                return (false, nil, .unclassified)
+            }
         }
         // A filler should be deleted (D-05), not relocated — moving a
         // filler token is not a defined permitted class.
