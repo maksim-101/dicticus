@@ -207,6 +207,82 @@ final class EditGuardDanglingPunctuationTests: XCTestCase {
         )
     }
 
+    // MARK: - Comma-dash adjacency (quick task 260831-ad8)
+    //
+    // `.planning/quick/260831-ap7-editguard-accept-policy-measurement/260831-ap7-REPORT.md`
+    // Q1: 909 accepted punctuation inserts across 548 August aiCleanup records included 13
+    // em-dash acceptances, 12 genuine improvements and one corruption — a comma immediately
+    // followed by an em-dash. Production record 2026-08-24T04:00:00.733Z, mode=aiCleanup,
+    // lang=en (`~/Library/Application Support/Dicticus/DebugRecordings/cleanup-2026-08-24.jsonl`):
+    // baseline has a trailing comma after "municipal" (`"...municipal, as well..."`); candidate
+    // drops that comma and joins the clause with an em-dash instead
+    // (`"...municipal—as well..."`). `EditDiff` pairs the baseline comma against a DIFFERENT
+    // candidate comma elsewhere in the sentence as a `.move`; `classifyMove` rejects every
+    // punctuation move unconditionally, so the baseline comma is RESTORED at its own anchor
+    // (immediately after "municipal"). The em-dash is a SEPARATE, independently accepted
+    // `.insert` (D-06 prosodic-punctuation, `punctuationOrCasing`) landing at the very next slot.
+    // Two-token punctuation run, ONE restored-baseline token + ONE accepted-candidate token —
+    // this is the SAME mixed-provenance shape `collapseMixedProvenancePunctuationRuns` (quick
+    // task 260830-dc4, "und.," defect) already owns.
+    //
+    // NON-REPRODUCTION FINDING: this record is dated 2026-08-24, six days BEFORE 260830-dc4's
+    // fix landed (commit 01f5ee7, 2026-08-30). Replayed against the CURRENT `EditGuard` — after
+    // that fix — the record no longer corrupts: `collapseMixedProvenancePunctuationRuns` already
+    // detects this exact mixed-source 2-token run and keeps only the candidate-sourced em-dash,
+    // dropping the restored comma. A corpus-wide sweep of the ENTIRE August corpus for
+    // `[,;:]\s*[—–]` in `post_gate.text` found exactly this one hit, and no others postdating
+    // 2026-08-30 — the defect class this quick task was scoped to fix was ALREADY fixed by
+    // yesterday's commit; nothing in `EditGuard.swift` changes as a result of this task. This
+    // test is a LOCKING regression test (not a RED-then-GREEN fix): it proves, by direct
+    // execution against the exact live strings, that the fix already covers this shape, and
+    // guards against a future regression re-opening it.
+    func testNoCommaDashAdjacency_governmentLevels_2026_08_24() {
+        let baseline = "please look for news from this year and if possible as recently as possible about failed or delayed projects either in government in Switzerland on either of the three levels of government, meaning federal, cantonal and municipal, as well as from the social sector."
+        let candidate = "Please look for news from this year, as recently as possible, about failed or delayed projects in the government in Switzerland at either of the three levels of government—federal, cantonal, and municipal—as well as from the social sector."
+
+        let out = guardOut(baseline, candidate, "en")
+        assertNoDoubledPunct(out)
+        for bad in [", —", ",—", "; —", ";—", ": —", ":—"] {
+            XCTAssertFalse(out.contains(bad), "comma/semicolon/colon immediately adjacent to a dash in: \(out)")
+        }
+    }
+
+    // MARK: - Accept-controls (260831-ad8): the 12 GENUINE em-dash insertions from the Q1
+    // measurement must survive completely untouched. Two are reproduced here from their own
+    // production records — proof that no comma-dash fix (had one been needed) could be allowed
+    // to strip a legitimate em-dash pair, and that the "already fixed, no code change" finding
+    // above is not masking a regression on the good cases.
+
+    /// Production record 2026-08-23T04:48:09.394Z — a genuine parenthetical em-dash pair the
+    /// LLM inserted around "or whatever you were addressing before". No baseline comma competes
+    /// for either dash's slot, so this exercises the guard's ordinary D-06 insert-accept path,
+    /// not the mixed-provenance collapse.
+    func testAcceptControl_migrationEmDash_2026_08_23() {
+        let baseline = "But of course this needs to be mapped out as well as planned really well beforehand. And then I reckon that not much is going on as of yet in the Superbase database. So migration or whatever you were addressing before shouldn't be too much of an issue."
+        let candidate = "But of course, this needs to be mapped out as well as planned really well beforehand. And then, I reckon that not much is going on as of yet in the Superbase database. So, migration—or whatever you were addressing before—shouldn't be too much of an issue."
+
+        let out = guardOut(baseline, candidate, "en")
+        XCTAssertTrue(
+            out.contains("migration—or whatever you were addressing before—shouldn't"),
+            "genuine em-dash parenthetical must survive verbatim: \(out)"
+        )
+    }
+
+    /// Production record 2026-08-23T07:53:42.449Z — a genuine em-dash pair around
+    /// "or, contrarily, getting worse", with a comma landing INSIDE the dash pair (not adjacent
+    /// to either dash) — the shape this fix must not disturb even though it involves both a
+    /// comma and dashes in the same short span.
+    func testAcceptControl_contrarilyEmDash_2026_08_23() {
+        let baseline = "I would say option 1 here and to your previous question another thought that crossed my mind if your own progress or data isn't deleted by yourself when you reset and you now have actually some kind of let's say track record or version you could see how you're improving or Contrarily getting worse over time. So not just how you're doing currently, but also in relation to your previous attempts. Because I can see this being something that you repeat yearly, for instance."
+        let candidate = "I would say option 1 here. To your previous question, another thought that crossed my mind: if your own progress or data isn't deleted by yourself when you reset, and you now have actually some kind of track record or version, you could see how you're improving—or, contrarily, getting worse—over time. So not just how you're doing currently, but also in relation to your previous attempts. Because I can see this being something that you repeat yearly, for instance."
+
+        let out = guardOut(baseline, candidate, "en")
+        XCTAssertTrue(
+            out.contains("improving—or, contrarily, getting worse—over time"),
+            "genuine em-dash pair with an interior comma must survive verbatim: \(out)"
+        )
+    }
+
     /// Corpus-wide punctuation-run provenance invariant (quick task 260830-dc4, Task 3): for
     /// every fixture in `EditGuardFixtures.all` (87 fixtures, 50 German), plus the 2026-08-30
     /// production record above, every maximal punctuation-mark run of length >= 2 in the guard's
@@ -275,6 +351,15 @@ final class EditGuardDanglingPunctuationTests: XCTestCase {
             language: "de",
             baseline: "Also ich möchte, dass du noch einmal genau recherchierst und mir einen Nahrungsergänzungsmittel sowie beispielhaften Trainingsplan zusammenstellst. Wie viel Resistancetraining braucht es wirklich? Ich bin zum Beispiel auch kein Fitnessstudio-Gänger. Ich finde das zu langweilig und... wenn nicht unbedingt notwendig dann möchte ich auch nicht einfach nur 30 minuten resistance training machen normalerweise mache ich so fünf minuten pro tag mit dem eigenen körpergewicht oder mit dem Tension Strap. Ich bin aber offen für Veränderung.",
             candidate: "Ich möchte, dass du noch einmal genau recherchierst und mir ein Nahrungsergänzungsmittel sowie einen beispielhaften Trainingsplan zusammenstellst. Wie viel Resistenztraining braucht es wirklich? Ich bin zum Beispiel auch kein Fitnessstudio-Gänger. Ich finde das zu langweilig und, wenn nicht unbedingt notwendig, möchte ich auch nicht einfach nur 30 Minuten Resistenztraining machen. Normalerweise mache ich so fünf Minuten pro Tag mit dem eigenen Körpergewicht oder mit dem Tension Strap. Ich bin aber offen für Veränderung."
+        ))
+        // Quick task 260831-ad8: the comma-dash adjacency record — widens this sweep's corpus so
+        // the mixed-source restored-comma / accepted-dash shape stays covered by the general
+        // invariant, not only by its own dedicated test above.
+        cases.append(SweepCase(
+            id: "record-2026-08-24T04-00-00-733Z",
+            language: "en",
+            baseline: "please look for news from this year and if possible as recently as possible about failed or delayed projects either in government in Switzerland on either of the three levels of government, meaning federal, cantonal and municipal, as well as from the social sector.",
+            candidate: "Please look for news from this year, as recently as possible, about failed or delayed projects in the government in Switzerland at either of the three levels of government—federal, cantonal, and municipal—as well as from the social sector."
         ))
 
         var nonVacuousCount = 0
