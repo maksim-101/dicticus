@@ -39,7 +39,12 @@ enum DicticusNotification {
         case .modelLoading:
             return "Models still loading, please wait a moment."
         case .transcriptionFailed:
-            return "Transcription failed. Check that models are loaded."
+            // Singular "model" (one ASR model on macOS) and points at the menu bar dropdown's
+            // WarmupRow, the one place the user can actually check model status — quick task
+            // 260831-nt6. This case now only fires for genuine failures (model not ready,
+            // recording-state errors, AVFoundation/WhisperKit throws); .noResult (no speech
+            // captured) was misrouted here and is now silent — see TranscriptionFailureRouter.
+            return "Transcription failed \u{2014} check model status in the menu bar."
         case .recordingFailed:
             return "Could not start recording. Check microphone permission."
         case .unexpectedLanguage:
