@@ -18,7 +18,7 @@ final class NotificationServiceTests: XCTestCase {
     func testTranscriptionFailedMessage() {
         let error = NSError(domain: "test", code: 1)
         let notification = DicticusNotification.transcriptionFailed(error)
-        XCTAssertEqual(notification.message, "Transcription failed. Check that models are loaded.")
+        XCTAssertEqual(notification.message, "Transcription failed \u{2014} check model status in the menu bar.")
     }
 
     func testRecordingFailedMessage() {

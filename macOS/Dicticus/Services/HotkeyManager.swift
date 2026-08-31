@@ -374,7 +374,8 @@ class HotkeyManager: ObservableObject {
     ///
     /// Per D-01: Release triggers transcription and paste.
     /// Per D-02: Short presses (<0.3s) silently discarded (TranscriptionError.tooShort).
-    /// Per D-16: Silence-only recordings silently discarded.
+    /// Per D-16: Silence-only recordings silently discarded (includes .noResult — see
+    /// TranscriptionFailureRouter, quick task 260831-nt6).
     func handleKeyUp(mode: DictationMode) {
         guard isKeyDown else { return }
 
@@ -454,18 +455,19 @@ class HotkeyManager: ObservableObject {
             } catch is CancellationError {
                 // Task cancelled — silent
             } catch let error as TranscriptionError {
-                switch error {
-                case .tooShort:
-                    break  // D-02: Silent discard
-                case .silenceOnly:
-                    break  // D-16: No notification for silence
-                case .unexpectedLanguage:
+                // D-02/D-16 + quick task 260831-nt6: silent vs. notify-worthy is decided by
+                // TranscriptionFailureRouter, not inline here — see its doc comment for why
+                // .noResult joins .tooShort/.silenceOnly as silent.
+                switch TranscriptionFailureRouter.route(error) {
+                case .silent:
+                    break
+                case .notifyUnexpectedLanguage:
                     // Non-Latin script detected — notify user (not silent, user needs to know
                     // why text was not injected)
                     let notification = DicticusNotification.unexpectedLanguage
                     self.lastPostedNotification = notification
                     NotificationService.shared.post(notification)
-                default:
+                case .notifyTranscriptionFailed:
                     let notification = DicticusNotification.transcriptionFailed(error)
                     self.lastPostedNotification = notification
                     NotificationService.shared.post(notification)
