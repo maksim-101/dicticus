@@ -490,4 +490,44 @@ final class EditGuardDanglingPunctuationTests: XCTestCase {
             "span must render exactly as the candidate did, with the deleted ellipsis gone: \(out)"
         )
     }
+
+    /// Negative arm 1 of the new `collapseMixedProvenancePunctuationRuns`
+    /// drop rule: a lone restored mark whose OWN baseline neighbour was NOT
+    /// punctuation (a baseline run of length 1) must survive untouched —
+    /// `WorkToken.restoredFromDestroyedBaselineRun` is false for exactly
+    /// this shape, so the new arm never fires on it. Reuses 260831-gd9's own
+    /// "in.clawed" production record: the SAME rejected-`.substitute`
+    /// restore machinery this quick task also touches (the second
+    /// construction site, lines ~2060-2063) must still restore this mark
+    /// verbatim, not drop it — proven directly here, not merely inferred
+    /// from gd9's own regression test staying green.
+    func testNegativeArm_loneMarkFromSingleMarkBaselineRun_survives_260901qyi() {
+        let baseline = "Check also in.clawed directory for the file."
+        let candidate = "Check also in the clawed directory for the file."
+        let out = guardOut(baseline, candidate, "en")
+        XCTAssertTrue(
+            out.contains("in.clawed directory"),
+            "a restored mark from a baseline run of length 1 must render, never be dropped: \(out)"
+        )
+    }
+
+    /// Negative arm 2 of the new `collapseMixedProvenancePunctuationRuns`
+    /// drop rule: a restored mark that ends up ADJACENT to another
+    /// punctuation token in the assembled output is a run of length >= 2,
+    /// not length 1 — it can never reach the new lone-remnant arm (which is
+    /// gated on `run.count == 1`) and stays owned by the pre-existing
+    /// mixed-run arm this quick task leaves byte-unchanged. Reuses
+    /// 260831-ad8's "government levels" production record.
+    func testNegativeArm_markAdjacentToAnotherPunctuationToken_staysWithMixedRunPass_260901qyi() {
+        let record = EditGuardFixtures.productionRecords.first {
+            $0.id == "record-2026-08-24T04-00-00-733Z"
+        }!
+        let out = guardOut(record.baseline, record.candidate, record.language)
+        for bad in [", —", ",—", "; —", ";—", ": —", ":—"] {
+            XCTAssertFalse(
+                out.contains(bad),
+                "a restored mark adjacent to a surviving em-dash must still be resolved by the mixed-run pass, not silently dropped by the new lone-remnant arm: \(out)"
+            )
+        }
+    }
 }
