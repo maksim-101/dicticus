@@ -38,9 +38,13 @@ import XCTest
 ///   `EditGuardFixtures.all` + 11 `productionRecords`).
 /// - P3-extension: 11 production records swept, `ledgeredCount=2` (both
 ///   citing the same known residual below).
-/// - P5: `casesExercising=1 totalTier2Violations=2` (of 98 total cases) — one
-///   record, both violations already covered by the same ledger entry as
-///   P3-extension.
+/// - P5: `adjacenciesEvaluated=1265 casesExercising=98
+///   totalTier2Violations=2` (of 98 total cases). Non-vacuity is asserted on
+///   adjacencies EXAMINED, deliberately not on violations FOUND: the only two
+///   violations are the ledgered em-dash residual below, so a
+///   violations-based counter would hit zero the moment that filed todo is
+///   fixed and would FAIL this test in response to the fix. Both violations
+///   are covered by the same ledger entry as P3-extension.
 ///
 /// One genuine, previously-unnoticed low-severity residual was FOUND by P4
 /// (and independently re-surfaced by P3-extension/P5 under their own coarser
@@ -292,6 +296,7 @@ final class EditGuardMaterializeInvariantTests: XCTestCase {
     func testFullTokenAdjacencyProvenance_P5() {
         struct Violation { let caseID: String; let pair: String }
         var violations: [Violation] = []
+        var adjacenciesEvaluated = 0
         var casesExercising = 0
 
         for c in corpus {
@@ -299,20 +304,34 @@ final class EditGuardMaterializeInvariantTests: XCTestCase {
             let v = EditGuardMergeAtomicityTests.neitherSourceViolations(
                 output: out, sourceA: c.baseline, sourceB: c.candidate
             )
-            guard !v.tier2.isEmpty else { continue }
-            casesExercising += 1
+            // Non-vacuity is measured on adjacencies EXAMINED, never on
+            // violations FOUND. Counting violations would make this property
+            // self-defeating: today's only two violations are the ledgered
+            // em-dash residual, so fixing that filed todo would drive a
+            // violation-based counter to zero and FAIL this test — punishing
+            // the fix. Examined-count instead collapses only if the sweep
+            // genuinely stops inspecting the corpus, which is the actual
+            // vacuity risk (memory feedback_gate_blind_to_firing_path).
+            adjacenciesEvaluated += v.tier2Evaluated
+            if v.tier2Evaluated > 0 { casesExercising += 1 }
             for pair in v.tier2 {
                 violations.append(Violation(caseID: c.id, pair: pair))
             }
         }
 
-        print("[P5 non-vacuity] casesExercising=\(casesExercising) totalTier2Violations=\(violations.count) " +
+        print("[P5 non-vacuity] adjacenciesEvaluated=\(adjacenciesEvaluated) " +
+              "casesExercising=\(casesExercising) totalTier2Violations=\(violations.count) " +
               "(of \(corpus.count) total cases)")
         XCTAssertGreaterThan(
+            adjacenciesEvaluated, 0,
+            "P5 evaluated ZERO full-token adjacencies across the whole corpus — the property " +
+            "never inspected anything and is VACUOUS (memory feedback_gate_blind_to_firing_path). " +
+            "Widen the corpus before trusting this test."
+        )
+        XCTAssertGreaterThan(
             casesExercising, 0,
-            "P5 exercised ZERO cases across the whole corpus — the property never fired on " +
-            "anything and is VACUOUS (memory feedback_gate_blind_to_firing_path). Widen the " +
-            "corpus before trusting this test."
+            "P5 exercised ZERO cases across the whole corpus — see adjacenciesEvaluated's " +
+            "failure message; the same vacuity risk applies per-case."
         )
 
         var unledgered: [String] = []
