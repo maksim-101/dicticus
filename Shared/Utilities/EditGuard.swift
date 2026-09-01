@@ -1379,61 +1379,6 @@ public enum EditGuard {
         /// .testCleanupPath` once the guard was wired into the real
         /// pipeline (Task 1). See `revertSpuriousSentenceInitialCapitalization`.
         let baselineCasingAlternative: String?
-        /// Quick task 260901-qyi ("possible.points" defect, narrowed same task
-        /// after a regression — see `isPartOfDictatedEllipsisRun`): true only
-        /// for a `.restoredBaseline` "." token that was, in the SOURCE
-        /// baseline text, one member of a run of 3+ consecutive "." tokens
-        /// (a literal dictated ellipsis) whose OTHER members were
-        /// independently deleted or otherwise did not survive to render.
-        /// Deliberately narrow, NOT "any restored mark next to any other
-        /// baseline mark" — see `isPartOfDictatedEllipsisRun`'s doc comment
-        /// for the regression that widened predicate caused. Non-defaulted
-        /// for the same reason `source` is non-defaulted above: only the two
-        /// restore paths ever set it true (`restorationTargets`'s loop and
-        /// the rejected-`.substitute` punctuation restore branch); every
-        /// candidate-sourced or pass-through construction sets it false, or
-        /// forwards whatever the token it is re-wrapping already carried.
-        /// Consumed solely by `collapseMixedProvenancePunctuationRuns`'s
-        /// lone-remnant arm — see that function's doc comment for why a mark
-        /// from a baseline run of length 1 (gd9's "in.clawed", 9n7's
-        /// "labeled. So") must NOT be treated the same as one from a
-        /// destroyed run.
-        let restoredFromDestroyedBaselineRun: Bool
-    }
-
-    /// Whether baseline index `index` was, in the SOURCE baseline text, one
-    /// member of a run of 3+ consecutive "." tokens — a literal dictated
-    /// ellipsis, the only multi-mark shape this codebase has ever observed
-    /// in the wild. Deliberately narrow: an earlier version of this check
-    /// asked only `kind == .punctuation` of either baseline neighbour, which
-    /// also matched MIXED pairs like `: "`, `". `, `!?`, `, —`, `")` —
-    /// `EditGuardTokenizer` emits every non-alphanumeric character as its
-    /// own punctuation token, so any two adjacent marks of ANY kind counted
-    /// as a "run". When one of those marks was later restored alone (moved
-    /// by the LLM, rejected, restored), `collapseMixedProvenancePunctuationRuns`'s
-    /// lone-remnant arm silently DELETED it — e.g. a colon before a restored
-    /// quote, or the "?" that should have survived "amazing!?". Quick task
-    /// 260901-qyi found and fixed this regression; see that task's SUMMARY
-    /// for the reproduction cases. Requiring same-text "." AND length >= 3
-    /// restricts the arm to the one shape it was ever meant to cover.
-    /// Used only to set `WorkToken.restoredFromDestroyedBaselineRun` at the
-    /// two restore-construction sites in `materialize`; a plain local index
-    /// check, not a diff-level concept, so it belongs beside `WorkToken`
-    /// rather than inside `materialize` itself.
-    private static func isPartOfDictatedEllipsisRun(_ index: Int, in baseline: [Token]) -> Bool {
-        guard index >= 0, index < baseline.count,
-              baseline[index].kind == .punctuation, baseline[index].text == "." else {
-            return false
-        }
-        var runStart = index
-        while runStart - 1 >= 0, baseline[runStart - 1].kind == .punctuation, baseline[runStart - 1].text == "." {
-            runStart -= 1
-        }
-        var runEnd = index
-        while runEnd + 1 < baseline.count, baseline[runEnd + 1].kind == .punctuation, baseline[runEnd + 1].text == "." {
-            runEnd += 1
-        }
-        return runEnd - runStart + 1 >= 3
     }
 
     private static let germanArticleTokens: Set<String> = [
@@ -1958,8 +1903,7 @@ public enum EditGuard {
         }.sorted { $0.bIdx < $1.bIdx }
 
         for (bIdx, a) in restorationTargets {
-            let restoredFromDestroyedRun = a.kind == .punctuation && isPartOfDictatedEllipsisRun(a.index, in: baseline)
-            let restored = WorkToken(text: a.text, normalized: a.normalized, kind: a.kind, trailing: a.trailing, sentenceIndex: a.sentenceIndex, source: .restoredBaseline, baselineCasingAlternative: nil, restoredFromDestroyedBaselineRun: restoredFromDestroyedRun)
+            let restored = WorkToken(text: a.text, normalized: a.normalized, kind: a.kind, trailing: a.trailing, sentenceIndex: a.sentenceIndex, source: .restoredBaseline, baselineCasingAlternative: nil)
 
             var anchor: Int?
             var scan = bIdx - 1
@@ -2059,7 +2003,7 @@ public enum EditGuard {
                 switch edit.kind {
                 case .keep:
                     if let b = edit.to {
-                        output.append(WorkToken(text: b.text, normalized: b.normalized, kind: b.kind, trailing: trailingFor(candidateIndex: i, ownTrailing: b.trailing), sentenceIndex: b.sentenceIndex, source: .candidate, baselineCasingAlternative: nil, restoredFromDestroyedBaselineRun: false))
+                        output.append(WorkToken(text: b.text, normalized: b.normalized, kind: b.kind, trailing: trailingFor(candidateIndex: i, ownTrailing: b.trailing), sentenceIndex: b.sentenceIndex, source: .candidate, baselineCasingAlternative: nil))
                     }
                 case .substitute:
                     if v.accepted, let a = edit.from, let b = edit.to {
@@ -2068,7 +2012,7 @@ public enum EditGuard {
                             && candidateFirstWordIndex[b.sentenceIndex] == b.index
                         output.append(WorkToken(
                             text: b.text, normalized: b.normalized, kind: b.kind, trailing: trailingFor(candidateIndex: i, ownTrailing: b.trailing), sentenceIndex: b.sentenceIndex,
-                            source: .candidate, baselineCasingAlternative: isCasingOnly ? a.text : nil, restoredFromDestroyedBaselineRun: false
+                            source: .candidate, baselineCasingAlternative: isCasingOnly ? a.text : nil
                         ))
                     } else if let a = edit.from, let b = edit.to {
                         // Gap-local remap (260724-j96): render the token
@@ -2116,22 +2060,17 @@ public enum EditGuard {
                         let restoredTrailing = renderToken.kind == .punctuation
                             ? renderToken.trailing
                             : trailingFor(candidateIndex: i, ownTrailing: b.trailing)
-                        // Same predicate as the restorationTargets loop above (quick task
-                        // 260901-qyi): a rejected-substitute punctuation restore is just as
-                        // capable of being the lone survivor of a destroyed baseline run as a
-                        // rejected delete/move is.
-                        let restoredFromDestroyedRun = renderToken.kind == .punctuation && isPartOfDictatedEllipsisRun(renderToken.index, in: baseline)
-                        output.append(WorkToken(text: renderToken.text, normalized: renderToken.normalized, kind: renderToken.kind, trailing: restoredTrailing, sentenceIndex: b.sentenceIndex, source: .restoredBaseline, baselineCasingAlternative: nil, restoredFromDestroyedBaselineRun: restoredFromDestroyedRun))
+                        output.append(WorkToken(text: renderToken.text, normalized: renderToken.normalized, kind: renderToken.kind, trailing: restoredTrailing, sentenceIndex: b.sentenceIndex, source: .restoredBaseline, baselineCasingAlternative: nil))
                     }
                 case .insert:
                     if v.accepted, let b = edit.to {
-                        output.append(WorkToken(text: b.text, normalized: b.normalized, kind: b.kind, trailing: trailingFor(candidateIndex: i, ownTrailing: b.trailing), sentenceIndex: b.sentenceIndex, source: .candidate, baselineCasingAlternative: nil, restoredFromDestroyedBaselineRun: false))
+                        output.append(WorkToken(text: b.text, normalized: b.normalized, kind: b.kind, trailing: trailingFor(candidateIndex: i, ownTrailing: b.trailing), sentenceIndex: b.sentenceIndex, source: .candidate, baselineCasingAlternative: nil))
                     }
                     // rejected insert -> omit entirely; `trailingFor` on
                     // the PRECEDING emitted token already bridges this gap.
                 case .move:
                     if v.accepted, let b = edit.to {
-                        output.append(WorkToken(text: b.text, normalized: b.normalized, kind: b.kind, trailing: trailingFor(candidateIndex: i, ownTrailing: b.trailing), sentenceIndex: b.sentenceIndex, source: .candidate, baselineCasingAlternative: nil, restoredFromDestroyedBaselineRun: false))
+                        output.append(WorkToken(text: b.text, normalized: b.normalized, kind: b.kind, trailing: trailingFor(candidateIndex: i, ownTrailing: b.trailing), sentenceIndex: b.sentenceIndex, source: .candidate, baselineCasingAlternative: nil))
                     }
                     // rejected move -> omit here; restored separately at
                     // its baseline anchor, and the gap this leaves is
@@ -2194,8 +2133,7 @@ public enum EditGuard {
             result[i] = WorkToken(
                 text: result[i].text, normalized: result[i].normalized, kind: result[i].kind,
                 trailing: " ", sentenceIndex: result[i].sentenceIndex,
-                source: result[i].source, baselineCasingAlternative: result[i].baselineCasingAlternative,
-                restoredFromDestroyedBaselineRun: result[i].restoredFromDestroyedBaselineRun
+                source: result[i].source, baselineCasingAlternative: result[i].baselineCasingAlternative
             )
         }
         return result
@@ -2253,57 +2191,6 @@ public enum EditGuard {
     /// punctuation token standing between the run's word/numeric neighbours
     /// (a mixed run has 2+ tokens and at least one candidate-sourced token
     /// always survives), so it can never trip that check either.
-    ///
-    /// **Second arm (quick task 260901-qyi, "possible.points" defect):** the
-    /// mixed-run arm above is structurally blind to a run of length 1 — a
-    /// SINGLE restored "." that is the lone survivor of what was, in the
-    /// baseline, a run of 3+ consecutive "." tokens (a dictated ellipsis)
-    /// whose OTHER members were independently, correctly deleted. That mark
-    /// passes straight through the `run.count < 2` branch untouched, ends up glued on both sides
-    /// (`bindPunctuationLeft`'s own ellipsis guard requires the NEXT two
-    /// tokens to still be "." before it will decline to bind, which they no
-    /// longer are once its siblings are gone), and renders a mark sequence
-    /// present in neither input — the fifth member of the same "neither
-    /// source" defect family the mixed-run arm above exists to close, in a
-    /// shape that arm cannot see because it never had 2+ tokens to compare.
-    ///
-    /// Fix: drop the lone mark outright (`WorkToken
-    /// .restoredFromDestroyedBaselineRun` — set only at the two restore
-    /// construction sites in `materialize`, true only when this SPECIFIC
-    /// mark was itself part of a 3+ run of "." tokens in the baseline; see
-    /// `isPartOfDictatedEllipsisRun`) rather than re-trailing it to close the
-    /// gap. A considered alternative — give the
-    /// restored mark the trailing of the baseline RUN it came from (the
-    /// ellipsis's own final space) instead of dropping it — was rejected at
-    /// planning time: a single "." where the baseline had "..." and the
-    /// candidate had nothing is a mark sequence present in NEITHER input,
-    /// exactly the "worse than both inputs" splice class 260830-dc4 exists
-    /// to close, and it injects a mid-clause sentence boundary the user
-    /// never dictated as one. Dropping instead makes the output byte-
-    /// identical to the candidate at this span — which is what the
-    /// candidate actually said, and dc4's own safety argument carries over
-    /// unchanged: `multisetInvariantHolds` excludes punctuation entirely and
-    /// `classifyDelete` already discards baseline punctuation
-    /// unconditionally, so dropping one more mark cannot change
-    /// meaning-bearing content.
-    ///
-    /// `bridgeGluedWordTokens` has already run by this point in the chain
-    /// (`materialize`'s call site, `revertSpuriousSentenceInitialCapitalization
-    /// (bindPunctuationLeft(collapseMixedProvenancePunctuationRuns
-    /// (bridgeGluedWordTokens(output))))`) and cannot repair a seam this pass
-    /// opens up, so this arm bridges it locally: when the dropped mark's
-    /// left (already-emitted) neighbour has an empty trailing, the left
-    /// neighbour gets a separator — preferring the dropped mark's own
-    /// trailing when non-empty, one plain space otherwise. (An earlier
-    /// version also gated this on the token after the dropped mark not
-    /// being punctuation, but `runEnd` is already the maximal end of the
-    /// punctuation run by construction, so `tokens[runEnd + 1]` is never
-    /// punctuation — that check could never be false and was removed.)
-    /// Skipping this
-    /// would leave the left/right word neighbours glued
-    /// (`renderingInvariantHolds` would then fail the WHOLE guard result
-    /// closed and silently revert the entire utterance to the rules
-    /// baseline — a far larger regression than the defect this arm fixes).
     private static func collapseMixedProvenancePunctuationRuns(_ tokens: [WorkToken]) -> [WorkToken] {
         guard tokens.count > 1 else { return tokens }
         var result: [WorkToken] = []
@@ -2319,20 +2206,6 @@ public enum EditGuard {
                 runEnd += 1
             }
             let run = Array(tokens[i...runEnd])
-            if run.count == 1, run[0].source == .restoredBaseline, run[0].restoredFromDestroyedBaselineRun {
-                let dropped = run[0]
-                if let last = result.last, last.trailing.isEmpty {
-                    result[result.count - 1] = WorkToken(
-                        text: last.text, normalized: last.normalized, kind: last.kind,
-                        trailing: dropped.trailing.isEmpty ? " " : dropped.trailing,
-                        sentenceIndex: last.sentenceIndex, source: last.source,
-                        baselineCasingAlternative: last.baselineCasingAlternative,
-                        restoredFromDestroyedBaselineRun: last.restoredFromDestroyedBaselineRun
-                    )
-                }
-                i = runEnd + 1
-                continue
-            }
             if run.count < 2 || run.allSatisfy({ $0.source == run[0].source }) {
                 result.append(contentsOf: run)
             } else {
@@ -2341,8 +2214,7 @@ public enum EditGuard {
                     survivors[survivors.count - 1] = WorkToken(
                         text: last.text, normalized: last.normalized, kind: last.kind,
                         trailing: originalLastTrailing, sentenceIndex: last.sentenceIndex,
-                        source: last.source, baselineCasingAlternative: last.baselineCasingAlternative,
-                        restoredFromDestroyedBaselineRun: last.restoredFromDestroyedBaselineRun
+                        source: last.source, baselineCasingAlternative: last.baselineCasingAlternative
                     )
                 }
                 result.append(contentsOf: survivors)
@@ -2399,8 +2271,7 @@ public enum EditGuard {
             result[i] = WorkToken(
                 text: result[i].text, normalized: result[i].normalized, kind: result[i].kind,
                 trailing: "", sentenceIndex: result[i].sentenceIndex,
-                source: result[i].source, baselineCasingAlternative: result[i].baselineCasingAlternative,
-                restoredFromDestroyedBaselineRun: result[i].restoredFromDestroyedBaselineRun
+                source: result[i].source, baselineCasingAlternative: result[i].baselineCasingAlternative
             )
         }
         return result
@@ -2472,7 +2343,7 @@ public enum EditGuard {
             let isGenuinelySentenceInitial = i == 0 ||
                 (tokens[i - 1].kind == .punctuation && sentenceTerminalMarks.contains(tokens[i - 1].text))
             guard !isGenuinelySentenceInitial else { return t }
-            return WorkToken(text: alt, normalized: t.normalized, kind: t.kind, trailing: t.trailing, sentenceIndex: t.sentenceIndex, source: t.source, baselineCasingAlternative: nil, restoredFromDestroyedBaselineRun: t.restoredFromDestroyedBaselineRun)
+            return WorkToken(text: alt, normalized: t.normalized, kind: t.kind, trailing: t.trailing, sentenceIndex: t.sentenceIndex, source: t.source, baselineCasingAlternative: nil)
         }
     }
 
