@@ -1379,37 +1379,61 @@ public enum EditGuard {
         /// .testCleanupPath` once the guard was wired into the real
         /// pipeline (Task 1). See `revertSpuriousSentenceInitialCapitalization`.
         let baselineCasingAlternative: String?
-        /// Quick task 260901-qyi ("possible.points" defect): true only for a
-        /// `.restoredBaseline` punctuation token whose BASELINE neighbour
-        /// (index - 1 or index + 1 in the `baseline` token array) was ALSO
-        /// punctuation — i.e. this mark is one member of what was, in the
-        /// source text, a multi-mark run (an ellipsis, a doubled mark) of
-        /// which the OTHER members were independently deleted or otherwise
-        /// did not survive to render. Non-defaulted for the same reason
-        /// `source` is non-defaulted above: only the two restore paths ever
-        /// set it true (`restorationTargets`'s loop and the rejected-
-        /// `.substitute` punctuation restore branch); every candidate-
-        /// sourced or pass-through construction sets it false, or forwards
-        /// whatever the token it is re-wrapping already carried. Consumed
-        /// solely by `collapseMixedProvenancePunctuationRuns`'s lone-remnant
-        /// arm — see that function's doc comment for why a mark from a
-        /// baseline run of length 1 (gd9's "in.clawed", 9n7's "labeled. So")
-        /// must NOT be treated the same as one from a destroyed run.
+        /// Quick task 260901-qyi ("possible.points" defect, narrowed same task
+        /// after a regression — see `isPartOfDictatedEllipsisRun`): true only
+        /// for a `.restoredBaseline` "." token that was, in the SOURCE
+        /// baseline text, one member of a run of 3+ consecutive "." tokens
+        /// (a literal dictated ellipsis) whose OTHER members were
+        /// independently deleted or otherwise did not survive to render.
+        /// Deliberately narrow, NOT "any restored mark next to any other
+        /// baseline mark" — see `isPartOfDictatedEllipsisRun`'s doc comment
+        /// for the regression that widened predicate caused. Non-defaulted
+        /// for the same reason `source` is non-defaulted above: only the two
+        /// restore paths ever set it true (`restorationTargets`'s loop and
+        /// the rejected-`.substitute` punctuation restore branch); every
+        /// candidate-sourced or pass-through construction sets it false, or
+        /// forwards whatever the token it is re-wrapping already carried.
+        /// Consumed solely by `collapseMixedProvenancePunctuationRuns`'s
+        /// lone-remnant arm — see that function's doc comment for why a mark
+        /// from a baseline run of length 1 (gd9's "in.clawed", 9n7's
+        /// "labeled. So") must NOT be treated the same as one from a
+        /// destroyed run.
         let restoredFromDestroyedBaselineRun: Bool
     }
 
     /// Whether baseline index `index` was, in the SOURCE baseline text, one
-    /// member of a punctuation run of length >= 2 (its immediate baseline
-    /// neighbour on either side was also a punctuation token) — e.g. any of
-    /// the three "." tokens of a literal "...", or either mark of a doubled
-    /// "!!"/"??". Used only to set `WorkToken.restoredFromDestroyedBaselineRun`
-    /// at the two restore-construction sites in `materialize`; a plain local
-    /// index check, not a diff-level concept, so it belongs beside `WorkToken`
+    /// member of a run of 3+ consecutive "." tokens — a literal dictated
+    /// ellipsis, the only multi-mark shape this codebase has ever observed
+    /// in the wild. Deliberately narrow: an earlier version of this check
+    /// asked only `kind == .punctuation` of either baseline neighbour, which
+    /// also matched MIXED pairs like `: "`, `". `, `!?`, `, —`, `")` —
+    /// `EditGuardTokenizer` emits every non-alphanumeric character as its
+    /// own punctuation token, so any two adjacent marks of ANY kind counted
+    /// as a "run". When one of those marks was later restored alone (moved
+    /// by the LLM, rejected, restored), `collapseMixedProvenancePunctuationRuns`'s
+    /// lone-remnant arm silently DELETED it — e.g. a colon before a restored
+    /// quote, or the "?" that should have survived "amazing!?". Quick task
+    /// 260901-qyi found and fixed this regression; see that task's SUMMARY
+    /// for the reproduction cases. Requiring same-text "." AND length >= 3
+    /// restricts the arm to the one shape it was ever meant to cover.
+    /// Used only to set `WorkToken.restoredFromDestroyedBaselineRun` at the
+    /// two restore-construction sites in `materialize`; a plain local index
+    /// check, not a diff-level concept, so it belongs beside `WorkToken`
     /// rather than inside `materialize` itself.
-    private static func isPartOfMultiMarkBaselineRun(_ index: Int, in baseline: [Token]) -> Bool {
-        let prevIsPunctuation = index - 1 >= 0 && index - 1 < baseline.count && baseline[index - 1].kind == .punctuation
-        let nextIsPunctuation = index + 1 >= 0 && index + 1 < baseline.count && baseline[index + 1].kind == .punctuation
-        return prevIsPunctuation || nextIsPunctuation
+    private static func isPartOfDictatedEllipsisRun(_ index: Int, in baseline: [Token]) -> Bool {
+        guard index >= 0, index < baseline.count,
+              baseline[index].kind == .punctuation, baseline[index].text == "." else {
+            return false
+        }
+        var runStart = index
+        while runStart - 1 >= 0, baseline[runStart - 1].kind == .punctuation, baseline[runStart - 1].text == "." {
+            runStart -= 1
+        }
+        var runEnd = index
+        while runEnd + 1 < baseline.count, baseline[runEnd + 1].kind == .punctuation, baseline[runEnd + 1].text == "." {
+            runEnd += 1
+        }
+        return runEnd - runStart + 1 >= 3
     }
 
     private static let germanArticleTokens: Set<String> = [
@@ -1934,7 +1958,7 @@ public enum EditGuard {
         }.sorted { $0.bIdx < $1.bIdx }
 
         for (bIdx, a) in restorationTargets {
-            let restoredFromDestroyedRun = a.kind == .punctuation && isPartOfMultiMarkBaselineRun(a.index, in: baseline)
+            let restoredFromDestroyedRun = a.kind == .punctuation && isPartOfDictatedEllipsisRun(a.index, in: baseline)
             let restored = WorkToken(text: a.text, normalized: a.normalized, kind: a.kind, trailing: a.trailing, sentenceIndex: a.sentenceIndex, source: .restoredBaseline, baselineCasingAlternative: nil, restoredFromDestroyedBaselineRun: restoredFromDestroyedRun)
 
             var anchor: Int?
@@ -2096,7 +2120,7 @@ public enum EditGuard {
                         // 260901-qyi): a rejected-substitute punctuation restore is just as
                         // capable of being the lone survivor of a destroyed baseline run as a
                         // rejected delete/move is.
-                        let restoredFromDestroyedRun = renderToken.kind == .punctuation && isPartOfMultiMarkBaselineRun(renderToken.index, in: baseline)
+                        let restoredFromDestroyedRun = renderToken.kind == .punctuation && isPartOfDictatedEllipsisRun(renderToken.index, in: baseline)
                         output.append(WorkToken(text: renderToken.text, normalized: renderToken.normalized, kind: renderToken.kind, trailing: restoredTrailing, sentenceIndex: b.sentenceIndex, source: .restoredBaseline, baselineCasingAlternative: nil, restoredFromDestroyedBaselineRun: restoredFromDestroyedRun))
                     }
                 case .insert:
@@ -2232,10 +2256,10 @@ public enum EditGuard {
     ///
     /// **Second arm (quick task 260901-qyi, "possible.points" defect):** the
     /// mixed-run arm above is structurally blind to a run of length 1 — a
-    /// SINGLE restored mark that is the lone survivor of what was, in the
-    /// baseline, a multi-mark run (an ellipsis) whose OTHER members were
-    /// independently, correctly deleted. That mark passes straight through
-    /// the `run.count < 2` branch untouched, ends up glued on both sides
+    /// SINGLE restored "." that is the lone survivor of what was, in the
+    /// baseline, a run of 3+ consecutive "." tokens (a dictated ellipsis)
+    /// whose OTHER members were independently, correctly deleted. That mark
+    /// passes straight through the `run.count < 2` branch untouched, ends up glued on both sides
     /// (`bindPunctuationLeft`'s own ellipsis guard requires the NEXT two
     /// tokens to still be "." before it will decline to bind, which they no
     /// longer are once its siblings are gone), and renders a mark sequence
@@ -2246,8 +2270,9 @@ public enum EditGuard {
     /// Fix: drop the lone mark outright (`WorkToken
     /// .restoredFromDestroyedBaselineRun` — set only at the two restore
     /// construction sites in `materialize`, true only when this SPECIFIC
-    /// mark's own baseline neighbour was also punctuation) rather than
-    /// re-trailing it to close the gap. A considered alternative — give the
+    /// mark was itself part of a 3+ run of "." tokens in the baseline; see
+    /// `isPartOfDictatedEllipsisRun`) rather than re-trailing it to close the
+    /// gap. A considered alternative — give the
     /// restored mark the trailing of the baseline RUN it came from (the
     /// ellipsis's own final space) instead of dropping it — was rejected at
     /// planning time: a single "." where the baseline had "..." and the
@@ -2267,10 +2292,14 @@ public enum EditGuard {
     /// (bindPunctuationLeft(collapseMixedProvenancePunctuationRuns
     /// (bridgeGluedWordTokens(output))))`) and cannot repair a seam this pass
     /// opens up, so this arm bridges it locally: when the dropped mark's
-    /// left (already-emitted) neighbour has an empty trailing and the token
-    /// immediately after the dropped mark is not itself punctuation, the left
+    /// left (already-emitted) neighbour has an empty trailing, the left
     /// neighbour gets a separator — preferring the dropped mark's own
-    /// trailing when non-empty, one plain space otherwise. Skipping this
+    /// trailing when non-empty, one plain space otherwise. (An earlier
+    /// version also gated this on the token after the dropped mark not
+    /// being punctuation, but `runEnd` is already the maximal end of the
+    /// punctuation run by construction, so `tokens[runEnd + 1]` is never
+    /// punctuation — that check could never be false and was removed.)
+    /// Skipping this
     /// would leave the left/right word neighbours glued
     /// (`renderingInvariantHolds` would then fail the WHOLE guard result
     /// closed and silently revert the entire utterance to the rules
@@ -2293,16 +2322,13 @@ public enum EditGuard {
             if run.count == 1, run[0].source == .restoredBaseline, run[0].restoredFromDestroyedBaselineRun {
                 let dropped = run[0]
                 if let last = result.last, last.trailing.isEmpty {
-                    let rightIsPunctuation = runEnd + 1 < tokens.count && tokens[runEnd + 1].kind == .punctuation
-                    if !rightIsPunctuation {
-                        result[result.count - 1] = WorkToken(
-                            text: last.text, normalized: last.normalized, kind: last.kind,
-                            trailing: dropped.trailing.isEmpty ? " " : dropped.trailing,
-                            sentenceIndex: last.sentenceIndex, source: last.source,
-                            baselineCasingAlternative: last.baselineCasingAlternative,
-                            restoredFromDestroyedBaselineRun: last.restoredFromDestroyedBaselineRun
-                        )
-                    }
+                    result[result.count - 1] = WorkToken(
+                        text: last.text, normalized: last.normalized, kind: last.kind,
+                        trailing: dropped.trailing.isEmpty ? " " : dropped.trailing,
+                        sentenceIndex: last.sentenceIndex, source: last.source,
+                        baselineCasingAlternative: last.baselineCasingAlternative,
+                        restoredFromDestroyedBaselineRun: last.restoredFromDestroyedBaselineRun
+                    )
                 }
                 i = runEnd + 1
                 continue
