@@ -538,6 +538,19 @@ class TextProcessingService: ObservableObject {
             for: .transcriptionist,
             context: mode == .aiCleanup ? context : .default
         )
+
+        // Quick task 260901-fs1: capture immediately before record assembly —
+        // the true end of the pipeline. Nothing mutates `processedText`
+        // between this line and `return processedText` below (Step 4's
+        // history save reads it but does not write it), so this is
+        // byte-identical to both the saved `TranscriptionEntry.text` and the
+        // return value the caller pastes. Deliberately re-read here rather
+        // than reusing `dbgPostSwissNum` above: capturing at the literal
+        // last possible point means a future insertion between the two
+        // capture sites can never silently desync `final` from what the
+        // user actually received.
+        let dbgFinal = processedText
+
         let record = DebugCleanupRecord(
             ts: DebugRecorder.iso8601Timestamp(),
             session_id: UUID().uuidString,
@@ -564,7 +577,8 @@ class TextProcessingService: ObservableObject {
                 llm_prompt: llmPromptEntry,
                 llm_raw: llmRawEntry,
                 post_gate: dbgGateEntry,
-                post_swiss_num: .init(text: dbgPostSwissNum, ms: dbgPostSwissNumMs)
+                post_swiss_num: .init(text: dbgPostSwissNum, ms: dbgPostSwissNumMs),
+                finalStage: .init(text: dbgFinal, ms: 0)
             ),
             dictionary_context_keys: dbgDictKeys,
             dictionary_replacements: dbgReplacements.map { DebugCleanupRecord.DictionaryReplacementEntry(key: $0.key, from: $0.from, to: $0.to) },

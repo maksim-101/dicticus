@@ -240,6 +240,37 @@ public struct DebugCleanupRecord: Codable, Sendable {
         public let llm_raw: LLMRawEntry?
         public let post_gate: GateEntry?
         public let post_swiss_num: StepEntry
+        /// Quick task 260901-fs1: the text actually handed back to the caller
+        /// (and, from there, to the pasteboard/history) — captured after
+        /// EVERY pipeline mutation for EVERY mode, most notably Step 3a.6
+        /// `applyFinalCapitalization`, which runs AFTER `post_gate` and was
+        /// previously unrecorded. `post_gate` can legitimately differ from
+        /// what the user received (see `debug-log-missing-final-stage.md`);
+        /// `final` (the JSON key — see `CodingKeys` below; `final` is a
+        /// Swift keyword so the Swift-side property is `finalStage`) is the
+        /// byte-identical ground truth. Optional + defaulted via the
+        /// synthesized-Codable Optional rule (no key in old JSONL ⇒
+        /// `decodeIfPresent` ⇒ `nil`), so pre-260901 recordings on disk keep
+        /// decoding unchanged — mirrors `post_gate`'s own optionality.
+        ///
+        /// `var`, not `let`: an Optional `let` with an inline `= nil`
+        /// default is a well-known Swift gotcha — the compiler treats it as
+        /// a fixed constant, EXCLUDED from both the memberwise initializer
+        /// and from `Decodable` overwrite (verified empirically; the
+        /// compiler even warns "will not be decoded because it is declared
+        /// with an initial value which cannot be overwritten"). `var`
+        /// without an inline default still gets the desired
+        /// omittable-parameter / `decodeIfPresent`-on-missing-key behavior
+        /// for a stored Optional. `Steps` stays `Sendable`: a value-type
+        /// struct's `var` stored properties don't break `Sendable` — each
+        /// instance is copied on use, so there's no shared mutable state.
+        public var finalStage: StepEntry?
+
+        private enum CodingKeys: String, CodingKey {
+            case raw, post_dict, post_itn, post_swiss, post_rules
+            case llm_prompt, llm_raw, post_gate, post_swiss_num
+            case finalStage = "final"
+        }
     }
 
     public struct Anomaly: Codable, Sendable {

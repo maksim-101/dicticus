@@ -109,6 +109,7 @@
 		765A3EF20A8B658498AF4E65 /* LowConfidenceShort.swift in Sources */ = {isa = PBXBuildFile; fileRef = DFFEAB556B3C35592C49E77D /* LowConfidenceShort.swift */; };
 		77E629F73BA61CF10EF8CAC5 /* SwissNumberFormatterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49F508FA7F203223AB4D05A0 /* SwissNumberFormatterTests.swift */; };
 		7806CA0106275C118F2F688A /* FunctionWords.swift in Sources */ = {isa = PBXBuildFile; fileRef = F278D1B719DF075C135C4B07 /* FunctionWords.swift */; };
+		78088756194BC65DD9CBE4DE /* DebugRecorderFinalStageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 946B59F77219FD6D0F22BAF9 /* DebugRecorderFinalStageTests.swift */; };
 		78DB03EE60CA2A43DBFEFEE5 /* AsrReplayHarnessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 924528FC6CB78FA7E6F697FF /* AsrReplayHarnessTests.swift */; };
 		7C2DE853EFA9D981F406B045 /* LastTranscriptionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC0CAF13337A0AF85CB46BC3 /* LastTranscriptionView.swift */; };
 		7C61B66CB6F5BB972C92FFFC /* TranscriptionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4711E5E2A1A90B0A7DC48F3 /* TranscriptionServiceTests.swift */; };
@@ -337,6 +338,7 @@
 		9323B1AD9E85950CAD77E332 /* SystemSettingsURLs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SystemSettingsURLs.swift; sourceTree = "<group>"; };
 		935574DB3DB5B1B25418ADE3 /* AsrModelLoader+WhisperKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AsrModelLoader+WhisperKit.swift"; sourceTree = "<group>"; };
 		9458B1D730A30CB3CF0F2A07 /* PronounPersonMap.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PronounPersonMap.swift; sourceTree = "<group>"; };
+		946B59F77219FD6D0F22BAF9 /* DebugRecorderFinalStageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugRecorderFinalStageTests.swift; sourceTree = "<group>"; };
 		953986B4EAA40D08A7557B11 /* TextProcessingServiceContextTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextProcessingServiceContextTests.swift; sourceTree = "<group>"; };
 		9583443B5090F875947F23B9 /* BrandContractionInflectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandContractionInflectionTests.swift; sourceTree = "<group>"; };
 		960860ACFBAA1B6980CAC734 /* DicticusTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DicticusTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -716,6 +718,7 @@
 				FAC9E0CB8C6339113702C44B /* CleanupPromptVariantTests.swift */,
 				A20BFF7DF7FDD1646B1F5B20 /* ClosedListTests.swift */,
 				97E6581C1D0ADCEE22CCB20E /* ContextResolverTests.swift */,
+				946B59F77219FD6D0F22BAF9 /* DebugRecorderFinalStageTests.swift */,
 				6D3F532C7AEB317140E6D49F /* DictationContextTests.swift */,
 				90BAB8D1F5509E0EA76D6DB7 /* DicticusTestBootstrap.swift */,
 				BC99727F95E5677BCD436B4B /* DictionaryCanonicalCollisionTests.swift */,
@@ -1070,6 +1073,7 @@
 				5EEB3E797170146D6935991B /* ClosedListTests.swift in Sources */,
 				93700175C092AF15DBAE5DBC /* ContextPromptAbTests.swift in Sources */,
 				B3B9E9B8177619B59EE6FC1C /* ContextResolverTests.swift in Sources */,
+				78088756194BC65DD9CBE4DE /* DebugRecorderFinalStageTests.swift in Sources */,
 				D0721C4F1028A96B44E8FE8A /* DictationContextTests.swift in Sources */,
 				BC46646AC6ACB62C88CE8114 /* DicticusDefaultsTests.swift in Sources */,
 				2641382593F5838DB78C9FF8 /* DicticusTestBootstrap.swift in Sources */,
