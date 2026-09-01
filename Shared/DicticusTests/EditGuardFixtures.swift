@@ -1656,6 +1656,111 @@ enum EditGuardFixtures {
          goodshineFullRecordSpuriousMoveFixture, longDistanceGermanWordOrderRepairFixture,
          adjacentDeletionSubstituteCouplingFixture, crossClauseMoveMispairingOpenDefectFixture]
 
+    // MARK: - Production record corpus (quick task 260901-8m3)
+    //
+    // A canonical corpus of LIVE dictation records, copied VERBATIM (not
+    // retyped, not re-anonymized) out of the sibling test files that already
+    // committed them (`EditGuardDanglingPunctuationTests.swift`,
+    // `EditGuardMergeAtomicityTests.swift`). Exists so
+    // `EditGuardMaterializeInvariantTests`'s corpus-wide sweeps can exercise
+    // real corpus text alongside `EditGuardFixtures.all`'s synthetic
+    // cross-product, per the objective's "where a replay corpus is
+    // available, real records" instruction. The ORIGINATING test named in
+    // each record's `origin` stays the authoritative owner of that record's
+    // own exact-string regression assertion — nothing here refactors or
+    // replaces those tests; this array is purely an additional shared corpus
+    // for sweeps that need many records at once.
+    struct ProductionRecord {
+        let id: String
+        /// "de" / "en".
+        let language: String
+        let baseline: String
+        let candidate: String
+        /// The quick-task id that surfaced this record + the test file/method
+        /// that owns its dedicated regression assertion.
+        let origin: String
+    }
+
+    static let productionRecords: [ProductionRecord] = [
+        ProductionRecord(
+            id: "record-2026-08-30T04-54-30-157Z",
+            language: "de",
+            baseline: "Also ich möchte, dass du noch einmal genau recherchierst und mir einen Nahrungsergänzungsmittel sowie beispielhaften Trainingsplan zusammenstellst. Wie viel Resistancetraining braucht es wirklich? Ich bin zum Beispiel auch kein Fitnessstudio-Gänger. Ich finde das zu langweilig und... wenn nicht unbedingt notwendig dann möchte ich auch nicht einfach nur 30 minuten resistance training machen normalerweise mache ich so fünf minuten pro tag mit dem eigenen körpergewicht oder mit dem Tension Strap. Ich bin aber offen für Veränderung.",
+            candidate: "Ich möchte, dass du noch einmal genau recherchierst und mir ein Nahrungsergänzungsmittel sowie einen beispielhaften Trainingsplan zusammenstellst. Wie viel Resistenztraining braucht es wirklich? Ich bin zum Beispiel auch kein Fitnessstudio-Gänger. Ich finde das zu langweilig und, wenn nicht unbedingt notwendig, möchte ich auch nicht einfach nur 30 Minuten Resistenztraining machen. Normalerweise mache ich so fünf Minuten pro Tag mit dem eigenen Körpergewicht oder mit dem Tension Strap. Ich bin aber offen für Veränderung.",
+            origin: "260830-dc4 / EditGuardDanglingPunctuationTests.testNoSplicedPunctuation_langweiligUnd_2026_08_30"
+        ),
+        ProductionRecord(
+            id: "record-2026-08-24T04-00-00-733Z",
+            language: "en",
+            baseline: "please look for news from this year and if possible as recently as possible about failed or delayed projects either in government in Switzerland on either of the three levels of government, meaning federal, cantonal and municipal, as well as from the social sector.",
+            candidate: "Please look for news from this year, as recently as possible, about failed or delayed projects in the government in Switzerland at either of the three levels of government—federal, cantonal, and municipal—as well as from the social sector.",
+            origin: "260831-ad8 / EditGuardDanglingPunctuationTests.testNoCommaDashAdjacency_governmentLevels_2026_08_24"
+        ),
+        ProductionRecord(
+            id: "record-260831-gd9-in-clawed",
+            language: "en",
+            baseline: "Check also in.clawed directory for the file.",
+            candidate: "Check also in the clawed directory for the file.",
+            origin: "260831-gd9 / EditGuardDanglingPunctuationTests.testNoFabricatedSpace_restoredDotBeforeGluedWord_260831gd9"
+        ),
+        ProductionRecord(
+            id: "record-2026-07-29T03-47-35-149Z",
+            language: "en",
+            baseline: "So help me adjust the feedback email or however it's labeled. So it matches these new states because I haven't sent it yet. I only was in contact with Pearcom support and now I want to go that separate lane as well because this is not acceptable anymore.",
+            candidate: "So, help me adjust the feedback email—or however it's labeled—to match these new states, because I haven't sent it yet. I was only in contact with Pearcom support, and now I want to go down that separate lane as well, because this is not acceptable anymore.</corrected_text>",
+            origin: "260801-9n7 / EditGuardMergeAtomicityTests.testRestoredTerminalPunctuation_keepsInterSentenceSpace_labeledSo"
+        ),
+        ProductionRecord(
+            id: "record-260724-j96-checkfact",
+            language: "en",
+            baseline: "No, the corporate style-guide convention is not about writing something like situation or assessment in capital letters. It's about geographic names and also entities, I believe. But fact check that.",
+            candidate: "No, the corporate style-guide convention is not about writing something like \"situation\" or \"assessment\" in capital letters. It is about geographic names and entities, I believe. But let's fact-check that.",
+            origin: "260724-j96 / EditGuardMergeAtomicityTests.testCrossedSubstituteRestore_checkFact"
+        ),
+        ProductionRecord(
+            id: "record-260724-j96-havingseeking",
+            language: "en",
+            baseline: "The title at the top meaning when was this report generated or what time period is this referring to can be a little bit more prominent. So as not to having to seek what time period this report is about.",
+            candidate: "The title at the top, indicating when this report was generated or what time period it refers to, could be a little more prominent so as not to require seeking out the time period this report is about.",
+            origin: "260724-j96 / EditGuardMergeAtomicityTests.testCrossedSubstituteRestore_havingSeeking"
+        ),
+        ProductionRecord(
+            id: "record-260723-rif-offorheartrate",
+            language: "en",
+            baseline: "She wants to be able to click in a dial and move the finger around to see individual data points. Like what was the value at any given time of heartrate for instance and then also along the way lost the info about the workouts so when I click on the workouts a small pop-up should show up",
+            candidate: "She wants to be able to click in a dial and move the finger around to see individual data points, like the value at any given time for heartrate, and then also along the way, lost the info about workouts. So when I click on the workouts, a small pop-up should show up.",
+            origin: "260723-rif / EditGuardMergeAtomicityTests.testAggregate_evidenceFixturesNeitherSourceClean (case 1)"
+        ),
+        ProductionRecord(
+            id: "record-260723-rif-itsis",
+            language: "en",
+            baseline: "Also in the current layout it's unclear to what time period this report is referring to.",
+            candidate: "Also, in the current layout, it is unclear to what time period this report refers.",
+            origin: "260723-rif / EditGuardMergeAtomicityTests.testAggregate_evidenceFixturesNeitherSourceClean (case 2)"
+        ),
+        ProductionRecord(
+            id: "record-260723-rif-wannato",
+            language: "en",
+            baseline: "- Yes, we can go ahead, but first I wanna clear the context window because it's already 75% full.",
+            candidate: "Yes, we can go ahead, but first I want to clear the context window because it's already 75% full.",
+            origin: "260723-rif / EditGuardMergeAtomicityTests.testAggregate_evidenceFixturesNeitherSourceClean (case 3)"
+        ),
+        ProductionRecord(
+            id: "record-260723-rif-rightsolostquestionmark",
+            language: "en",
+            baseline: "For the sections, what kind of structure are you following now? Because I would like to have a clear structure that's also kind of visible, right? So facts and figures first, then development possibilities, likelihoods and whatnot, confidentiality.",
+            candidate: "For the sections, what kind of structure are you following now? Because I would like to have a clear structure that is also visible. So, facts and figures first, then development possibilities, likelihoods, and confidentiality.",
+            origin: "260723-rif / EditGuardMergeAtomicityTests.testAggregate_evidenceFixturesNeitherSourceClean (case 4)"
+        ),
+        ProductionRecord(
+            id: "record-260723-rif-esundzwardanglinges",
+            language: "de",
+            baseline: "Und dann gibt es, ich glaube es ist eine Folie mit einer Tabelle, doch hierfür würde ich tatsächlich ein anderes Folienlayout nehmen. Und zwar eines, das oberhalb der Tabelle nicht noch einen Text enthält, weil jetzt in diesem Fall wurde auch tatsächlich nichts oben hingeschrieben und damit bleibt ein grosser Anteil des Platzes auf der Folie ungenutzt.",
+            candidate: "Und dann gibt es eine Folie mit einer Tabelle. Dafür würde ich jedoch ein anderes Folienlayout verwenden. Es sollte eines sein, das oberhalb der Tabelle keinen Text enthält, da in diesem Fall oben nichts geschrieben wurde. Dadurch bleibt ein grosser Teil des Platzes auf der Folie ungenutzt.",
+            origin: "260723-rif / EditGuardMergeAtomicityTests.testAggregate_evidenceFixturesNeitherSourceClean (case 5)"
+        )
+    ]
+
     // MARK: - Pruned cells
 
     /// Every uncovered cell of the 120-cell cross product
