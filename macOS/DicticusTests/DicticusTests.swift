@@ -249,5 +249,79 @@ final class DebugCleanupRecordCodableTests: XCTestCase {
         XCTAssertEqual(decoded.prompt_version, "v19c",
                        "Missing prompt_version key must decode as 'v19c' (Phase 28 R3 decodeIfPresent default, mirrors Phase 27 WR-02 pattern)")
     }
+
+    // MARK: - Quick task 260901-fs1: `steps.finalStage` (JSON key `final`) round-trip + backward compat
+
+    /// `finalStage` (wire key `"final"`) must round-trip like any other
+    /// populated `StepEntry` field — same shape/contract as `post_swiss_num`.
+    func testDebugCleanupRecordCodableRoundTrip_FinalStagePopulated() {
+        let steps = DebugCleanupRecord.Steps(
+            raw: DebugCleanupRecord.StepEntry(text: "hello world. clawed directory is open.", ms: 0),
+            post_dict: DebugCleanupRecord.StepEntry(text: "hello world. clawed directory is open.", ms: 0),
+            post_itn: DebugCleanupRecord.StepEntry(text: "hello world. clawed directory is open.", ms: 0),
+            post_swiss: DebugCleanupRecord.StepEntry(text: "hello world. clawed directory is open.", ms: 0),
+            post_rules: DebugCleanupRecord.StepEntry(text: "hello world. clawed directory is open.", ms: 0),
+            llm_prompt: nil,
+            llm_raw: nil,
+            post_gate: DebugCleanupRecord.GateEntry(
+                text: "hello world. clawed directory is open.",
+                verdict: "rejected",
+                edit_distance: nil,
+                ms: 0,
+                fail_closed_reason: "reasoningLeak"
+            ),
+            post_swiss_num: DebugCleanupRecord.StepEntry(text: "Hello world. Clawed directory is open.", ms: 0),
+            finalStage: DebugCleanupRecord.StepEntry(text: "Hello world. Clawed directory is open.", ms: 0)
+        )
+        let data = try! JSONEncoder().encode(steps)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertTrue(json.contains("\"final\""),
+            "Phase 260901-fs1: populated `finalStage` must serialize under the JSON key \"final\" — got: \(json)")
+
+        let roundtrip = try! JSONDecoder().decode(DebugCleanupRecord.Steps.self, from: data)
+        XCTAssertEqual(roundtrip.finalStage?.text, "Hello world. Clawed directory is open.")
+        // Non-vacuity, pinned in the schema test itself: `finalStage` differs
+        // from `post_gate` in this fixture, proving the field is not a duplicate.
+        XCTAssertNotEqual(roundtrip.finalStage?.text, roundtrip.post_gate?.text)
+    }
+
+    /// Pre-260901 JSONL on disk has no `"final"` key at all. The synthesized
+    /// `Decodable` conformance for `Steps` treats an Optional stored property
+    /// via `decodeIfPresent` automatically — even with the custom
+    /// `CodingKeys` mapping `finalStage` to the wire key `"final"` — so a
+    /// missing key must decode as `nil`, not throw.
+    func testDebugCleanupRecordDecode_PreFs1_TolerantToMissingFinalStage() {
+        let json = """
+        {
+          "ts": "2026-08-30T12:00:00.000Z",
+          "session_id": "legacy-session",
+          "lang": "en",
+          "lang_used": "en",
+          "mode": "cleanup",
+          "model": { "name": "gemma-4-e2b", "sha256_prefix": null },
+          "sampler": { "temp": 0.1, "top_k": 40, "top_p": 0.9, "max_tokens": 512, "seed": null },
+          "steps": {
+            "raw": { "text": "test", "ms": 0 },
+            "post_dict": { "text": "test", "ms": 0 },
+            "post_itn": { "text": "test", "ms": 0 },
+            "post_swiss": { "text": "test", "ms": 0 },
+            "post_rules": { "text": "test", "ms": 0 },
+            "llm_prompt": null,
+            "llm_raw": null,
+            "post_gate": null,
+            "post_swiss_num": { "text": "test", "ms": 0 }
+          },
+          "dictionary_context_keys": [],
+          "dictionary_replacements": [],
+          "dictionary_blocked": [],
+          "anomaly": { "degenerate_collapse": false, "very_short_output": false },
+          "emission_counter": 1
+        }
+        """.data(using: .utf8)!
+        let decoder = JSONDecoder()
+        let decoded = try! decoder.decode(DebugCleanupRecord.self, from: json)
+        XCTAssertNil(decoded.steps.finalStage,
+            "Phase 260901-fs1: missing \"final\" key on pre-existing JSONL must decode as nil (not throw)")
+    }
 }
 #endif
