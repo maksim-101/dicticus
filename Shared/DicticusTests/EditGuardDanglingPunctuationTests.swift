@@ -450,4 +450,44 @@ final class EditGuardDanglingPunctuationTests: XCTestCase {
             "next sentence must capitalize downstream of a genuine accepted period: \(capitalized)"
         )
     }
+
+    // MARK: - Quick task 260901-qyi: lone restored ellipsis remnant
+
+    /// LIVE production bug, corpus 2026-09-01T17:17:59.197Z
+    /// (`EditGuardFixtures.productionRecords`, record
+    /// `record-2026-09-01T17-17-59-197Z`). Baseline carries a hesitation
+    /// ellipsis (three `.` tokens) between "possible" and "points"; the LLM
+    /// correctly deleted the whole ellipsis. `EditDiff` pairs one of the
+    /// three baseline dots against an unrelated candidate period (elsewhere
+    /// in the sentence) as a REJECTED `.move`; the other two dots are
+    /// independently accepted deletes. The rejected move's dot is restored
+    /// via `restorationTargets` with its own (empty, mid-ellipsis) baseline
+    /// trailing — correct in isolation — but it is now the LONE surviving
+    /// member of what was a 3-mark baseline run, so
+    /// `collapseMixedProvenancePunctuationRuns`'s mixed-run pass (built for
+    /// runs of length >= 2) passes it straight through untouched, and
+    /// `bindPunctuationLeft` then clears "possible"'s trailing too (its
+    /// own ellipsis guard requires the next TWO tokens to still be `.`,
+    /// which they no longer are) — gluing the mark on both sides. This is
+    /// the fifth member of the recurring "neither source" defect family
+    /// (260801-9n7, 260830-dc4, 260831-ad8, 260831-gd9): a shape all four
+    /// prior fixes are individually correct about but structurally blind to
+    /// in combination. Fixed by a new arm in
+    /// `collapseMixedProvenancePunctuationRuns` that drops a lone restored
+    /// mark descended from a destroyed multi-mark baseline run, so the span
+    /// renders exactly as the candidate did.
+    func testNoGluedEllipsisRemnant_possiblePoints_260901qyi() {
+        let record = EditGuardFixtures.productionRecords.first {
+            $0.id == "record-2026-09-01T17-17-59-197Z"
+        }!
+        let out = guardOut(record.baseline, record.candidate, record.language)
+        XCTAssertFalse(
+            out.contains("possible" + "." + "points"),
+            "lone restored ellipsis remnant must not glue onto the following word: \(out)"
+        )
+        XCTAssertTrue(
+            out.contains("two possible points of contact"),
+            "span must render exactly as the candidate did, with the deleted ellipsis gone: \(out)"
+        )
+    }
 }

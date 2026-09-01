@@ -1758,6 +1758,13 @@ enum EditGuardFixtures {
             baseline: "Und dann gibt es, ich glaube es ist eine Folie mit einer Tabelle, doch hierfür würde ich tatsächlich ein anderes Folienlayout nehmen. Und zwar eines, das oberhalb der Tabelle nicht noch einen Text enthält, weil jetzt in diesem Fall wurde auch tatsächlich nichts oben hingeschrieben und damit bleibt ein grosser Anteil des Platzes auf der Folie ungenutzt.",
             candidate: "Und dann gibt es eine Folie mit einer Tabelle. Dafür würde ich jedoch ein anderes Folienlayout verwenden. Es sollte eines sein, das oberhalb der Tabelle keinen Text enthält, da in diesem Fall oben nichts geschrieben wurde. Dadurch bleibt ein grosser Teil des Platzes auf der Folie ungenutzt.",
             origin: "260723-rif / EditGuardMergeAtomicityTests.testAggregate_evidenceFixturesNeitherSourceClean (case 5)"
+        ),
+        ProductionRecord(
+            id: "record-2026-09-01T17-17-59-197Z",
+            language: "en",
+            baseline: "And as for 999.2, what's going through my mind when I read your explanation of what this is about? I mean, I see two possible... points of contact where this kind of enrollment and also discernment of how well a user of Dicticus can pronounce certain words That is, at first, maybe at the ASR level or right after, kind of more deterministically, which has its own drawbacks, I assume, because it's not clear signs here. And then at AI Cleanup level, where we would give the LLM the context of, oh, this user is actually struggling with breathing and breathing, meaning we should make sure that whenever these words appear, that it actually makes sense within the context of the sentence that it's placed in.",
+            candidate: "And as for 999.2, what's going through my mind when I read your explanation of what this is about? I mean, I see two possible points of contact where this kind of enrollment and also discernment of how well a user of Dicticus can pronounce certain words. That is, at first, maybe at the ASR level or right after, kind of more deterministically, which has its own drawbacks, I assume, because it's not clear signs here. And then at AI Cleanup level, where we would give the LLM the context of, oh, this user is actually struggling with breathing and breathing, meaning we should make sure that whenever these words appear, that it actually makes sense within the context of the sentence that it's placed in.",
+            origin: "260901-qyi / EditGuardDanglingPunctuationTests.testNoGluedEllipsisRemnant_possiblePoints_260901qyi"
         )
     ]
 
