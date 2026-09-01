@@ -30,15 +30,29 @@ import XCTest
 /// `multisetInvariantHolds` already own them, and duplicating either would
 /// only create a second copy to keep in sync for no new coverage.
 ///
-/// Non-vacuity counts printed on the last passing local run (recorded here
-/// per Task 3's instruction so a future reader can see at a glance whether a
-/// property has gone quiet — see `260901-8m3-SUMMARY.md` for the exact
-/// captured console output this table transcribes):
-/// - P4: see `260901-8m3-SUMMARY.md` for `checkedCount` / `casesExercising` /
-///   `abstainCount` / `contestedCount`.
-/// - P3-extension: see `260901-8m3-SUMMARY.md` for the production-record
-///   count swept.
-/// - P5: see `260901-8m3-SUMMARY.md` for `casesExercising` and the ledger.
+/// Non-vacuity counts printed on the last passing local run (recorded here,
+/// verbatim from `260901-8m3-SUMMARY.md`'s captured console output, so a
+/// future reader can see at a glance whether a property has gone quiet):
+/// - P4: `checkedCount=1091 casesExercising=98 abstainCount=0
+///   contestedCount=0 exemptedCount=1` (of 98 total cases: 87
+///   `EditGuardFixtures.all` + 11 `productionRecords`).
+/// - P3-extension: 11 production records swept, `ledgeredCount=2` (both
+///   citing the same known residual below).
+/// - P5: `casesExercising=1 totalTier2Violations=2` (of 98 total cases) — one
+///   record, both violations already covered by the same ledger entry as
+///   P3-extension.
+///
+/// One genuine, previously-unnoticed low-severity residual was FOUND by P4
+/// (and independently re-surfaced by P3-extension/P5 under their own coarser
+/// tokenizer) while measuring these counts — a stray space rendered before a
+/// surviving em-dash in `record-2026-08-24T04-00-00-733Z`
+/// (`EditGuard.collapseMixedProvenancePunctuationRuns` correctly fixes the
+/// ORIGINAL 260831-ad8 comma-touching-dash defect but leaves a forced
+/// bridging space, meant for the comma it drops, stranded in front of the
+/// dash that survives in its place). NOT fixed here (test-only scope; see
+/// `.planning/todos/pending/editguard-stray-space-before-surviving-emdash.md`)
+/// — each affected property carries a single, exact-match, per-entry-cited
+/// exemption for this one case, never a threshold or a whole-case skip.
 @MainActor
 final class EditGuardMaterializeInvariantTests: XCTestCase {
 
