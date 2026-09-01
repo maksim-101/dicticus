@@ -57,7 +57,16 @@ final class EditGuardMergeAtomicityTests: XCTestCase {
     /// (full-token bigrams, with the sanctioned `collapseDanglingPunctuation`
     /// allowance) — see `Atomicity.check` in the harness for the full spec;
     /// this is a byte-for-byte port.
-    private static func neitherSourceViolations(output: String, sourceA: String, sourceB: String) -> (tier1: [String], tier2: [String]) {
+    /// Widened from `private` to internal (quick task 260901-8m3, Task 2):
+    /// `EditGuardMaterializeInvariantTests`'s P3-extension/P5 sweeps reuse
+    /// this checker over `EditGuardFixtures.productionRecords` rather than
+    /// building a third copy. `tokenize`/`isPunctToken`/`bigramSet` stay
+    /// `private` — this file's own doc comment already explains why exactly
+    /// two independent copies of the SPEC exist (this one and the harness's);
+    /// widening the private helpers too would risk a third divergent copy
+    /// forming elsewhere, which this visibility change is explicitly meant
+    /// to avoid.
+    static func neitherSourceViolations(output: String, sourceA: String, sourceB: String) -> (tier1: [String], tier2: [String]) {
         let outTokens = tokenize(output)
         let aTokens = tokenize(sourceA)
         let bTokens = tokenize(sourceB)
