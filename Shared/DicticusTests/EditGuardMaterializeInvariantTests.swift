@@ -191,4 +191,127 @@ final class EditGuardMaterializeInvariantTests: XCTestCase {
             "message; the same vacuity risk applies per-case."
         )
     }
+
+    // MARK: - P3-extension: tier-1 word-bigram check, widened to production records
+
+    /// The EXISTING tier-1 word-bigram neither-source checker
+    /// (`EditGuardMergeAtomicityTests.neitherSourceViolations`), already run
+    /// over all of `EditGuardFixtures.all` by
+    /// `testAggregate_allGoldenFixturesNeitherSourceClean` — this test does
+    /// NOT duplicate that sweep. It runs the SAME checker over
+    /// `EditGuardFixtures.productionRecords` only, closing the gap that the
+    /// word-level neither-source splice invariant was, until this quick
+    /// task, checked only across the 87 synthetic fixtures and never against
+    /// a live record.
+    ///
+    /// MEASURED (not guessed): this checker's own trivial internal tokenizer
+    /// (`EditGuardMergeAtomicityTests.tokenize`) only splits on whitespace and
+    /// the 6 ASCII marks in its `punctuationChars` set — it does NOT
+    /// recognize an em-dash as a separate token the way the guard's own
+    /// `EditGuardTokenizer` does, so "—as" (em-dash glued to a word) reads as
+    /// ONE "word" to this checker. That is exactly how `record-2026-08-24T04-00-00-733Z`
+    /// (the SAME stray-space-before-surviving-em-dash residual P4 found and
+    /// filed as `.planning/todos/pending/editguard-stray-space-before-surviving-emdash.md`)
+    /// surfaces here too: "municipal" + "—as" reads as a neither-source
+    /// WORD bigram under this checker's coarser tokenization, even though it
+    /// is the identical single root cause, not a second independent defect.
+    /// Exempted by exact record id + pair only, citing the same todo — never
+    /// widened to a threshold or a whole-record skip.
+    private static let p3ExtensionKnownExemptions: Set<String> = [
+        "record-2026-08-24T04-00-00-733Z|municipal —as",
+        "record-2026-08-24T04-00-00-733Z|—as well"
+    ]
+
+    func testTier1NeitherSourceClean_productionRecords_P3Extension() {
+        var unledgered: [String] = []
+        var ledgeredCount = 0
+        for record in EditGuardFixtures.productionRecords {
+            let out = guardOut(record.baseline, record.candidate, record.language)
+            let v = EditGuardMergeAtomicityTests.neitherSourceViolations(
+                output: out, sourceA: record.baseline, sourceB: record.candidate
+            )
+            for pair in v.tier1 {
+                let key = "\(record.id)|\(pair)"
+                if Self.p3ExtensionKnownExemptions.contains(key) {
+                    ledgeredCount += 1
+                } else {
+                    unledgered.append(key)
+                }
+            }
+        }
+        print("[P3-extension] swept \(EditGuardFixtures.productionRecords.count) production records for " +
+              "tier-1 neither-source violations; ledgeredCount=\(ledgeredCount)")
+        XCTAssertTrue(
+            unledgered.isEmpty,
+            "tier-1 neither-source violation(s) outside the exemption ledger in production " +
+            "records — a NEW word-level splice defect: \(unledgered)"
+        )
+    }
+
+    // MARK: - P5: full-token adjacency provenance (tier 2), promoted to a corpus-wide ratchet
+
+    /// Promotes `EditGuardMergeAtomicityTests.neitherSourceViolations`'s
+    /// tier-2 result — computed at every prior call site and discarded,
+    /// because `assertNeitherSourceClean` only asserts `.tier1` — to an
+    /// actual assertion, run over the WHOLE corpus (fixtures + production
+    /// records). Tier 2 additionally catches full-token (word-OR-punctuation)
+    /// adjacencies absent from both inputs, e.g. the 260830-dc4 "und.," and
+    /// 260831-ad8 comma-dash mixed-provenance shapes — see this checker's own
+    /// doc comment for the exact spec (byte-for-byte port of the harness's
+    /// `Atomicity.check`, including its sanctioned single-mark-after-word
+    /// allowance).
+    ///
+    /// The assertion form below (a hard, per-entry-justified exemption
+    /// ledger) was chosen AFTER measuring the real violation list on this
+    /// corpus — not written first and fitted to a guess. MEASURED result:
+    /// exactly 1 case (`record-2026-08-24T04-00-00-733Z`) produced 2 tier-2
+    /// violations, both the SAME root cause P4 already found and filed
+    /// (`.planning/todos/pending/editguard-stray-space-before-surviving-emdash.md`)
+    /// — a stray space before a surviving em-dash, not a second independent
+    /// defect. Every other case in the corpus (97 of 98) is tier-2 clean.
+    /// See `260901-8m3-SUMMARY.md` for the full measured list.
+    private static let p5KnownExemptions: Set<String> = [
+        "record-2026-08-24T04-00-00-733Z|municipal —as",
+        "record-2026-08-24T04-00-00-733Z|—as well"
+    ]
+
+    func testFullTokenAdjacencyProvenance_P5() {
+        struct Violation { let caseID: String; let pair: String }
+        var violations: [Violation] = []
+        var casesExercising = 0
+
+        for c in corpus {
+            let out = guardOut(c.baseline, c.candidate, c.language)
+            let v = EditGuardMergeAtomicityTests.neitherSourceViolations(
+                output: out, sourceA: c.baseline, sourceB: c.candidate
+            )
+            guard !v.tier2.isEmpty else { continue }
+            casesExercising += 1
+            for pair in v.tier2 {
+                violations.append(Violation(caseID: c.id, pair: pair))
+            }
+        }
+
+        print("[P5 non-vacuity] casesExercising=\(casesExercising) totalTier2Violations=\(violations.count) " +
+              "(of \(corpus.count) total cases)")
+        XCTAssertGreaterThan(
+            casesExercising, 0,
+            "P5 exercised ZERO cases across the whole corpus — the property never fired on " +
+            "anything and is VACUOUS (memory feedback_gate_blind_to_firing_path). Widen the " +
+            "corpus before trusting this test."
+        )
+
+        var unledgered: [String] = []
+        for v in violations {
+            let key = "\(v.caseID)|\(v.pair)"
+            if !Self.p5KnownExemptions.contains(key) {
+                unledgered.append(key)
+            }
+        }
+        XCTAssertTrue(
+            unledgered.isEmpty,
+            "tier-2 neither-source violation(s) outside the exemption ledger — a NEW " +
+            "full-token adjacency defect: \(unledgered)"
+        )
+    }
 }
