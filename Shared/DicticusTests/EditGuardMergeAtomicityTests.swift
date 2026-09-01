@@ -66,7 +66,7 @@ final class EditGuardMergeAtomicityTests: XCTestCase {
     /// widening the private helpers too would risk a third divergent copy
     /// forming elsewhere, which this visibility change is explicitly meant
     /// to avoid.
-    static func neitherSourceViolations(output: String, sourceA: String, sourceB: String) -> (tier1: [String], tier2: [String]) {
+    static func neitherSourceViolations(output: String, sourceA: String, sourceB: String) -> (tier1: [String], tier2: [String], tier2Evaluated: Int) {
         let outTokens = tokenize(output)
         let aTokens = tokenize(sourceA)
         let bTokens = tokenize(sourceB)
@@ -98,9 +98,17 @@ final class EditGuardMergeAtomicityTests: XCTestCase {
         let allSourceMarks = Set((aTokens + bTokens).filter { isPunctToken($0) })
 
         var tier2: [String] = []
+        // Count of adjacencies this loop actually EXAMINED (not the count it
+        // rejected). Callers need this to prove their tier-2 sweep is
+        // non-vacuous: "how many violations were found" goes to zero on a
+        // clean corpus and says nothing about coverage, whereas this number
+        // stays large and only collapses if the sweep genuinely stops
+        // looking at anything (260901-8m3).
+        var tier2Evaluated = 0
         if outTokens.count > 1 {
             for i in 0..<(outTokens.count - 1) {
                 let t0 = outTokens[i], t1 = outTokens[i + 1]
+                tier2Evaluated += 1
                 let bg = t0 + "\u{0}" + t1
                 if allowedFullBigrams.contains(bg) { continue }
                 if !isPunctToken(t0), isPunctToken(t1),
@@ -111,7 +119,7 @@ final class EditGuardMergeAtomicityTests: XCTestCase {
                 tier2.append("\(t0) \(t1)")
             }
         }
-        return (tier1, tier2)
+        return (tier1, tier2, tier2Evaluated)
     }
 
     private func assertNeitherSourceClean(_ output: String, _ baseline: String, _ llm: String, file: StaticString = #filePath, line: UInt = #line) {
