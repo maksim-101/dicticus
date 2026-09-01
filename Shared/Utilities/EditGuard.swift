@@ -2023,32 +2023,43 @@ public enum EditGuard {
                         // substitute's own slot is always populated).
                         let renderToken = substituteRestoreToken[i] ?? a
                         // Whitespace-provenance fix (quick task 260801-9n7,
-                        // evidence record 2026-07-29T03:47:35.149Z): this
-                        // branch restores the BASELINE token's `text` (via
-                        // `renderToken`) but was, unconditionally, taking the
-                        // CANDIDATE token's whitespace via `trailingFor`. A
-                        // baseline mark that carried a genuine inter-sentence
-                        // separator (the "." in "...labeled. So...", baseline
-                        // trailing " ") silently inherited a candidate glue
-                        // (the LLM's "labeled—to", trailing "") whenever the
-                        // candidate-derived trailing came back empty — gluing
-                        // two sentences together ("labeled.So"). Falling back
-                        // to the restored token's OWN baseline trailing in
-                        // that situation is source-faithful BY CONSTRUCTION:
-                        // it can never fabricate a separator the baseline
-                        // didn't have, which is exactly what protects
-                        // legitimate punct-glued-to-word source text like
-                        // "a.m"/"z.B"/"(word" (their own baseline trailing is
-                        // ALSO empty, so the fallback is a no-op there).
+                        // evidence record 2026-07-29T03:47:35.149Z, widened
+                        // by quick task 260831-gd9): this branch restores the
+                        // BASELINE token's `text` (via `renderToken`) and
+                        // must restore its `trailing` with it — reverting a
+                        // span means reverting it completely, whitespace
+                        // included. 9n7 first found the empty-candidate-
+                        // trailing half of this: a baseline mark that carried
+                        // a genuine inter-sentence separator (the "." in
+                        // "...labeled. So...", baseline trailing " ")
+                        // silently inherited a candidate glue (the LLM's
+                        // "labeled—to", trailing "") whenever the candidate-
+                        // derived trailing came back empty — gluing two
+                        // sentences together ("labeled.So"). gd9 found the
+                        // MIRROR case (live record "in.clawed", 2026-08-31
+                        // 16:29:29.370Z): a baseline mark glued to its next
+                        // word with NO separator (baseline trailing "")
+                        // inherited the candidate's non-empty trailing
+                        // instead, fabricating a space the baseline never had
+                        // ("in.clawed" -> "in. clawed"). Both are the same
+                        // defect — using the candidate's trailing at all for
+                        // a restored mark — so the fix is unconditional: a
+                        // restored punctuation token always renders with its
+                        // OWN baseline trailing, never the candidate's.
+                        // Source-faithful BY CONSTRUCTION either way: it can
+                        // never fabricate a separator the baseline didn't
+                        // have, nor drop one it did, which is exactly what
+                        // protects legitimate punct-glued-to-word source text
+                        // like "a.m"/"z.B"/"(word" (their own baseline
+                        // trailing is ALSO empty, so this is a no-op there).
                         // Scoped to `.punctuation` only — the sibling restore
                         // paths (`restorationTargets`, front-of-output) are
                         // already baseline-anchored and deliberately
                         // untouched; a restored WORD's candidate-derived
                         // trailing is not this defect's shape.
-                        let candidateDerivedTrailing = trailingFor(candidateIndex: i, ownTrailing: b.trailing)
-                        let restoredTrailing = (candidateDerivedTrailing.isEmpty && renderToken.kind == .punctuation)
+                        let restoredTrailing = renderToken.kind == .punctuation
                             ? renderToken.trailing
-                            : candidateDerivedTrailing
+                            : trailingFor(candidateIndex: i, ownTrailing: b.trailing)
                         output.append(WorkToken(text: renderToken.text, normalized: renderToken.normalized, kind: renderToken.kind, trailing: restoredTrailing, sentenceIndex: b.sentenceIndex, source: .restoredBaseline, baselineCasingAlternative: nil))
                     }
                 case .insert:

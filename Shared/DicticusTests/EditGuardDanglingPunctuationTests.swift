@@ -390,4 +390,64 @@ final class EditGuardDanglingPunctuationTests: XCTestCase {
             "blind gate before). Widen the corpus before trusting this test."
         )
     }
+
+    // MARK: - Restored-punctuation fabricated-space splice (quick task 260831-gd9)
+    //
+    // Regression net for `.planning/quick/260831-gd9-glued-dot-spacing/`. Live record
+    // `cleanup-2026-08-31.jsonl` @ 16:29:29.370Z, mode=aiCleanup, lang=en (context genericized
+    // per the project's fixture-anonymization rule — the defect depends only on the glued
+    // "in.clawed" shape, not on any surrounding identifier). The user dictated a directory
+    // reference; ASR produced it glued to a preceding period with ZERO separator on either
+    // side ("in.clawed", baseline trailing "" before AND after the dot). The LLM candidate
+    // deleted the dot and inserted "the" ("in the clawed"). `EditDiff` pairs the baseline "."
+    // against the candidate word "the" as a `.substitute`; `classifySubstitute` correctly
+    // REJECTS it (`contentWordIdentityChange` — a content word can never replace punctuation),
+    // and the baseline "." is restored at its own anchor. The restoration itself was correct;
+    // only its RENDERED trailing whitespace was wrong — `materialize`'s rejected-`.substitute`
+    // branch took the CANDIDATE's trailing (the space after "the") instead of the restored
+    // token's OWN baseline trailing (empty), producing "in. clawed" — a fabricated space
+    // present in NEITHER input. `collapseDanglingPunctuation` cannot catch this: it is a
+    // single restored mark, not a doubled pair, so there is no second mark for its interior-
+    // space-between-two-marks pattern to match against.
+    //
+    // This is the MIRROR of quick task 260801-9n7
+    // (`testRestoredTerminalPunctuation_keepsInterSentenceSpace_labeledSo`,
+    // EditGuardMergeAtomicityTests.swift): 9n7 found a restored mark inheriting an EMPTY
+    // candidate trailing when its own baseline trailing was a genuine separator (dropping a
+    // needed space, "labeled.So"); gd9 found the same mechanism failing the OTHER way — a
+    // restored mark inheriting a NON-EMPTY candidate trailing when its own baseline trailing
+    // was empty (fabricating a space that was never there, "in. clawed"). Both directions are
+    // now covered by one rule: a restored punctuation token always renders with its own
+    // baseline trailing, never the candidate's.
+    func testNoFabricatedSpace_restoredDotBeforeGluedWord_260831gd9() {
+        let baseline = "Check also in.clawed directory for the file."
+        let candidate = "Check also in the clawed directory for the file."
+        let out = guardOut(baseline, candidate, "en")
+        XCTAssertTrue(
+            out.contains("in.clawed directory"),
+            "restored dot must render with its own (empty) baseline trailing, not a fabricated space: \(out)"
+        )
+        XCTAssertFalse(
+            out.contains("in. clawed"),
+            "restored dot must not carry the candidate's trailing space: \(out)"
+        )
+    }
+
+    /// Accept-control (260831-gd9): a GENUINE end-of-sentence period the LLM inserts where no
+    /// baseline mark competes for the slot — an ordinary ACCEPTED `.insert`, never touching the
+    /// rejected-`.substitute` restore branch this quick task changed — must still get its space
+    /// and, once `TextProcessingService.applyFinalCapitalization` runs (the guard's own
+    /// downstream consumer, Step 3a.6), the next sentence must still capitalize. Proves the fix
+    /// is scoped to the restore path and does not touch accepted-insert rendering.
+    func testAcceptControl_genuineAcceptedPeriod_keepsSpaceAndCapitalizesDownstream_260831gd9() {
+        let baseline = "we finished the sprint great work everyone"
+        let candidate = "We finished the sprint. Great work everyone."
+        let out = guardOut(baseline, candidate, "en")
+        XCTAssertTrue(out.contains("sprint. "), "genuine accepted period insert must keep its space: \(out)")
+        let capitalized = TextProcessingService.applyFinalCapitalization(out, language: "en")
+        XCTAssertTrue(
+            capitalized.contains("sprint. Great work"),
+            "next sentence must capitalize downstream of a genuine accepted period: \(capitalized)"
+        )
+    }
 }
