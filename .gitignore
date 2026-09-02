@@ -68,3 +68,6 @@ xcuserdata/
 
 # GSD runtime sentinel (per-session dispatch-isolation marker, not a project artifact)
 .gsd/
+
+# Local ops tool with op:// item refs — never commit to this PUBLIC repo (2026-07-31 reboot rule)
+scripts/refresh_preflight.sh
