@@ -129,8 +129,21 @@ final class EditGuardMaterializeInvariantTests: XCTestCase {
     /// Exempted here by EXACT case id + adjacency pair only — never widened
     /// to a threshold, a percentage, or a whole-case skip — so every OTHER
     /// occurrence of this shape, in this record or any other, still fails.
+    ///
+    /// SECOND EXEMPTION (added by 260901-qyi, not 8m3): quick task 260901-qyi
+    /// added `record-2026-09-01T17-17-59-197Z` to `productionRecords` to
+    /// reproduce a "possible.points" lone-restored-ellipsis-remnant glue.
+    /// Two rendering-level fixes for that defect (`1751bc1`, `ff118d1`) were
+    /// each found to introduce a WORSE semantic regression and were
+    /// REVERTED by this same quick task — see
+    /// `EditGuardDanglingPunctuationTests.testKnownResidual_gluedEllipsisRemnant_possiblePoints`
+    /// and `.planning/todos/pending/editguard-ellipsis-remnant-glue.md`. The
+    /// glue this exemption covers is the SAME accepted, cosmetic, filed
+    /// residual that known-residual test pins — not a new defect, and not
+    /// re-widened here.
     private static let p4KnownExemptions: Set<String> = [
-        "record-2026-08-24T04-00-00-733Z|municipal|—"
+        "record-2026-08-24T04-00-00-733Z|municipal|—",
+        "record-2026-09-01T17-17-59-197Z|.|points",
     ]
 
     func testAdjacencySpacingFidelity_P4() {
@@ -345,6 +358,111 @@ final class EditGuardMaterializeInvariantTests: XCTestCase {
             unledgered.isEmpty,
             "tier-2 neither-source violation(s) outside the exemption ledger — a NEW " +
             "full-token adjacency defect: \(unledgered)"
+        )
+    }
+
+    // MARK: - P6: mark conservation (quick task 260901-qyi)
+
+    /// Both `1751bc1` and `ff118d1` (reverted by 260901-qyi, this quick task)
+    /// passed the FULL suite (1140-1143 tests, including P4/P5 above) while
+    /// each independently DELETING a sentence-terminal mark outright — P4/P5
+    /// check adjacency/spacing and neither-source SPLICES, but nothing in
+    /// either green suite ever counted whether a mark disappeared entirely.
+    /// That is the blind spot this property closes: a raw census of
+    /// sentence-terminal marks (`.`, `!`, `?`) — not their position, not
+    /// their spacing, just their COUNT — asserting the guard's output never
+    /// carries FEWER such marks than the weaker of its two inputs already
+    /// agreed on. A "possible.points"-shaped glue (mark present, just
+    /// mis-spaced) passes this property; `ff118d1`'s narrowed drop arm
+    /// (which literally deletes the lone mark) does not — see this quick
+    /// task's SUMMARY for the empirical RED-capability proof (the arm
+    /// re-applied, this property re-run, the failure captured, then
+    /// reverted).
+    ///
+    /// MEASURED (not guessed): sweeping the whole corpus (`EditGuardFixtures
+    /// .all` + `.productionRecords`, same 99-case `corpus` this file's other
+    /// properties use) at the REVERTED (correct) `EditGuard.swift` surfaces
+    /// exactly 2 pre-existing violations, NEITHER belonging to the
+    /// 260901-qyi "neither source" defect family:
+    /// - `fx-mov-punct-en-goodshine-fullrecord-spuriousmove`: baseline=20 /
+    ///   candidate=3 / out=2. Baseline's 20 marks are almost entirely
+    ///   pause-dot noise (`......goodshine......`) both sides correctly
+    ///   strip; `out`'s 2 marks match this fixture's OWN `expectedText`
+    ///   exactly (verified by inspection) — the guard correctly reverts
+    ///   candidate's rejected sentence-split ("suspect. However" ->
+    ///   "suspect of course, but then"), which legitimately drops the
+    ///   output below candidate's own count because baseline's local
+    ///   structure at that span never had a mark there either. A global
+    ///   min-of-both-counts floor cannot distinguish this from a real
+    ///   defect without edit-level analysis; investigated directly rather
+    ///   than assumed.
+    /// - `record-2026-08-30T04-54-30-157Z` (dc4's "langweilig und" record,
+    ///   already owned by `testNoSplicedPunctuation_langweiligUnd_2026_08_30`,
+    ///   which explicitly accepts EITHER the baseline's ellipsis form or the
+    ///   candidate's comma form as valid): baseline=8 / candidate=6 / out=5.
+    ///   Same mechanism — a rejected candidate sentence-split
+    ///   ("machen. Normalerweise" -> "machen, normalerweise") correctly
+    ///   reverts to baseline's non-split form, legitimately below
+    ///   candidate's own count.
+    /// Both exempted below by EXACT case id only, each independently
+    /// investigated and cited — never widened to a threshold. Every OTHER
+    /// case in the corpus (97 of 99) is P6-clean with zero exemption.
+    private static let p6KnownExemptions: Set<String> = [
+        "fx-mov-punct-en-goodshine-fullrecord-spuriousmove",
+        "record-2026-08-30T04-54-30-157Z",
+    ]
+
+    private static let sentenceTerminalMarksForP6: Set<String> = [".", "!", "?"]
+
+    private func terminalMarkCount(_ text: String) -> Int {
+        EditGuardTokenizer.tokenize(text).filter {
+            $0.kind == .punctuation && Self.sentenceTerminalMarksForP6.contains($0.text)
+        }.count
+    }
+
+    func testMarkConservation_P6() {
+        var checkedCount = 0
+        var casesExercising = 0
+        var unledgered: [String] = []
+
+        for c in corpus {
+            let out = guardOut(c.baseline, c.candidate, c.language)
+            let baselineCount = terminalMarkCount(c.baseline)
+            let candidateCount = terminalMarkCount(c.candidate)
+            let outCount = terminalMarkCount(out)
+            let floor = min(baselineCount, candidateCount)
+
+            checkedCount += 1
+            if floor > 0 { casesExercising += 1 }
+
+            if outCount < floor {
+                if Self.p6KnownExemptions.contains(c.id) {
+                    continue
+                }
+                unledgered.append(
+                    "\(c.id) baseline=\(baselineCount) candidate=\(candidateCount) out=\(outCount)"
+                )
+            }
+        }
+
+        print("[P6 non-vacuity] checkedCount=\(checkedCount) casesExercising=\(casesExercising) " +
+              "(of \(corpus.count) total cases)")
+        XCTAssertGreaterThan(
+            checkedCount, 0,
+            "P6 checked ZERO cases across the whole corpus — the property never fired and is " +
+            "VACUOUS (memory feedback_gate_blind_to_firing_path). Widen the corpus before " +
+            "trusting this test."
+        )
+        XCTAssertGreaterThan(
+            casesExercising, 0,
+            "P6 exercised ZERO cases with a non-zero mark floor — see checkedCount's failure " +
+            "message; the same vacuity risk applies per-case."
+        )
+        XCTAssertTrue(
+            unledgered.isEmpty,
+            "sentence-terminal mark count DROPPED below min(baseline, candidate) outside the " +
+            "exemption ledger — a mark was silently deleted, the exact 260901-qyi defect shape: " +
+            "\(unledgered)"
         )
     }
 }

@@ -65,3 +65,6 @@ CLAUDE.md
 # Coverage + Xcode user state
 *.profraw
 xcuserdata/
+
+# GSD runtime sentinel (per-session dispatch-isolation marker, not a project artifact)
+.gsd/

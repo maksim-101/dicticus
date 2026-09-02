@@ -451,8 +451,22 @@ final class EditGuardDanglingPunctuationTests: XCTestCase {
         )
     }
 
-    // MARK: - Quick task 260901-qyi: lone restored ellipsis remnant
+    // MARK: - Quick task 260901-qyi: lone restored ellipsis remnant (KNOWN RESIDUAL, not fixed)
 
+    /// KNOWN RESIDUAL, deliberately NOT fixed at the rendering level. Two
+    /// rendering-level attempts (`1751bc1`, `ff118d1`) each "fixed" this
+    /// specific defect but introduced a WORSE semantic regression (silently
+    /// deleting a legitimate mark or an unrelated sentence boundary) —
+    /// reverted by this quick task; see the SUMMARY's "REVERTED" section for
+    /// the measured evidence. The correct fix is structural (atomic
+    /// same-mark punctuation-run tokenization, so a run of `.` tokens is
+    /// treated as ONE unit instead of N independent tokens that `EditDiff`
+    /// can pair away one at a time), sequenced as the first v2.6 item — see
+    /// `.planning/todos/pending/editguard-ellipsis-remnant-glue.md`. A THIRD
+    /// rendering-level narrowing attempt should NOT be made; this test pins
+    /// the CURRENT (accepted, cosmetic) output so any future change to this
+    /// shape shows up as a diff here, not a silent behavior change.
+    ///
     /// LIVE production bug, corpus 2026-09-01T17:17:59.197Z
     /// (`EditGuardFixtures.productionRecords`, record
     /// `record-2026-09-01T17-17-59-197Z`). Baseline carries a hesitation
@@ -468,26 +482,134 @@ final class EditGuardDanglingPunctuationTests: XCTestCase {
     /// runs of length >= 2) passes it straight through untouched, and
     /// `bindPunctuationLeft` then clears "possible"'s trailing too (its
     /// own ellipsis guard requires the next TWO tokens to still be `.`,
-    /// which they no longer are) — gluing the mark on both sides. This is
-    /// the fifth member of the recurring "neither source" defect family
-    /// (260801-9n7, 260830-dc4, 260831-ad8, 260831-gd9): a shape all four
-    /// prior fixes are individually correct about but structurally blind to
-    /// in combination. Fixed by a new arm in
-    /// `collapseMixedProvenancePunctuationRuns` that drops a lone restored
-    /// mark descended from a destroyed multi-mark baseline run, so the span
-    /// renders exactly as the candidate did.
-    func testNoGluedEllipsisRemnant_possiblePoints_260901qyi() {
+    /// which they no longer are) — gluing the mark on both sides. Cosmetic
+    /// (the mark itself survives, just mis-spaced) and user-repairable —
+    /// measured at 2 occurrences in 583 live records (260901-qyi planning).
+    func testKnownResidual_gluedEllipsisRemnant_possiblePoints() {
         let record = EditGuardFixtures.productionRecords.first {
             $0.id == "record-2026-09-01T17-17-59-197Z"
         }!
         let out = guardOut(record.baseline, record.candidate, record.language)
-        XCTAssertFalse(
-            out.contains("possible" + "." + "points"),
-            "lone restored ellipsis remnant must not glue onto the following word: \(out)"
-        )
         XCTAssertTrue(
-            out.contains("two possible points of contact"),
-            "span must render exactly as the candidate did, with the deleted ellipsis gone: \(out)"
+            out.contains("two possible.points of contact"),
+            "KNOWN RESIDUAL (260901-qyi, v2.6 structural fix pending): the lone restored " +
+            "ellipsis remnant is expected to glue onto the following word — this pins the " +
+            "CURRENT accepted output, not a target: \(out)"
         )
+    }
+
+    /// KNOWN RESIDUAL, PRE-EXISTING at `9b454f7` (i.e. before either reverted
+    /// rendering-level attempt existed, and unaffected by the revert) — same
+    /// root cause as the `possible.points` residual above (a lone restored
+    /// mark surviving a destroyed 3+ same-mark baseline run glues to its
+    /// neighbour), different shape: the LLM candidate DROPS the mid-sentence
+    /// ellipsis outright (no replacement mark) but correctly writes its own
+    /// terminal period at the very end of the utterance. `EditDiff` still
+    /// pairs one baseline dot against the candidate's terminal period as a
+    /// rejected `.move`, restoring it at its OWN (mid-sentence) baseline
+    /// anchor rather than at the candidate's (end-of-utterance) position —
+    /// so the mark ends up glued mid-sentence (`nicht.Vielleicht`) and the
+    /// candidate's own terminal period is never separately rendered. Net
+    /// effect: 1 terminal mark survives total (the glued one), 0 at the
+    /// end. Verified via direct execution (260901-qyi), not assumed.
+    func testKnownResidual_gluedEllipsisRemnant_deMidEllipsisDropped() {
+        let baseline = "Ich weiss nicht... Vielleicht spaeter melde ich mich noch einmal bei dir"
+        let candidate = "Ich weiss nicht Vielleicht spaeter melde ich mich noch einmal bei dir."
+        let out = guardOut(baseline, candidate, "de")
+        XCTAssertEqual(
+            out,
+            "Ich weiss nicht.Vielleicht spaeter melde ich mich noch einmal bei dir",
+            "KNOWN RESIDUAL (260901-qyi, v2.6 structural fix pending) — pins CURRENT output, " +
+            "not a target"
+        )
+    }
+
+    /// KNOWN RESIDUAL, PRE-EXISTING at `9b454f7`, previously UNNOTICED
+    /// (found while writing this quick task's tests, not from a user
+    /// report) — the WORST of the three pinned shapes here. The LLM does
+    /// the RIGHT thing: it writes the sentence boundary IN PLACE
+    /// (`nicht.` not `nicht`), correctly resolving the mid-sentence
+    /// ellipsis to a single period, AND still writes its own terminal
+    /// period at the end. Both candidate marks are, individually,
+    /// exactly what a user would want. But `EditDiff` still pairs one
+    /// baseline dot (from the 3-mark ellipsis run) against the candidate's
+    /// mid-sentence period as a rejected `.move` (their positions don't
+    /// align baseline-to-candidate token-for-token), restoring it at the
+    /// baseline's own anchor — which glues to "Vielleicht" via the SAME
+    /// lone-remnant mechanism as the two residuals above. The output not
+    /// only glues that mark but LOSES the candidate's terminal period
+    /// entirely: baseline carries 3 terminal marks, candidate carries 2,
+    /// output carries only 1 — an actual mark COUNT loss, not just a
+    /// mis-spacing, unlike the two residuals above (see this quick task's
+    /// SUMMARY and `EditGuardMaterializeInvariantTests`'s P6 property,
+    /// which ledgers neither of the other two but does NOT need to ledger
+    /// this one either — it is not part of the corpus P6 sweeps; pinned
+    /// here as a standalone regression net instead). Verified via direct
+    /// execution (260901-qyi), not assumed.
+    func testKnownResidual_gluedEllipsisRemnant_deInPlaceEllipsisResolved() {
+        let baseline = "Ich weiss nicht... Vielleicht spaeter melde ich mich noch einmal bei dir"
+        let candidate = "Ich weiss nicht. Vielleicht spaeter melde ich mich noch einmal bei dir."
+        let out = guardOut(baseline, candidate, "de")
+        XCTAssertEqual(
+            out,
+            "Ich weiss nicht.Vielleicht spaeter melde ich mich noch einmal bei dir",
+            "KNOWN RESIDUAL (260901-qyi, v2.6 structural fix pending), matters most: the " +
+            "candidate's OWN terminal period is lost entirely, not just mis-spaced — pins " +
+            "CURRENT output, not a target"
+        )
+    }
+
+    // MARK: - Quick task 260901-qyi: mixed-pair regression tests (re-added after revert)
+
+    /// REGRESSION NET against `1751bc1`'s broad `isPartOfMultiMarkBaselineRun`
+    /// predicate (asked only `kind == .punctuation` of either baseline
+    /// neighbour, which also matched MIXED pairs like `: "`, `". `, `!?`) —
+    /// these three tests were introduced by `ff118d1` to prove the narrowing
+    /// worked, and are re-added here (exact-string, unchanged) as a
+    /// regression net against the SPECIFIC, WORSE defect `1751bc1`
+    /// introduced. They PASS at reverted code because reverted code never
+    /// had `isPartOfMultiMarkBaselineRun`/`isPartOfDictatedEllipsisRun` at
+    /// all — the mixed-pair deletion these guard against can only happen if
+    /// a future attempt reintroduces some version of that broad predicate.
+    /// If any of these three regresses, the bug that made `1751bc1`
+    /// (`WORSE than the original defect`) fail review has come back.
+    ///
+    /// Baseline carries a colon immediately followed by an opening quote
+    /// (`sagte: "komm her"`); the candidate strips both quotes and
+    /// relocates the colon to the end of the sentence, so `EditDiff` pairs
+    /// the baseline colon against the relocated candidate colon as a
+    /// `.move`, which `classifyMove` rejects (all punctuation moves are
+    /// rejected). The rejected colon is restored at its own baseline
+    /// anchor.
+    func testNoDeletedColon_multiMarkQuotePairRelocated_260901qyi() {
+        let baseline = "Sie sagte: \"komm her\" und wartete geduldig auf eine Antwort von ihm"
+        let candidate = "Sie sagte komm her und wartete geduldig auf eine Antwort von ihm:"
+        let out = guardOut(baseline, candidate, "de")
+        XCTAssertEqual(out, "Sie sagte: komm her und wartete geduldig auf eine Antwort von ihm")
+    }
+
+    /// Same regression, mirror shape: baseline carries a closing quote
+    /// immediately followed by a sentence-terminal period
+    /// (`"the plan". Then`); the candidate strips the quotes and relocates
+    /// the period to the end of the WHOLE utterance. The rejected-move
+    /// period is restored at its own anchor, next to the closing quote.
+    func testNoDeletedPeriod_quotePeriodPairRelocated_260901qyi() {
+        let baseline = "She called it \"the plan\". Then we started working on it together today"
+        let candidate = "She called it the plan Then we started working on it together today."
+        let out = guardOut(baseline, candidate, "en")
+        XCTAssertEqual(out, "She called it the plan. Then we started working on it together today")
+    }
+
+    /// Same regression, doubled-terminal shape: baseline carries "!?" (an
+    /// exclamation immediately followed by a question mark — two DIFFERENT
+    /// marks, not a same-text run). The candidate deletes the "!" outright
+    /// (an accepted delete) and relocates the "?" to the very end of the
+    /// sentence. The rejected-move "?" is restored at its own baseline
+    /// anchor, next to the (already-deleted, but still baseline-adjacent) "!".
+    func testNoDeletedMark_doubledBangQuestionPairRelocated_260901qyi() {
+        let baseline = "That was amazing!? I could not believe it happened so quickly today"
+        let candidate = "That was amazing I could not believe it happened so quickly today?"
+        let out = guardOut(baseline, candidate, "en")
+        XCTAssertEqual(out, "That was amazing? I could not believe it happened so quickly today")
     }
 }
