@@ -26,9 +26,10 @@ enum AppBuildInfo {
     }
 
     static let recentChanges: [String] = [
-        "Fixed: pause-media-while-dictating no longer un-pauses an unrelated app when the playing audio comes from a player macOS can't pause — it now mutes the output instead",
-        "Added: expanded brand and tech dictation corrections in Dictionary → Starter Packs",
-        "Fixed: AI cleanup no longer glues two sentences together (\"labeled.So\") when it rejects an over-eager sentence merge",
+        "Fixed: push-to-talk media pause could launch Apple Music instead of just pausing what was already playing",
+        "Fixed: the brand dictionary's fuzzy matching could rewrite short acronyms and nearby words into an unrelated brand name",
+        "Fixed: several AI-cleanup punctuation glitches (stray or misplaced commas, dashes, and periods)",
+        "Added: a safety net that stops AI cleanup from silently dropping a number, URL, email, or file path from your dictation",
     ]
 
     static let releasesURL = URL(string: "https://github.com/maksim-101/dicticus/releases")!

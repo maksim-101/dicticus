@@ -6,12 +6,19 @@ Dicticus is a fully local, on-device dictation app (ASR via WhisperKit/Whisper l
 
 ---
 
-## Unreleased — dictation-pipeline fixes from the 2026-08-25 log audit
+## 1.1.0 — Dictation Reliability & Cleanup Fixes — 2026-09-02
 
-- **Fixed: fuzzy brand-matching could corrupt meaning** — the phonetic brand matcher could rewrite spans crossing word boundaries ("…my Tailscale IP and not…" became "…my Tailscale iPad, not…") or swallow digits ("Opus 5" → "USB-A"). Two new vetoes (function-word boundary, digit-sequence parity) make all traced cases inert while keeping genuine brand fixes. macOS + iOS.
+- **Fixed: push-to-talk media pause could launch Apple Music unprompted** — on audio sources macOS can't address directly (some browser tabs, bare-bones IPTV/streaming apps), the pause toggle could hit the system's "no active player" fallback and launch Music instead of just pausing what was already playing. Switched to discrete pause/resume commands that have no such fallback. macOS.
+- **Fixed: fuzzy brand-matching could corrupt short words and acronyms** — the phonetic brand matcher could rewrite spans crossing word boundaries ("…my Tailscale IP and not…" became "…my Tailscale iPad, not…"), swallow digits ("Opus 5" → "USB-A"), or misfire on short acronyms in context ("as BCAA" → "USB-C"). New vetoes (function-word boundary, digit-sequence parity, short-acronym context gate) close all three while keeping genuine brand fixes. macOS + iOS.
+- **Fixed: several AI-cleanup punctuation glitches** — EditGuard no longer fabricates a comma/dash/period sequence that wasn't present in either your speech or the cleaned text (a "mixed-provenance" punctuation bug), and a punctuation mark that gets restored after a rejected edit now always keeps its own correct spacing instead of occasionally gluing onto the next word. macOS + iOS.
 - **Fixed: AI cleanup rejected legitimate hyphen joins** — compounds dictated as two words ("code wise", "self evaluation") now come through as "code-wise" / "self-evaluation" instead of being blocked; a sentence-split bookkeeping bug that could strip a correct sentence-start capital is also fixed. macOS + iOS.
-- **Faster first dictation** (macOS) — the cleanup model is pre-warmed the moment recording starts, removing the ~5 s cold-start on the first AI cleanup after launch or idle (~1 s now).
+- **Fixed: "Thank you." no longer appears out of nowhere** — a short closed list of Whisper's known pause-hallucination phrases is now discarded before it reaches you, instead of being pasted as if you'd said it. macOS.
+- **Fixed: wrong "check your models" alert on silent presses** — pressing the hotkey without speaking no longer shows "Transcription failed. Check that models are loaded."; it now stays silent, matching how other no-speech cases are already handled. macOS.
+- **Added: a safety net for AI cleanup** — a new independent guard blocks any cleanup result that silently drops a number, URL, email address, or file path that was present in your dictation, falling back to the pre-cleanup text instead. macOS + iOS.
+- **Improved: less gets thrown away when AI cleanup partially misbehaves** — previously, if any part of a cleaned multi-sentence response failed the correctness check, cleanup reverted the *entire* response to raw text; now an isolated bad edit reverts on its own, keeping the rest of the cleanup. macOS + iOS.
+- **Faster first dictation** (macOS) — the cleanup model is pre-warmed the moment you press to start recording, removing the ~5 s cold-start on the first AI cleanup after launch or idle (~1 s now).
 - **Debug logs stop fabricating a confidence signal** — the per-segment no-speech probability (never actually computed by WhisperKit) is no longer logged as a fake 0; compression ratio and temperature are recorded instead (macOS Debug-Recorder builds).
+- **Debug logging improvements** (macOS Debug-Recorder builds) — the cleanup log now records the exact final text after capitalization, and a new diagnostic probe records secure-input state at paste time, to speed up future bug investigations.
 
 ---
 
