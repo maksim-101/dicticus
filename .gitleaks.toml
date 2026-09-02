@@ -1,0 +1,13 @@
+# Gitleaks allowlist — targeted false positives only (2026-09-02).
+# Never allowlist a real credential; rotate + purge instead (see global CLAUDE.md).
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known non-secrets that trip the generic-api-key entropy rule"
+regexes = [
+  # UserDefaults migration flag key name (SwissDefaultMigration + its tests)
+  '''swissDefaultMigratedV2_1''',
+  # Sparkle PUBLIC EdDSA key — public by design, verifies update signatures
+  '''svsiIi/mzzxOO1K9AJ7yAXboJb\+U0wDoLCoLM1hEqjc=''',
+]
