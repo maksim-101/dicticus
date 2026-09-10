@@ -361,10 +361,20 @@ final class EditGuardMaterializeInvariantTests: XCTestCase {
 
     private static let sentenceTerminalMarksForP6: Set<String> = [".", "!", "?"]
 
+    /// Counts sentence-terminal mark CHARACTERS, not tokens whose whole
+    /// `.text` is one mark. Since the same-mark run tokenizer change, a
+    /// "......" hesitation is ONE `.punctuation` token whose `.text` is the
+    /// six-character string "......" — matching whole token text against a
+    /// set of single characters would score that run as 0 instead of 6, and
+    /// (because both inputs and the output are counted the same way) the
+    /// floor would collapse instead of staying put, silently hiding the
+    /// mark-DELETION regression this property exists to catch.
     private func terminalMarkCount(_ text: String) -> Int {
-        EditGuardTokenizer.tokenize(text).filter {
-            $0.kind == .punctuation && Self.sentenceTerminalMarksForP6.contains($0.text)
-        }.count
+        EditGuardTokenizer.tokenize(text).reduce(0) {
+            $0 + ($1.kind == .punctuation
+                  ? $1.text.filter { Self.sentenceTerminalMarksForP6.contains(String($0)) }.count
+                  : 0)
+        }
     }
 
     func testMarkConservation_P6() {

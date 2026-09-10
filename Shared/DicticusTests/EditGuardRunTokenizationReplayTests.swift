@@ -56,6 +56,15 @@ final class EditGuardRunTokenizationReplayTests: XCTestCase {
             "Und dann gibt es, ich glaube es ist eine Folie mit einer Tabelle, doch hierfür würde ich tatsächlich ein anderes Folienlayout nehmen. Und zwar eines, das oberhalb der Tabelle nicht noch einen Text enthält, weil jetzt in diesem Fall wurde auch tatsächlich nichts oben hingeschrieben und damit bleibt ein grosser Anteil des Platzes auf der Folie ungenutzt.",
         "record-2026-09-01T17-17-59-197Z":
             "And as for 999.2, what's going through my mind when I read your explanation of what this is about? I mean, I see two possible\u{2E}points of contact where this kind of enrollment and also discernment of how well a user of Dicticus can pronounce certain words That is, at first, maybe at the ASR level or right after, kind of more deterministically, which has its own drawbacks, I assume, because it's not clear signs here. And then at AI Cleanup level, where we would give the LLM the context of, oh, this user is actually struggling with breathing and breathing, meaning we should make sure that whenever these words appear, that it actually makes sense within the context of the sentence that it's placed in.",
+        // introduced by 49.5, therefore post-fix by construction (no pre-49.5 value exists)
+        "record-495-invented-ellipsis-hesitation-en":
+            "I need to follow up with Haldenwerk Informatik regarding the rollout schedule.",
+        // introduced by 49.5, therefore post-fix by construction (no pre-49.5 value exists)
+        "record-495-invented-ellipsis-inplace-de":
+            "Ich bin mir nicht sicher. Die Firnwald Logistik AG hat noch nicht geantwortet.",
+        // introduced by 49.5, therefore post-fix by construction (no pre-49.5 value exists)
+        "record-495-invented-exclamation-run-de":
+            "Das ist grossartig! Haldenwerk Informatik wird begeistert sein.",
     ]
 
     /// The records whose current output is a known DEFECT, so they must

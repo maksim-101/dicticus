@@ -537,4 +537,46 @@ final class EditGuardDanglingPunctuationTests: XCTestCase {
         let out = guardOut(baseline, candidate, "de")
         XCTAssertEqual(out, "Sie sagte: komm her und wartete geduldig auf eine Antwort von ihm")
     }
+
+    // MARK: - 49.5: invented same-mark-run records render the candidate verbatim
+
+    /// The three `record-495-invented-*` fixtures each carry a same-mark
+    /// punctuation RUN in the baseline that the candidate resolves (deletes,
+    /// or folds to a single mark). With runs tokenized as ONE token, the
+    /// guard must render the candidate's resolution verbatim — no remnant of
+    /// the baseline run glued to a neighbour, and no mark lost. Assertions
+    /// below are the exact strings observed from `guardOut` at the time of
+    /// writing, per case, not paraphrases.
+    func testInventedEllipsisRunRecords_renderCandidateVerbatim() {
+        // 1. Mid-sentence "..." deleted outright by the candidate (en).
+        let hesitation = EditGuardFixtures.productionRecords.first {
+            $0.id == "record-495-invented-ellipsis-hesitation-en"
+        }!
+        let out1 = guardOut(hesitation.baseline, hesitation.candidate, hesitation.language)
+        XCTAssertFalse(out1.contains("Informatikregarding"), "glued ellipsis remnant in: \(out1)")
+        XCTAssertFalse(out1.contains("Informatik..."), "baseline ellipsis survived in: \(out1)")
+        XCTAssertTrue(out1.contains("Haldenwerk Informatik regarding the rollout schedule."), out1)
+        XCTAssertEqual(out1, "I need to follow up with Haldenwerk Informatik regarding the rollout schedule.")
+
+        // 2. Mid-sentence "..." resolved IN PLACE to ".", candidate also
+        //    writing its own terminal period (de) — both marks must survive.
+        let inPlace = EditGuardFixtures.productionRecords.first {
+            $0.id == "record-495-invented-ellipsis-inplace-de"
+        }!
+        let out2 = guardOut(inPlace.baseline, inPlace.candidate, inPlace.language)
+        XCTAssertFalse(out2.contains("sicher..."), "baseline ellipsis survived in: \(out2)")
+        XCTAssertFalse(out2.contains("sicher.Die"), "glued ellipsis remnant in: \(out2)")
+        XCTAssertTrue(out2.contains("Ich bin mir nicht sicher. Die Firnwald Logistik AG"), out2)
+        XCTAssertEqual(out2, "Ich bin mir nicht sicher. Die Firnwald Logistik AG hat noch nicht geantwortet.")
+
+        // 3. A "!!" run folded to a single "!" (de).
+        let exclamation = EditGuardFixtures.productionRecords.first {
+            $0.id == "record-495-invented-exclamation-run-de"
+        }!
+        let out3 = guardOut(exclamation.baseline, exclamation.candidate, exclamation.language)
+        XCTAssertFalse(out3.contains("!!"), "the baseline run survived in: \(out3)")
+        XCTAssertFalse(out3.contains("grossartig!Haldenwerk"), "glued run remnant in: \(out3)")
+        XCTAssertTrue(out3.contains("Das ist grossartig! Haldenwerk Informatik wird begeistert sein."), out3)
+        XCTAssertEqual(out3, "Das ist grossartig! Haldenwerk Informatik wird begeistert sein.")
+    }
 }

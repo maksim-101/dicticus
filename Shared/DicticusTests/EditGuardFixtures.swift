@@ -1750,6 +1750,34 @@ enum EditGuardFixtures {
             language: "en",
             baseline: "And as for 999.2, what's going through my mind when I read your explanation of what this is about? I mean, I see two possible... points of contact where this kind of enrollment and also discernment of how well a user of Dicticus can pronounce certain words That is, at first, maybe at the ASR level or right after, kind of more deterministically, which has its own drawbacks, I assume, because it's not clear signs here. And then at AI Cleanup level, where we would give the LLM the context of, oh, this user is actually struggling with breathing and breathing, meaning we should make sure that whenever these words appear, that it actually makes sense within the context of the sentence that it's placed in.",
             candidate: "And as for 999.2, what's going through my mind when I read your explanation of what this is about? I mean, I see two possible points of contact where this kind of enrollment and also discernment of how well a user of Dicticus can pronounce certain words. That is, at first, maybe at the ASR level or right after, kind of more deterministically, which has its own drawbacks, I assume, because it's not clear signs here. And then at AI Cleanup level, where we would give the LLM the context of, oh, this user is actually struggling with breathing and breathing, meaning we should make sure that whenever these words appear, that it actually makes sense within the context of the sentence that it's placed in."
+        ),
+
+        // MARK: - 49.5 invented fixtures (anonymized by construction)
+        //
+        // These three are NOT production captures: every name in them is
+        // INVENTED ("Haldenwerk Informatik", "Firnwald Logistik AG"), same
+        // shape as "Pearcom"/"Dicticus" in the records above, because this
+        // repo is PUBLIC. Each isolates one same-mark-run mechanic at the
+        // smallest natural size, so a regression in run handling fails on a
+        // named record instead of only on the long production captures.
+
+        ProductionRecord(
+            id: "record-495-invented-ellipsis-hesitation-en",
+            language: "en",
+            baseline: "I need to follow up with Haldenwerk Informatik... regarding the rollout schedule",
+            candidate: "I need to follow up with Haldenwerk Informatik regarding the rollout schedule."
+        ),
+        ProductionRecord(
+            id: "record-495-invented-ellipsis-inplace-de",
+            language: "de",
+            baseline: "Ich bin mir nicht sicher... Die Firnwald Logistik AG hat noch nicht geantwortet",
+            candidate: "Ich bin mir nicht sicher. Die Firnwald Logistik AG hat noch nicht geantwortet."
+        ),
+        ProductionRecord(
+            id: "record-495-invented-exclamation-run-de",
+            language: "de",
+            baseline: "Das ist grossartig!! Haldenwerk Informatik wird begeistert sein",
+            candidate: "Das ist grossartig! Haldenwerk Informatik wird begeistert sein."
         )
     ]
 
