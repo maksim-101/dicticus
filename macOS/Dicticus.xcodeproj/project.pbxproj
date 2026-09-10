@@ -168,6 +168,7 @@
 		BCB52BFB7508FD3AF0B07679 /* AdaptiveVoiceGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C15C76E33EDAB96E77F16EC /* AdaptiveVoiceGate.swift */; };
 		BD87CB32FB9F05A589E884AE /* BrandMatcherGermanPrecisionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD956E2E462A36191625195C /* BrandMatcherGermanPrecisionTests.swift */; };
 		BDC0C44074CD829203DDED3D /* EditGuardFixtureCoverageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3931C660399C4F5714646B17 /* EditGuardFixtureCoverageTests.swift */; };
+		BEFDF81CFEF4CCB358B14CBC /* EditGuardRunTokenizationReplayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02507396F705EA789DBA4801 /* EditGuardRunTokenizationReplayTests.swift */; };
 		BFDB87F665D7FFABF0692E1A /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 65F840B6DAF4061FED6C7E20 /* Assets.xcassets */; };
 		C524718AC8111D53B30A01FD /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48F103886FBBE1F7D287929D /* NotificationService.swift */; };
 		C88A581C1776F2B4EFC2C57C /* CleanupPromptTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 174AD8DEBAA5EAA8DF8734DB /* CleanupPromptTests.swift */; };
@@ -227,6 +228,7 @@
 
 /* Begin PBXFileReference section */
 		00A6403E7E893BEB40EABCBD /* DicticusApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DicticusApp.swift; sourceTree = "<group>"; };
+		02507396F705EA789DBA4801 /* EditGuardRunTokenizationReplayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditGuardRunTokenizationReplayTests.swift; sourceTree = "<group>"; };
 		0251735010FF2B17E0BCF8CC /* SwissHelvetisms.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwissHelvetisms.swift; sourceTree = "<group>"; };
 		02FDEF7A735A7BAFE44B996F /* NumberRevertTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NumberRevertTests.swift; sourceTree = "<group>"; };
 		07E8AD126537E7029E61D9DD /* EditGuardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditGuardTests.swift; sourceTree = "<group>"; };
@@ -741,6 +743,7 @@
 				E29AE36115156F5CFED4B1D5 /* EditGuardPauseSplitParakeetAuditTests.swift */,
 				216843E09576D99E411462A0 /* EditGuardPipelineTests.swift */,
 				B0FC1D8FAD13709807AABBA4 /* EditGuardProjectionSalvageTests.swift */,
+				02507396F705EA789DBA4801 /* EditGuardRunTokenizationReplayTests.swift */,
 				07E8AD126537E7029E61D9DD /* EditGuardTests.swift */,
 				F80DDF0ECF58FEA139E28FDF /* EditGuardTokenizerTests.swift */,
 				C4865BCB7953F16DA2CC2361 /* FactPreservationGuardTests.swift */,
@@ -1102,6 +1105,7 @@
 				9D7A21E2A8257707109AACED /* EditGuardPauseSplitParakeetAuditTests.swift in Sources */,
 				B84B080262C8BCE1138D388B /* EditGuardPipelineTests.swift in Sources */,
 				84A628BF3C641F4A29204CAC /* EditGuardProjectionSalvageTests.swift in Sources */,
+				BEFDF81CFEF4CCB358B14CBC /* EditGuardRunTokenizationReplayTests.swift in Sources */,
 				17FB04E9771817C360006E70 /* EditGuardTests.swift in Sources */,
 				4E8963527065DC1D3A1511EB /* EditGuardTokenizerTests.swift in Sources */,
 				40E9437848A0A7B50BFC93A6 /* EntitlementTests.swift in Sources */,
