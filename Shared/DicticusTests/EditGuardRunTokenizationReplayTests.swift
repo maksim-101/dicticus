@@ -1,15 +1,32 @@
 import XCTest
 @testable import Dicticus
 
-/// Phase 49.5 Wave 0 (TDD): the byte-identity replay golden that pins
-/// `EditGuard.apply(...)`'s CURRENT output for every anonymized production
-/// record, so the run-tokenization change landing in a later phase has to
-/// prove it changed ONLY what it claims to change.
+/// Phase 49.5 (Wave 0 capture, Wave 3 re-baseline): a PERMANENT byte-identity
+/// replay golden pinning `EditGuard.apply(...)`'s POST-FIX output for every
+/// anonymized production record — a CI-runnable lock that outlives the local
+/// DebugRecorder logs (D-02). Zero allowance, permanently: any future change
+/// to any of these records' output must show up as a diff here.
 ///
-/// Two records are deliberately NOT pinned: they carry the known
-/// neither-source glue defect this phase exists to fix, so for them the test
-/// asserts the FIXED behaviour instead of the current one. Those assertions
-/// are RED right now, by design.
+/// Three records were re-baselined from their Wave-0 pre-fix values (see
+/// 49.5-GATE-DIFF.md for the full live-corpus evidence and adjudication):
+/// - `record-2026-09-01T17-17-59-197Z` — the designated glued-ellipsis-
+///   remnant defect (see `testKnownDefectStringsNeverReturn` for the exact
+///   defect string), now fixed.
+/// - `record-2026-08-24T04-00-00-733Z` — the designated stray-space-before-
+///   em-dash defect, now fixed.
+/// - `record-2026-08-30T04-54-30-157Z` — NOT one of the two designated
+///   defects, but its output legitimately changed as a side effect of
+///   run-atomic tokenization. `EditGuardDanglingPunctuationTests
+///   .testNoSplicedPunctuation_langweiligUnd_2026_08_30` (quick task
+///   260830-dc4, pre-dates this phase) already tolerates EITHER of two
+///   outputs for this exact record as equally acceptable; the fix simply
+///   shifted which of those two the guard now produces. Re-baselined here so
+///   the permanent lock reflects current, verified-correct behavior rather
+///   than perpetually failing on a non-regression.
+///
+/// `testKnownDefectStringsNeverReturn` keeps the two designated defects'
+/// exact-string assertions alive independently of this golden, so a future
+/// re-baseline can never quietly re-legalize either one.
 @MainActor
 final class EditGuardRunTokenizationReplayTests: XCTestCase {
 
@@ -22,20 +39,14 @@ final class EditGuardRunTokenizationReplayTests: XCTestCase {
 
     // MARK: - Golden
 
-    /// Captured at pre-49.5-fix HEAD. Values are ANONYMIZED production
-    /// records from `EditGuardFixtures.productionRecords` — no live dictation
-    /// text is committed.
-    ///
-    /// The two known-defect values below spell their defective character as a
-    /// `\u{...}` escape (`possible\u{2E}points`, `municipal\u{20}—`): the stored
-    /// value is byte-identical at runtime, but a plain `grep` for a defect
-    /// substring still finds only the one assertion that targets it, never this
-    /// data blob.
+    /// POST-FIX values. Values are ANONYMIZED production records from
+    /// `EditGuardFixtures.productionRecords` — no live dictation text is
+    /// committed.
     private static let preChangeGolden: [String: String] = [
         "record-2026-08-30T04-54-30-157Z":
-            "Also ich möchte, dass du noch einmal genau recherchierst und mir ein Nahrungsergänzungsmittel sowie einen beispielhaften Trainingsplan zusammenstellst. Wie viel Resistancetraining braucht es wirklich? Ich bin zum Beispiel auch kein Fitnessstudio-Gänger. Ich finde das zu langweilig und, wenn nicht unbedingt notwendig dann möchte ich auch nicht einfach nur 30 minuten resistance training machen normalerweise mache ich so fünf Minuten pro Tag mit dem eigenen Körpergewicht oder mit dem Tension Strap. Ich bin aber offen für Veränderung.",
+            "Also ich möchte, dass du noch einmal genau recherchierst und mir ein Nahrungsergänzungsmittel sowie einen beispielhaften Trainingsplan zusammenstellst. Wie viel Resistancetraining braucht es wirklich? Ich bin zum Beispiel auch kein Fitnessstudio-Gänger. Ich finde das zu langweilig und, wenn nicht unbedingt notwendig dann möchte ich auch nicht einfach nur 30 minuten resistance training machen. Normalerweise mache ich so fünf Minuten pro Tag mit dem eigenen Körpergewicht oder mit dem Tension Strap. Ich bin aber offen für Veränderung.",
         "record-2026-08-24T04-00-00-733Z":
-            "Please look for news from this year and if possible as recently as possible about failed or delayed projects either in the government in Switzerland at either of the three levels of government, meaning federal, cantonal and municipal\u{20}—as well as from the social sector.",
+            "Please look for news from this year and if possible as recently as possible about failed or delayed projects either in the government in Switzerland at either of the three levels of government, meaning federal, cantonal and municipal—as well as from the social sector.",
         "record-260831-gd9-in-clawed":
             "Check also in.clawed directory for the file.",
         "record-2026-07-29T03-47-35-149Z":
@@ -55,7 +66,7 @@ final class EditGuardRunTokenizationReplayTests: XCTestCase {
         "record-260723-rif-esundzwardanglinges":
             "Und dann gibt es, ich glaube es ist eine Folie mit einer Tabelle, doch hierfür würde ich tatsächlich ein anderes Folienlayout nehmen. Und zwar eines, das oberhalb der Tabelle nicht noch einen Text enthält, weil jetzt in diesem Fall wurde auch tatsächlich nichts oben hingeschrieben und damit bleibt ein grosser Anteil des Platzes auf der Folie ungenutzt.",
         "record-2026-09-01T17-17-59-197Z":
-            "And as for 999.2, what's going through my mind when I read your explanation of what this is about? I mean, I see two possible\u{2E}points of contact where this kind of enrollment and also discernment of how well a user of Dicticus can pronounce certain words That is, at first, maybe at the ASR level or right after, kind of more deterministically, which has its own drawbacks, I assume, because it's not clear signs here. And then at AI Cleanup level, where we would give the LLM the context of, oh, this user is actually struggling with breathing and breathing, meaning we should make sure that whenever these words appear, that it actually makes sense within the context of the sentence that it's placed in.",
+            "And as for 999.2, what's going through my mind when I read your explanation of what this is about? I mean, I see two possible points of contact where this kind of enrollment and also discernment of how well a user of Dicticus can pronounce certain words. That is, at first, maybe at the ASR level or right after, kind of more deterministically, which has its own drawbacks, I assume, because it's not clear signs here. And then at AI Cleanup level, where we would give the LLM the context of, oh, this user is actually struggling with breathing and breathing, meaning we should make sure that whenever these words appear, that it actually makes sense within the context of the sentence that it's placed in.",
         // introduced by 49.5, therefore post-fix by construction (no pre-49.5 value exists)
         "record-495-invented-ellipsis-hesitation-en":
             "I need to follow up with Haldenwerk Informatik regarding the rollout schedule.",
@@ -67,18 +78,14 @@ final class EditGuardRunTokenizationReplayTests: XCTestCase {
             "Das ist grossartig! Haldenwerk Informatik wird begeistert sein.",
     ]
 
-    /// The records whose current output is a known DEFECT, so they must
-    /// IMPROVE rather than stay byte-identical to the golden above.
-    private static let improvementIDs: Set<String> = [
-        // Lone-restored-ellipsis-remnant glue: output contains a period glued
-        // to the following word where neither input has that adjacency.
-        "record-2026-09-01T17-17-59-197Z",
-        // Stray space rendered before a surviving em-dash.
-        "record-2026-08-24T04-00-00-733Z",
-    ]
-
     // MARK: - Replay
 
+    /// Zero-allowance, permanent byte-identity lock: EVERY golden entry is a
+    /// hard equality check. No improvement allowance exists any more — the
+    /// two records that legitimately changed during this phase (plus the
+    /// third, `record-2026-08-30`, per its own doc comment above) were
+    /// re-baselined to their post-fix values, so a future regression on any
+    /// of them fails here exactly like any other record would.
     func testProductionRecordsMatchPreChangeGolden_orImprove() {
         XCTAssertEqual(Self.preChangeGolden.count, EditGuardFixtures.productionRecords.count,
                        "the golden must cover every production record")
@@ -92,33 +99,39 @@ final class EditGuardRunTokenizationReplayTests: XCTestCase {
             }
 
             let out = guardOut(record.baseline, record.candidate, record.language)
-
-            if Self.improvementIDs.contains(id) {
-                XCTAssertNotEqual(out, golden,
-                                  "\(id) must IMPROVE, not stay pinned to the pre-fix golden")
-
-                if id == "record-2026-09-01T17-17-59-197Z" {
-                    XCTAssertFalse(out.contains("possible.points"),
-                                   "\(id): the restored ellipsis remnant must not glue to the following word")
-                    XCTAssertTrue(out.contains("two possible points of contact"),
-                                  "\(id): the phrase must read as one of the two inputs actually wrote it")
-                }
-
-                if id == "record-2026-08-24T04-00-00-733Z" {
-                    XCTAssertFalse(out.contains("municipal —"),
-                                   "\(id): no stray space may survive in front of the em-dash")
-                    XCTAssertTrue(out.contains("municipal—as well as"),
-                                  "\(id): the em-dash must bind exactly as the candidate wrote it")
-                }
-            } else {
-                XCTAssertEqual(out, golden, "byte-identity regression on \(id)")
-            }
-
+            XCTAssertEqual(out, golden, "byte-identity regression on \(id)")
             checkedCount += 1
         }
 
         print("[eg495 replay] checkedCount=\(checkedCount) (of \(Self.preChangeGolden.count) golden entries)")
         XCTAssertGreaterThan(checkedCount, 0, "the replay must not be vacuous")
+    }
+
+    /// Keeps the two designated defects' exact-string acceptance criteria
+    /// alive INDEPENDENTLY of `preChangeGolden` — so a future re-baseline of
+    /// the golden (e.g. after a legitimate, unrelated change to one of these
+    /// two records) can never quietly re-legalize either defect by simply
+    /// updating its stored golden value.
+    func testKnownDefectStringsNeverReturn() {
+        if let r = EditGuardFixtures.productionRecords.first(where: { $0.id == "record-2026-09-01T17-17-59-197Z" }) {
+            let out = guardOut(r.baseline, r.candidate, r.language)
+            XCTAssertFalse(out.contains("possible.points"),
+                           "the restored ellipsis remnant must not glue to the following word")
+            XCTAssertTrue(out.contains("two possible points of contact"),
+                          "the phrase must read as one of the two inputs actually wrote it")
+        } else {
+            XCTFail("record-2026-09-01T17-17-59-197Z missing from EditGuardFixtures.productionRecords")
+        }
+
+        if let r = EditGuardFixtures.productionRecords.first(where: { $0.id == "record-2026-08-24T04-00-00-733Z" }) {
+            let out = guardOut(r.baseline, r.candidate, r.language)
+            XCTAssertFalse(out.contains("municipal —"),
+                           "no stray space may survive in front of the em-dash")
+            XCTAssertTrue(out.contains("municipal—as well as"),
+                          "the em-dash must bind exactly as the candidate wrote it")
+        } else {
+            XCTFail("record-2026-08-24T04-00-00-733Z missing from EditGuardFixtures.productionRecords")
+        }
     }
 
     // MARK: - D-04: per-sentence divergence gate window
