@@ -36,13 +36,13 @@ import XCTest
 /// (and independently re-surfaced by P3-extension/P5 under their own coarser
 /// tokenizer) while measuring these counts — a stray space rendered before a
 /// surviving em-dash in `record-2026-08-24T04-00-00-733Z`
-/// (`EditGuard.collapseMixedProvenancePunctuationRuns` correctly fixes the
-/// ORIGINAL 260831-ad8 comma-touching-dash defect but leaves a forced
-/// bridging space, meant for the comma it drops, stranded in front of the
-/// dash that survives in its place). NOT fixed here (test-only scope; see
-/// `.planning/todos/pending/editguard-stray-space-before-surviving-emdash.md`)
-/// — each affected property carries a single, exact-match, per-entry-cited
-/// exemption for this one case, never a threshold or a whole-case skip.
+/// (`EditGuard.collapseMixedProvenancePunctuationRuns` correctly fixed the
+/// ORIGINAL 260831-ad8 comma-touching-dash defect but left a forced bridging
+/// space, meant for the comma it drops, stranded in front of the dash that
+/// survives in its place). CLOSED by Phase 49.5's `deriveSeamSpacing`
+/// renderer (`.planning/todos/pending/editguard-stray-space-before-surviving-emdash.md`)
+/// — every exemption set that once cited this residual has been removed;
+/// all three properties below are now zero-allowance hard gates.
 @MainActor
 final class EditGuardMaterializeInvariantTests: XCTestCase {
 
@@ -95,31 +95,22 @@ final class EditGuardMaterializeInvariantTests: XCTestCase {
     /// discovered as a false positive): a non-punctuation token gluing
     /// directly to a FOLLOWING punctuation mark in the output is never
     /// flagged, even when every input occurrence of that pair was spaced —
-    /// `EditGuard.bindPunctuationLeft` binding a mark leftward is a
-    /// sanctioned normalization (protects against "Excel , PowerPoint"-STYLE
-    /// dangling space, not producing it). The OPPOSITE direction — output
-    /// SPACED where every input occurrence of that exact pair is glued,
-    /// which is the actual "Excel , PowerPoint" defect shape — is NOT
-    /// exempted and is fully checked below.
-    /// Exemptions are EXACT case id + adjacency pair — never a threshold, a
-    /// percentage, or a whole-case skip — so every OTHER occurrence of these
-    /// shapes still fails:
-    /// - `municipal|—`: the stray-space-before-surviving-em-dash residual
-    ///   described in this file's header, filed as
-    ///   `.planning/todos/pending/editguard-stray-space-before-surviving-emdash.md`.
-    /// - `.|points`: the lone-restored-ellipsis-remnant glue filed as
-    ///   `.planning/todos/pending/editguard-ellipsis-remnant-glue.md`.
-    private static let p4KnownExemptions: Set<String> = [
-        "record-2026-08-24T04-00-00-733Z|municipal|—",
-        "record-2026-09-01T17-17-59-197Z|.|points",
-    ]
+    /// `EditGuard.deriveSeamSpacing`'s glue-before-punctuation kind-rule
+    /// fallback is a sanctioned normalization (protects against
+    /// "Excel , PowerPoint"-STYLE dangling space, not producing it). The
+    /// OPPOSITE direction — output SPACED where every input occurrence of
+    /// that exact pair is glued, which is the actual "Excel , PowerPoint"
+    /// defect shape — is NOT exempted and is fully checked below.
+    ///
+    /// Phase 49.5 closed both residuals this property once carried an
+    /// exemption for (`municipal|—` and `.|points`) — that exemption set is
+    /// gone; this is now a zero-allowance hard gate.
 
     func testAdjacencySpacingFidelity_P4() {
         var checkedCount = 0
         var abstainCount = 0
         var contestedCount = 0
         var casesExercising = 0
-        var exemptedCount = 0
 
         func recordAdjacencies(_ tokens: [EditGuard.Token], into observed: inout [String: Set<Bool>]) {
             guard tokens.count > 1 else { return }
@@ -149,12 +140,6 @@ final class EditGuardMaterializeInvariantTests: XCTestCase {
                     continue
                 }
 
-                let exemptionKey = "\(c.id)|\(left.normalized)|\(right.normalized)"
-                if Self.p4KnownExemptions.contains(exemptionKey) {
-                    exemptedCount += 1
-                    continue
-                }
-
                 let key = left.normalized + "\u{0}" + right.normalized
                 guard let observedSet = observed[key] else {
                     abstainCount += 1
@@ -176,7 +161,7 @@ final class EditGuardMaterializeInvariantTests: XCTestCase {
         }
 
         print("[P4 non-vacuity] checkedCount=\(checkedCount) casesExercising=\(casesExercising) " +
-              "abstainCount=\(abstainCount) contestedCount=\(contestedCount) exemptedCount=\(exemptedCount) " +
+              "abstainCount=\(abstainCount) contestedCount=\(contestedCount) " +
               "(of \(corpus.count) total cases)")
         XCTAssertGreaterThan(
             checkedCount, 0,
@@ -191,14 +176,6 @@ final class EditGuardMaterializeInvariantTests: XCTestCase {
         )
     }
 
-    /// Shared by P3-extension and P5: both run the same coarse-tokenizer
-    /// checker, so both see the em-dash residual as the identical two pairs.
-    /// Exact record id + pair only — never a threshold or a whole-record skip.
-    private static let emDashResidualExemptions: Set<String> = [
-        "record-2026-08-24T04-00-00-733Z|municipal —as",
-        "record-2026-08-24T04-00-00-733Z|—as well"
-    ]
-
     // MARK: - P3-extension: tier-1 word-bigram check, widened to production records
 
     /// The EXISTING tier-1 word-bigram neither-source checker
@@ -211,33 +188,29 @@ final class EditGuardMaterializeInvariantTests: XCTestCase {
     /// task, checked only across the 87 synthetic fixtures and never against
     /// a live record.
     ///
-    /// The em-dash residual surfaces here as a WORD bigram because this
-    /// checker's tokenizer splits only on whitespace and 6 ASCII marks, so
-    /// "—as" reads as one word — the same single root cause, not a second
-    /// defect. Ledgered in `emDashResidualExemptions` below.
+    /// The em-dash residual used to surface here as a WORD bigram because
+    /// this checker's tokenizer splits only on whitespace and 6 ASCII marks,
+    /// so "—as" read as one word — the same single root cause P4 found, not
+    /// a second defect. Phase 49.5's `deriveSeamSpacing` fix closed it; the
+    /// exemption set that once ledgered it is gone and this is now a
+    /// zero-allowance hard gate.
     func testTier1NeitherSourceClean_productionRecords_P3Extension() {
-        var unledgered: [String] = []
-        var ledgeredCount = 0
+        var violations: [String] = []
         for record in EditGuardFixtures.productionRecords {
             let out = guardOut(record.baseline, record.candidate, record.language)
             let v = EditGuardMergeAtomicityTests.neitherSourceViolations(
                 output: out, sourceA: record.baseline, sourceB: record.candidate
             )
             for pair in v.tier1 {
-                let key = "\(record.id)|\(pair)"
-                if Self.emDashResidualExemptions.contains(key) {
-                    ledgeredCount += 1
-                } else {
-                    unledgered.append(key)
-                }
+                violations.append("\(record.id)|\(pair)")
             }
         }
         print("[P3-extension] swept \(EditGuardFixtures.productionRecords.count) production records for " +
-              "tier-1 neither-source violations; ledgeredCount=\(ledgeredCount)")
+              "tier-1 neither-source violations; ledgeredCount=0")
         XCTAssertTrue(
-            unledgered.isEmpty,
-            "tier-1 neither-source violation(s) outside the exemption ledger in production " +
-            "records — a NEW word-level splice defect: \(unledgered)"
+            violations.isEmpty,
+            "tier-1 neither-source violation(s) in production records — a NEW word-level " +
+            "splice defect: \(violations)"
         )
     }
 
@@ -254,12 +227,12 @@ final class EditGuardMaterializeInvariantTests: XCTestCase {
     /// `Atomicity.check`, including its sanctioned single-mark-after-word
     /// allowance).
     ///
-    /// The assertion form below (a hard, per-entry-justified exemption
-    /// ledger) was chosen AFTER measuring the real violation list on this
-    /// corpus — not written first and fitted to a guess: the only tier-2
-    /// violations are the same em-dash residual P4 found and filed
+    /// The only tier-2 violations this property ever found were the same
+    /// em-dash residual P4 found and filed
     /// (`.planning/todos/pending/editguard-stray-space-before-surviving-emdash.md`),
-    /// ledgered in `emDashResidualExemptions` below.
+    /// previously ledgered in an exemption set. Phase 49.5's
+    /// `deriveSeamSpacing` fix closed it; that exemption set is gone and this
+    /// is now a zero-allowance hard gate.
 
     func testFullTokenAdjacencyProvenance_P5() {
         struct Violation { let caseID: String; let pair: String }
@@ -294,17 +267,10 @@ final class EditGuardMaterializeInvariantTests: XCTestCase {
             "failure message; the same vacuity risk applies per-case."
         )
 
-        var unledgered: [String] = []
-        for v in violations {
-            let key = "\(v.caseID)|\(v.pair)"
-            if !Self.emDashResidualExemptions.contains(key) {
-                unledgered.append(key)
-            }
-        }
+        let keys = violations.map { "\($0.caseID)|\($0.pair)" }
         XCTAssertTrue(
-            unledgered.isEmpty,
-            "tier-2 neither-source violation(s) outside the exemption ledger — a NEW " +
-            "full-token adjacency defect: \(unledgered)"
+            keys.isEmpty,
+            "tier-2 neither-source violation(s) — a NEW full-token adjacency defect: \(keys)"
         )
     }
 
