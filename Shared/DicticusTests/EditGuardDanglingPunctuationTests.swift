@@ -451,9 +451,13 @@ final class EditGuardDanglingPunctuationTests: XCTestCase {
         )
     }
 
-    // MARK: - Quick task 260901-qyi: lone restored ellipsis remnant (KNOWN RESIDUAL, not fixed)
+    // MARK: - Quick task 260901-qyi: lone restored ellipsis remnant (structural fix landed in Phase 49.5)
 
-    /// KNOWN RESIDUAL, deliberately NOT fixed at the rendering level. Two
+    /// Acceptance criterion for ellipsis resolution fix: when the LLM resolves an ellipsis
+    /// in place, the guard must accept that resolution instead of shipping a glued remnant.
+    /// The phrase must read as one of the two inputs actually wrote it.
+    ///
+    /// This was previously a KNOWN RESIDUAL, deliberately NOT fixed at the rendering level. Two
     /// rendering-level attempts (`1751bc1`, `ff118d1`) each "fixed" this
     /// specific defect but introduced a WORSE semantic regression (silently
     /// deleting a legitimate mark or an unrelated sentence boundary) —
@@ -463,74 +467,46 @@ final class EditGuardDanglingPunctuationTests: XCTestCase {
     /// treated as ONE unit instead of N independent tokens that `EditDiff`
     /// can pair away one at a time), sequenced as the first v2.6 item — see
     /// `.planning/todos/pending/editguard-ellipsis-remnant-glue.md`. A THIRD
-    /// rendering-level narrowing attempt should NOT be made; this test pins
-    /// the CURRENT (accepted, cosmetic) output so any future change to this
-    /// shape shows up as a diff here, not a silent behavior change.
-    ///
-    /// LIVE production bug, corpus 2026-09-01T17:17:59.197Z
-    /// (`EditGuardFixtures.productionRecords`, record
-    /// `record-2026-09-01T17-17-59-197Z`). Baseline carries a hesitation
-    /// ellipsis (three `.` tokens) between "possible" and "points"; the LLM
-    /// correctly deleted the whole ellipsis. `EditDiff` pairs one of the
-    /// three baseline dots against an unrelated candidate period (elsewhere
-    /// in the sentence) as a REJECTED `.move`; the other two dots are
-    /// independently accepted deletes. The rejected move's dot is restored
-    /// via `restorationTargets` with its own (empty, mid-ellipsis) baseline
-    /// trailing — correct in isolation — but it is now the LONE surviving
-    /// member of what was a 3-mark baseline run, so
-    /// `collapseMixedProvenancePunctuationRuns`'s mixed-run pass (built for
-    /// runs of length >= 2) passes it straight through untouched, and
-    /// `bindPunctuationLeft` then clears "possible"'s trailing too (its
-    /// own ellipsis guard requires the next TWO tokens to still be `.`,
-    /// which they no longer are) — gluing the mark on both sides. Cosmetic
-    /// (the mark itself survives, just mis-spaced) and user-repairable —
-    /// measured at 2 occurrences in 583 live records (260901-qyi planning).
+    /// rendering-level narrowing attempt should NOT be made; this test was
+    /// originally pinned to the CURRENT (accepted, cosmetic) output so any future change to this
+    /// shape would show up as a diff here, not a silent behavior change.
     func testKnownResidual_gluedEllipsisRemnant_possiblePoints() {
         let record = EditGuardFixtures.productionRecords.first {
             $0.id == "record-2026-09-01T17-17-59-197Z"
         }!
         let out = guardOut(record.baseline, record.candidate, record.language)
-        XCTAssertTrue(
-            out.contains("two possible.points of contact"),
-            "KNOWN RESIDUAL (260901-qyi, v2.6 structural fix pending): the lone restored " +
-            "ellipsis remnant is expected to glue onto the following word — this pins the " +
-            "CURRENT accepted output, not a target: \(out)"
-        )
+        XCTAssertFalse(out.contains("possible.points"), "the restored ellipsis remnant must not glue to the following word")
+        XCTAssertTrue(out.contains("two possible points of contact"), "the phrase must read as one of the two inputs actually wrote it")
     }
 
-    /// KNOWN RESIDUAL, PRE-EXISTING at `9b454f7`, previously UNNOTICED
+    /// The LLM resolved the ellipsis in place and the guard must now accept that resolution
+    /// instead of shipping a glued remnant plus a lost terminal period.
+    ///
+    /// This was previously a KNOWN RESIDUAL, PRE-EXISTING at `9b454f7`, previously UNNOTICED
     /// (found while writing this quick task's tests, not from a user
-    /// report) — the worse of the two pinned shapes here. The LLM does
-    /// the RIGHT thing: it writes the sentence boundary IN PLACE
+    /// report) — the worse of the two pinned shapes here. The LLM did
+    /// the RIGHT thing: it wrote the sentence boundary IN PLACE
     /// (`nicht.` not `nicht`), correctly resolving the mid-sentence
-    /// ellipsis to a single period, AND still writes its own terminal
-    /// period at the end. Both candidate marks are, individually,
-    /// exactly what a user would want. But `EditDiff` still pairs one
+    /// ellipsis to a single period, AND still wrote its own terminal
+    /// period at the end. Both candidate marks were, individually,
+    /// exactly what a user would want. But `EditDiff` still paired one
     /// baseline dot (from the 3-mark ellipsis run) against the candidate's
     /// mid-sentence period as a rejected `.move` (their positions don't
     /// align baseline-to-candidate token-for-token), restoring it at the
-    /// baseline's own anchor — which glues to "Vielleicht" via the SAME
-    /// lone-remnant mechanism as the two residuals above. The output not
-    /// only glues that mark but LOSES the candidate's terminal period
+    /// baseline's own anchor — which glued to "Vielleicht" via the SAME
+    /// lone-remnant mechanism as the residual above. The output not
+    /// only glued that mark but LOST the candidate's terminal period
     /// entirely: baseline carries 3 terminal marks, candidate carries 2,
-    /// output carries only 1 — an actual mark COUNT loss, not just a
+    /// output carried only 1 — an actual mark COUNT loss, not just a
     /// mis-spacing, unlike the residual above (see this quick task's
     /// SUMMARY and `EditGuardMaterializeInvariantTests`'s P6 property,
-    /// which does NOT need to ledger
-    /// this one either — it is not part of the corpus P6 sweeps; pinned
-    /// here as a standalone regression net instead). Verified via direct
-    /// execution (260901-qyi), not assumed.
+    /// which does NOT need to ledger this one either — it is not part of
+    /// the corpus P6 sweeps; it was pinned inline here instead).
     func testKnownResidual_gluedEllipsisRemnant_deInPlaceEllipsisResolved() {
         let baseline = "Ich weiss nicht... Vielleicht spaeter melde ich mich noch einmal bei dir"
         let candidate = "Ich weiss nicht. Vielleicht spaeter melde ich mich noch einmal bei dir."
         let out = guardOut(baseline, candidate, "de")
-        XCTAssertEqual(
-            out,
-            "Ich weiss nicht.Vielleicht spaeter melde ich mich noch einmal bei dir",
-            "KNOWN RESIDUAL (260901-qyi, v2.6 structural fix pending), matters most: the " +
-            "candidate's OWN terminal period is lost entirely, not just mis-spaced — pins " +
-            "CURRENT output, not a target"
-        )
+        XCTAssertEqual(out, "Ich weiss nicht. Vielleicht spaeter melde ich mich noch einmal bei dir.")
     }
 
     // MARK: - Quick task 260901-qyi: mixed-pair regression test (re-added after revert)
