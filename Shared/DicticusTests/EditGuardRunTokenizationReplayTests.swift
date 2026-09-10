@@ -129,7 +129,7 @@ final class EditGuardRunTokenizationReplayTests: XCTestCase {
         }
 
         XCTAssertEqual(
-            EditGuardTokenizer.rebuild(candidate.filter { $0.sentenceIndex == b.sentenceIndex }),
+            EditGuardTokenizer.rebuild(EditGuard.candidateSentenceWindow(candidate, sentenceIndex: b.sentenceIndex)),
             "Vielleicht spaeter melde ich mich noch einmal bei dir."
         )
 
