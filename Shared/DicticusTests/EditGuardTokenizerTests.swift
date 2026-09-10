@@ -88,6 +88,74 @@ final class EditGuardTokenizerTests: XCTestCase {
         XCTAssertEqual(tokens.map(\.text), ["s'het"])
     }
 
+    // MARK: - EDITGUARD-02: same-mark run atomicity + D-04 sentence numbering
+
+    func testSameMarkRunIsOneToken() {
+        let tokens = EditGuardTokenizer.tokenize("a... b")
+        XCTAssertEqual(tokens.map(\.text), ["a", "...", "b"])
+    }
+
+    func testSameMarkRunsForExclamationAndQuestion() {
+        let tokens1 = EditGuardTokenizer.tokenize("a!! b")
+        XCTAssertEqual(tokens1.map(\.text), ["a", "!!", "b"])
+        
+        let tokens2 = EditGuardTokenizer.tokenize("a?? b")
+        XCTAssertEqual(tokens2.map(\.text), ["a", "??", "b"])
+    }
+
+    func testMixedMarkAdjacencyStaysSeparate() {
+        let tokens1 = EditGuardTokenizer.tokenize("a..!? b")
+        XCTAssertEqual(tokens1.map(\.text), ["a", "..", "!", "?", "b"])
+        
+        let tokens2 = EditGuardTokenizer.tokenize("a!? b")
+        let punctTokens = tokens2.filter { $0.kind == .punctuation }
+        XCTAssertEqual(punctTokens.map(\.text), ["!", "?"])
+        
+        // Verify mixed pair like colon followed by quote stays separate
+        let tokens3 = EditGuardTokenizer.tokenize("sagte: \"hi\"")
+        let punctTokens3 = tokens3.filter { $0.kind == .punctuation }
+        // Should have colon, opening quote, closing quote as separate tokens
+        XCTAssertEqual(punctTokens3.count, 3, "Should have 3 punctuation tokens")
+        XCTAssertEqual(punctTokens3[0].text, ":", "First punctuation should be colon")
+        XCTAssertEqual(punctTokens3[1].text, "\"", "Second punctuation should be opening quote")
+        XCTAssertEqual(punctTokens3[2].text, "\"", "Third punctuation should be closing quote")
+    }
+
+    func testSpacedMarksDoNotMerge() {
+        let tokens = EditGuardTokenizer.tokenize("a. . . b")
+        XCTAssertEqual(tokens.map(\.text), ["a", ".", ".", ".", "b"])
+    }
+
+    func testOneSentenceBoundaryPerRun_D04() {
+        let tokens1 = EditGuardTokenizer.tokenize("a... b")
+        XCTAssertEqual(tokens1.map(\.sentenceIndex), [0, 0, 1])
+        
+        let tokens2 = EditGuardTokenizer.tokenize("a. b")
+        XCTAssertEqual(tokens2.map(\.sentenceIndex), [0, 0, 1])
+    }
+
+    func testDigitFlankedAndOrdinalPeriodsUnaffected() {
+        let tokens1 = EditGuardTokenizer.tokenize("Version 2.5.")
+        XCTAssertEqual(tokens1.map(\.text), ["Version", "2.5", "."])
+        
+        let tokens2 = EditGuardTokenizer.tokenize("4.")
+        XCTAssertEqual(tokens2.map(\.text), ["4", "."])
+    }
+
+    func testLosslessRebuildOnPunctuationRuns() {
+        let inputs = [
+            "wait... really?!",
+            "a...b",
+            "wow!!  ok",
+            "......goodshine......"
+        ]
+        
+        for input in inputs {
+            XCTAssertEqual(EditGuardTokenizer.rebuild(EditGuardTokenizer.tokenize(input)), input,
+                "Lossless round-trip failed for: '\(input)'")
+        }
+    }
+
     // MARK: - Losslessness
 
     func testLosslessRebuildOnBehaviorExamples() {
