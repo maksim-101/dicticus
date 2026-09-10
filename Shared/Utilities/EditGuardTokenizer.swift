@@ -17,8 +17,22 @@ import Foundation
 /// same guarantee `SentenceAligner.splitSentences` already makes at the
 /// sentence level. Whitespace and punctuation ride on `Token.trailing`, not
 /// inline in `Token.text`, so the guard can diff token identity without
-/// noise from surrounding formatting.
+/// noise from surrounding formatting. Merging a punctuation run (below)
+/// preserves this: it only concatenates `Token.text`, leaving every
+/// `trailing` exactly where the original per-character tokens had it.
+///
+/// ⚠️ `Token.text` may be a MULTI-character punctuation run (`...`, `!!`),
+/// not just a single mark. A maximal run of the same mark tokenizes as ONE
+/// token and counts as exactly ONE sentence boundary. Code that assumed a
+/// `.punctuation` token is always one character must be revisited.
 public enum EditGuardTokenizer {
+
+    /// Same-mark runs of THESE characters tokenize as one token
+    /// (EDITGUARD-02). Deliberately excludes `, ; :` — a repeated comma or
+    /// colon is not a dictated prosodic run, and folding it would change
+    /// mixed-adjacency behavior that other tests pin (e.g. a colon
+    /// immediately followed by a quote must stay two tokens).
+    private static let runMergingMarks: Set<Character> = [".", "!", "?"]
 
     // MARK: - Tokenize
 
@@ -38,9 +52,15 @@ public enum EditGuardTokenizer {
         let n = chars.count
         var tokens: [EditGuard.Token] = []
         var sentenceIndex = 0
+        var pendingSentenceBoundary = false
         var i = 0
 
         func emit(text: String, kind: EditGuard.TokenKind) {
+            // Deferred so a merged run bumps the index once, not per mark.
+            if pendingSentenceBoundary {
+                sentenceIndex += 1
+                pendingSentenceBoundary = false
+            }
             tokens.append(EditGuard.Token(
                 text: text,
                 normalized: text.lowercased(),
@@ -50,7 +70,7 @@ public enum EditGuardTokenizer {
                 trailing: ""
             ))
             if kind == .punctuation, text == "." || text == "!" || text == "?" {
-                sentenceIndex += 1
+                pendingSentenceBoundary = true
             }
         }
 
@@ -81,6 +101,27 @@ public enum EditGuardTokenizer {
                     trailing: ""
                 ))
             }
+        }
+
+        /// Emits one punctuation character, folding it into the previous
+        /// token when it continues a maximal same-mark run.
+        func emitPunctuation(_ c: Character) {
+            if let last = tokens.last,
+               runMergingMarks.contains(c),
+               last.kind == .punctuation,
+               last.trailing.isEmpty,
+               last.text.allSatisfy({ $0 == c }) {
+                tokens[tokens.count - 1] = EditGuard.Token(
+                    text: last.text + String(c),
+                    normalized: (last.text + String(c)).lowercased(),
+                    kind: .punctuation,
+                    index: last.index,
+                    sentenceIndex: last.sentenceIndex,
+                    trailing: ""
+                )
+                return
+            }
+            emit(text: String(c), kind: .punctuation)
         }
 
         while i < n {
@@ -120,7 +161,7 @@ public enum EditGuardTokenizer {
                 // construction this cannot be digit-flanked, since a
                 // digit-flanked separator would already have been absorbed
                 // by the word-scan branch above.
-                emit(text: String(c), kind: .punctuation)
+                emitPunctuation(c)
                 i += 1
             } else if c.isWhitespace {
                 var ws = ""
@@ -130,7 +171,7 @@ public enum EditGuardTokenizer {
                 }
                 appendTrailing(ws)
             } else {
-                emit(text: String(c), kind: .punctuation)
+                emitPunctuation(c)
                 i += 1
             }
         }
