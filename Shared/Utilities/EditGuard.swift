@@ -733,7 +733,7 @@ public enum EditGuard {
             } else if edits[j].kind == .substitute,
                       let pf = edits[j].from, pf.kind == .word,
                       let pt = edits[j].to, pt.kind == .punctuation,
-                      prosodicPunctuation.contains(pt.text) {
+                      isProsodicPunctuation(pt.text) {
                 partnerFrom = pf
             } else {
                 continue
@@ -830,7 +830,7 @@ public enum EditGuard {
         //    prosody, and must fall through to the content checks below
         //    instead of blanket-accepting.
         if a.kind == .punctuation, b.kind == .punctuation,
-           prosodicPunctuation.contains(a.text), prosodicPunctuation.contains(b.text) {
+           isProsodicPunctuation(a.text), isProsodicPunctuation(b.text) {
             return (true, .punctuationOrCasing, nil)
         }
         // 3. Digit lock (D-03).
@@ -925,7 +925,7 @@ public enum EditGuard {
         // changes meaning ("C" -> "C++"), so it is classed like any other
         // invented content, not blanket-accepted.
         if b.kind == .punctuation {
-            if prosodicPunctuation.contains(b.text) {
+            if isProsodicPunctuation(b.text) {
                 return (true, .punctuationOrCasing, nil)
             }
             return (false, nil, .contentWordInsertion)
@@ -954,7 +954,7 @@ public enum EditGuard {
         // ships `false` (44-07). A `nil` verdict is NEVER coerced to accept.
         if PosTagger.enableNLTaggerFunctionWidening {
             let sentenceText = EditGuardTokenizer.rebuild(
-                candidate.filter { $0.sentenceIndex == b.sentenceIndex }
+                candidateSentenceWindow(candidate, sentenceIndex: b.sentenceIndex)
             )
             if PosTagger.isFunctionWord(b.text, in: sentenceText, language: language) == true {
                 return (true, .functionWordInsertion, nil)
@@ -1061,10 +1061,12 @@ public enum EditGuard {
     ///   continuation (German capitalises nouns, not just sentence starts)
     ///   is also a missed repair — again the safe direction.
     ///
-    /// R3+R4 together also fully exclude the ellipsis run in
-    /// `cleanup-2026-07-31.jsonl:91` ("another**...**investigation" —
-    /// each dot has a dot neighbour, so neither neighbour is a `.word`);
-    /// no separate ellipsis arm is needed.
+    /// R1 ALONE now excludes the ellipsis run in
+    /// `cleanup-2026-07-31.jsonl:91` ("another**...**investigation") —
+    /// since EDITGUARD-02 an ellipsis is ONE run token whose `text` is
+    /// "...", so it never satisfies `token.text == "."` structurally and
+    /// no separate ellipsis arm is needed. R2 still does its own job:
+    /// excluding glued single periods (`a.m`, `claw.md`, `.claude`, `3.5`).
     ///
     /// Index arithmetic (`baseline[index - 1]` / `baseline[index + 1]`) is
     /// safe because `EditGuardTokenizer` assigns baseline indices
@@ -1076,7 +1078,9 @@ public enum EditGuard {
         guard token.text == "." else { return false }
         // R2: own trailing is non-empty and every character is horizontal
         // whitespace — excludes glued forms (`a.m`, `claw.md`, `.claude`,
-        // `3.5`) and ellipsis dots (empty trailing between adjacent dots).
+        // `3.5`). Ellipsis dots no longer reach here as separate
+        // single-character tokens — a run is ONE token whose text is
+        // "...", already excluded by R1 above.
         guard !token.trailing.isEmpty, token.trailing.allSatisfy({ $0.isWhitespace }) else { return false }
         let idx = token.index
         // R3: previous baseline token exists, is a word, and is at least
@@ -1234,6 +1238,23 @@ public enum EditGuard {
         "(", ")", "[", "]", "{", "}",
         "-", "–", "—"
     ]
+
+    /// EDITGUARD-02: a run token (`...`, `!!`) is prosodic iff EVERY
+    /// character is — membership must not be per-single-character, or an
+    /// ellipsis stops being a freely insertable/substitutable mark and an
+    /// in-place `...` -> `.` resolution stops being accepted.
+    private static func isProsodicPunctuation(_ text: String) -> Bool {
+        !text.isEmpty && text.allSatisfy { prosodicPunctuation.contains(String($0)) }
+    }
+
+    /// D-04: the per-sentence divergence gate's window. A punctuation run
+    /// advances sentenceIndex ONCE, so this window is a whole sentence even
+    /// when the baseline carried an ellipsis the candidate resolved to a
+    /// single period — pre-fix the baseline was three ahead and the window
+    /// silently covered a fragment of a different sentence.
+    internal static func candidateSentenceWindow(_ candidate: [Token], sentenceIndex: Int) -> [Token] {
+        candidate.filter { $0.sentenceIndex == sentenceIndex }
+    }
 
     // MARK: - Quick task 260723-sx1, criterion B: adjacent-duplicate disfluency collapse
 
@@ -2290,7 +2311,7 @@ public enum EditGuard {
     /// Deliberately does NOT also check for "doubled punctuation" (two
     /// identical adjacent punctuation marks with empty trailing between
     /// them) — that shape is indistinguishable from a legitimate literal
-    /// ellipsis ("...", three genuine "." tokens by construction) or a
+    /// ellipsis ("...", now ONE run token by construction) or a
     /// repeated "!!"/"??" the user actually said; a first version of this
     /// check flagged the ROADMAP-named "scratch" and "10,011" corruption
     /// fixtures as false positives purely because their sentences end in
