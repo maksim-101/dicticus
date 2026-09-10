@@ -1975,30 +1975,7 @@ public enum EditGuard {
         }
 
         func trailingFor(candidateIndex i: Int, ownTrailing: String) -> String {
-            // A restoration queued right after this position needs a
-            // leading separator. Originally documented "restored content is
-            // virtually always a word, never punctuation" — TRUE only until
-            // the punctuation-move lever-1 fix (44-FIDELITY-REPLAY.md SC#3
-            // Adjudication / GOODSHINE-VERIFICATION.md): a rejected
-            // `.delete` of punctuation never reaches this path (D-05 accepts
-            // ALL punctuation deletes unconditionally, so they are never
-            // restored), but a rejected `.move` of punctuation NOW can be
-            // (classifyMove rejects every punctuation move as of this fix,
-            // where it previously always accepted). Root-caused via the live
-            // full-record replay of the 2026-07-12T09:38:37.354Z "goodshine"
-            // corpus record: forcing `""` here glued the restored `.` onto
-            // the immediately-following candidate token with ZERO separator
-            // ("of.\"goodshine\"" — no space anywhere), a genuine rendering
-            // corruption `bridgeGluedWordTokens`/`renderingInvariantHolds`
-            // cannot catch (both deliberately skip punctuation-adjacent
-            // seams, to protect abbreviations like "a.m" — see their own doc
-            // comments). Restored punctuation now takes the SAME
-            // separator-guaranteeing path as restored words: never glue,
-            // worst case one extra space (cosmetic, never a correctness
-            // issue) instead of a fused token.
-            if let after = restorationsAfter[i], after.first != nil {
-                return ownTrailing.isEmpty ? " " : ownTrailing
-            }
+            // EDITGUARD-01: a queued restoration no longer force-spaces the token before it — the seam is derived once by deriveSeamSpacing after the collapse pass decides what actually survives.
             // Nothing dropped immediately after `i` — candidate's own
             // structure at this seam is unchanged, so its own trailing is
             // already correct. Preserve it verbatim.
@@ -2105,7 +2082,7 @@ public enum EditGuard {
             }
         }
 
-        return revertSpuriousSentenceInitialCapitalization(bindPunctuationLeft(collapseMixedProvenancePunctuationRuns(bridgeGluedWordTokens(output))))
+        return revertSpuriousSentenceInitialCapitalization(deriveSeamSpacing(collapseMixedProvenancePunctuationRuns(bridgeGluedWordTokens(output)), baseline: baseline, candidate: candidate))
     }
 
     /// Post-process (SC#3 gap closure, bug 2 — 44-FIDELITY-REPLAY.md §2/§3):
@@ -2162,14 +2139,13 @@ public enum EditGuard {
 
     /// Post-process (quick task 260830-dc4, 2026-08-30 "und.," defect —
     /// `.planning/todos/resolved/editguard-splices-worse-than-both-inputs.md`):
-    /// runs between `bridgeGluedWordTokens` and `bindPunctuationLeft` in the
+    /// runs between `bridgeGluedWordTokens` and `deriveSeamSpacing` in the
     /// post-pass chain — order is LOAD-BEARING. Running this AFTER
-    /// `bindPunctuationLeft` would be too late: that pass deliberately
-    /// declines to bind a mark to a PRECEDING punctuation token (see its own
-    /// doc comment, "never to a preceding punctuation token"), so a
-    /// mixed-provenance run would already be glued together with no interior
-    /// space by the time this pass ran, and it would have nothing left to
-    /// detect.
+    /// `deriveSeamSpacing` would be too late: that pass derives the spacing
+    /// of every seam it is GIVEN, so running it first would spend a
+    /// derivation on seams this pass then removes, and leave the seam that
+    /// survives the collapse never derived at all (see its own doc comment,
+    /// "which decides WHICH tokens survive").
     ///
     /// A punctuation RUN (2+ adjacent punctuation tokens) can be assembled
     /// from tokens sourced from BOTH inputs: a rejected `.move`/`.substitute`
@@ -2245,55 +2221,59 @@ public enum EditGuard {
         return result
     }
 
-    /// Post-process, sibling to `bridgeGluedWordTokens` (2026-07-17 root-
-    /// cause fix): a KEPT/restored token's `trailing` is calibrated against
-    /// its SOURCE neighbor. When the guard rejects a punctuation-for-word
-    /// substitute and restores the mark in place, the preceding word keeps
-    /// the space it had before the LLM's word — not before the mark that
-    /// now actually follows it — producing "Excel , PowerPoint". This pass
-    /// binds a single-char terminal/separator mark leftward by clearing any
-    /// purely-horizontal-whitespace trailing immediately before it.
-    ///
-    /// Invariant-safety: this only ever CLEARS a trailing when the NEXT
-    /// token is punctuation, so `renderingInvariantHolds` (which fails only
-    /// between two NON-punctuation tokens) can never trip from this pass,
-    /// and the token multiset is unchanged (only whitespace changes) so
-    /// `multisetInvariantHolds` is unaffected — the chain's output still
-    /// passes through BOTH checks at `rebuild`'s call sites as a backstop.
-    private static let horizontalWhitespace: Set<Character> = [" ", "\t", "\u{00A0}"]
-    private static let singleCharBindableMarks: Set<String> = [",", ".", ";", ":", "!", "?"]
+    /// EDITGUARD-01: for every adjacent token pair in ONE input stream, the set of
+    /// SPACED-vs-GLUED observations for that pair (`true` == the left token carried a
+    /// separator). Keyed on `normalized` text so casing never forks an adjacency.
+    private static func observedAdjacencySpacing(_ tokens: [Token]) -> [String: Set<Bool>] {
+        guard tokens.count > 1 else { return [:] }
+        var result: [String: Set<Bool>] = [:]
+        for i in 0..<(tokens.count - 1) {
+            let key = tokens[i].normalized + "\u{0}" + tokens[i + 1].normalized
+            result[key, default: []].insert(!tokens[i].trailing.isEmpty)
+        }
+        return result
+    }
 
-    private static func bindPunctuationLeft(_ tokens: [WorkToken]) -> [WorkToken] {
+    /// EDITGUARD-01: the FINAL spacing authority for every output seam. Runs after
+    /// `collapseMixedProvenancePunctuationRuns` (which decides WHICH tokens survive —
+    /// running spacing derivation before that would space seams the collapse then
+    /// removes) and before `revertSpuriousSentenceInitialCapitalization` (casing, not
+    /// spacing). P4-safe by construction: a seam ends up spaced only if some input
+    /// occurrence of that same normalized pair is spaced, or the pair appears in NO
+    /// input at all (P4 abstains on exactly those). Never writes a non-horizontal-
+    /// whitespace separator, so a dictated line break is preserved and never
+    /// fabricated or destroyed.
+    private static func deriveSeamSpacing(_ tokens: [WorkToken], baseline: [Token], candidate: [Token]) -> [WorkToken] {
         guard tokens.count > 1 else { return tokens }
+        let candidateSpacing = observedAdjacencySpacing(candidate)
+        let baselineSpacing = observedAdjacencySpacing(baseline)
         var result = tokens
-        for i in 0..<(result.count - 1) {
-            guard result[i + 1].kind == .punctuation,
-                  singleCharBindableMarks.contains(result[i + 1].text),
-                  // Bind a mark ONLY to a preceding word/numeric token, never
-                  // to a preceding punctuation token: stripping the interior
-                  // space of a doubled mark ("guide . ," -> "guide.,") would
-                  // defeat collapseDanglingPunctuation, which needs that space
-                  // to detect and collapse the dangling pair (it runs AFTER
-                  // this pass, on the joined string). Leaving the space lets
-                  // "guide . , explaining" collapse to "guide. explaining".
-                  result[i].kind != .punctuation,
-                  !result[i].trailing.isEmpty,
-                  result[i].trailing.allSatisfy({ horizontalWhitespace.contains($0) })
-            else { continue }
-
-            // Ellipsis guard: "word ..." is three genuine "." tokens by
-            // construction (renderingInvariantHolds' doc comment) — never
-            // bind the first dot leftward and strip the space in front of it.
-            if result[i + 1].text == ".", i + 2 < result.count,
-               result[i + 2].kind == .punctuation, result[i + 2].text == "." {
-                continue
+        for i in 0..<(tokens.count - 1) {
+            let key = tokens[i].normalized + "\u{0}" + tokens[i + 1].normalized
+            let spaced: Bool
+            if let c = candidateSpacing[key], c.count == 1 {
+                spaced = c.first!
+            } else if let b = baselineSpacing[key], b.count == 1 {
+                spaced = b.first!
+            } else {
+                spaced = tokens[i + 1].kind != .punctuation
             }
-
-            result[i] = WorkToken(
-                text: result[i].text, normalized: result[i].normalized, kind: result[i].kind,
-                trailing: "", sentenceIndex: result[i].sentenceIndex,
-                source: result[i].source, baselineCasingAlternative: result[i].baselineCasingAlternative
-            )
+            let current = result[i].trailing
+            let newTrailing: String
+            if !spaced {
+                newTrailing = ""
+            } else if current.isEmpty {
+                newTrailing = " "
+            } else {
+                newTrailing = current
+            }
+            if newTrailing != current {
+                result[i] = WorkToken(
+                    text: result[i].text, normalized: result[i].normalized, kind: result[i].kind,
+                    trailing: newTrailing, sentenceIndex: result[i].sentenceIndex,
+                    source: result[i].source, baselineCasingAlternative: result[i].baselineCasingAlternative
+                )
+            }
         }
         return result
     }
@@ -2336,8 +2316,10 @@ public enum EditGuard {
     /// spelling. Never touches the ACTUAL first word of a sentence.
     ///
     /// **Linear-adjacency fix (quick task 260719-8am):** this pass runs
-    /// LAST, over the fully-assembled `bindPunctuationLeft(bridgeGluedWordTokens(output))`
-    /// array — the true rendered structure, after every restoration,
+    /// LAST, over the fully-assembled output of the post-pass chain
+    /// (`bridgeGluedWordTokens`, then
+    /// `collapseMixedProvenancePunctuationRuns`, then `deriveSeamSpacing`)
+    /// — the true rendered structure, after every restoration,
     /// rejection, and rebuild decision has already been applied. The OLD
     /// test asked "is `t.sentenceIndex` the candidate's first-word-of-
     /// sentence?", a question keyed on the CANDIDATE's own sentence
