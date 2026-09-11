@@ -3,14 +3,32 @@ import Foundation
 /// D-C2 / D-C3: Post-LLM number-formatting pass for Swiss output.
 ///
 /// Replaces the Phase 19 D-20 LLM-only thousands-separator approach with a
-/// deterministic post-pass. Phase 20.08 strikes the original D-C1
-/// apostrophe-thousands rule: rendering `"2026"` as `"2'026"` was wrong
-/// for years and the simpler fix is to emit no thousands separator at all.
+/// deterministic post-pass.
 ///
-///   - No thousands grouping (apostrophe-strike, Phase 20.08). Years like
-///     `2026` and amounts like `10000` flow through unchanged.
-///   - Period decimal separator on every numeric token (currency and
+/// Phase 49.7 D-09/D-10/D-11 (current behaviour):
+///   - An EXISTING single thousands group — comma (`2,273`), period
+///     (`1.250`) or apostrophe (`2'273`) — is re-rendered with the Swiss
+///     straight apostrophe `'`. The group is never invented: bare integers
+///     (years like `2026`, amounts like `10000`) never reach this rule, so
+///     the Phase 20.08 year fix (history below) stays intact. Multi-group
+///     tokens (`12,500,000`) are out of scope and keep today's behaviour.
+///   - `d,ddd` is a thousands group in both languages, EXCEPT a zero
+///     integer part, which is a decimal (`0,125`→`0.125`). A comma followed
+///     by one or two digits is a decimal (`1,80`→`1.80`, `2,5`→`2.5`). A
+///     three-place German decimal with a non-zero integer part (`3,141`) is
+///     a known, documented residue that renders as a thousands group.
+///   - D-11: when the same digit string occurs twice in one utterance with
+///     different separators — the user naming a punctuation contrast, e.g.
+///     "1,80 but actually 1.80" — every numeric token of that utterance is
+///     left untouched. No keyword trigger.
+///   - Period decimal separator on every other numeric token (currency and
 ///     non-currency alike) when Swiss toggle is ON. Per D-C2.
+///
+/// History — Phase 20.08 apostrophe-strike: this pass originally emitted no
+/// thousands separator at all, because rendering `"2026"` as `"2'026"` was
+/// wrong for years. D-09 re-introduces grouping, but only for a token that
+/// is ALREADY grouped — the bare-integer exclusion that fixed the year bug
+/// is unchanged.
 ///
 /// Single call site: `Shared/Services/CleanupService.cleanup(...)` —
 /// runs after the existing D-19 `applySwissITN` safety-net, gated on the
@@ -40,6 +58,16 @@ public struct SwissNumberFormatter {
     /// Non-numeric tokens are emitted unchanged. Phase 20.08 dropped the
     /// apostrophe thousands separator (years like 2026 should not become 2'026).
     public static func format(_ text: String) -> String {
+        // Phase 49.7 D-11: same digit string twice with different
+        // separators = the user is naming the punctuation, e.g. "1,80 but
+        // actually 1.80"; leave every numeric token of the utterance alone.
+        // No keyword trigger by decision. Runs on the untouched input, before
+        // fold/bridge (which also rewrite numeric tokens), so "every numeric
+        // token untouched" holds literally.
+        if hasSeparatorContrastPair(text) {
+            return text
+        }
+
         // UAT-discovered cross-token gap (Phase 19.5 follow-up):
         // Gemma occasionally detokenizes German decimals with a stray space
         // after the comma — `"1.250, 70"` instead of `"1.250,70"`. The
@@ -258,14 +286,29 @@ public struct SwissNumberFormatter {
     /// Set of leading currency glyphs we strip-and-reattach (W7).
     private static let leadingGlyphs: Set<Character> = ["€", "$", "£"]
 
-    /// Reformat a single token. Strips a single trailing punctuation
-    /// character (`.`, `,`, `;`, `:`, `?`, `!`) before parsing and
-    /// re-attaches it to the output. Also strips a single leading currency
-    /// glyph (€, $, £) per W7 and re-attaches it. Returns the input
-    /// verbatim on any parse failure.
-    private static func reformatToken(_ raw: Substring) -> String {
-        let token = String(raw)
-        guard !token.isEmpty else { return token }
+    /// Phase 49.7 D-09: an EXISTING single thousands group — comma
+    /// (`2,273`), period (`1.250`) or apostrophe (`2'273`) — is re-rendered
+    /// with the Swiss straight apostrophe. The integer part is 1-3 digits
+    /// and non-zero (D-10: a zero integer part, `0,125`, is a decimal and
+    /// falls through since `[1-9]` excludes it), and an optional 1-2-digit
+    /// decimal tail is kept, re-emitted with a period. Bare integers never
+    /// match (no separator to anchor on), so the Phase 20.08 year fix stays
+    /// intact; multi-group tokens (`12,500,000`) do not match either.
+    private static let thousandsGroupRegex = try? NSRegularExpression(
+        pattern: "^([+-]?)([1-9]\\d{0,2})[.,'\u{2019}](\\d{3})(?:[.,](\\d{1,2}))?$"
+    )
+
+    /// Detach a leading currency glyph (€, $, £, W7) and a trailing
+    /// punctuation tail (`.`, `,`, `;`, `:`, `?`, `!`) from `token`, then
+    /// validate the remaining core contains only digits and number
+    /// punctuation (phantom-zero guard, Phase 19.5 follow-up — Foundation's
+    /// `Decimal(string: "Euro", ...)` silently returns 0). Returns nil when
+    /// the core has no digit or contains a non-numeric character; callers
+    /// then emit the original token verbatim. Shared by `reformatToken` and
+    /// `hasSeparatorContrastPair` (D-11) so the two classifications cannot
+    /// drift apart.
+    private static func numericCore(of token: String) -> (glyph: String, core: String, tail: String)? {
+        guard !token.isEmpty else { return nil }
 
         // W7: detach a leading currency glyph (€, $, £) so it doesn't
         // poison parsing. Whitespace-prefixed currencies (`"€ 6,70"`)
@@ -281,32 +324,84 @@ public struct SwissNumberFormatter {
         }
 
         // Detach a trailing punctuation tail so it doesn't poison parsing.
-        let tail: Character?
+        let tail: String
         let core: String
         if let last = afterGlyph.last, ".,;:?!".contains(last), afterGlyph.count > 1 {
-            tail = last
+            tail = String(last)
             core = String(afterGlyph.dropLast())
         } else {
-            tail = nil
+            tail = ""
             core = afterGlyph
         }
 
-        // UAT-discovered phantom-zero (Phase 19.5 follow-up): Foundation's
-        // `Decimal(string: "Euro", locale: ...)` returns Optional(0) — same
-        // for "EUR", "ein", and other strings that Foundation interprets as
-        // a degenerate exponent form ("E…"). Without this guard, parseSwiss
-        // / parseGerman silently parse currency words to 0 and emitSwiss
-        // rewrites them to literal "0" in the output. Restrict the parser
-        // path to tokens whose core contains only digits and number
-        // punctuation (`.`, `,`, `'`, U+2019, sign).
         let numericChars: Set<Character> = [
             "0","1","2","3","4","5","6","7","8","9",
             ".", ",", "'", "\u{2019}", "+", "-"
         ]
         let hasDigit = core.contains(where: { $0.isNumber })
         let onlyNumericChars = core.allSatisfy({ numericChars.contains($0) })
-        guard hasDigit, onlyNumericChars else {
+        guard hasDigit, onlyNumericChars else { return nil }
+
+        return (leadingGlyph, core, tail)
+    }
+
+    /// Phase 49.7 D-11: same digit string twice with different separators =
+    /// the user is naming the punctuation (e.g. `1,80 but actually 1.80`);
+    /// leave every numeric token of the utterance alone. No keyword trigger
+    /// by decision. Uses the SAME `numericCore` classification as
+    /// `reformatToken` so the two cannot drift. A bare integer (no
+    /// separator) never participates.
+    private static func hasSeparatorContrastPair(_ text: String) -> Bool {
+        var digitsToSeparatorSets: [String: Set<Set<Character>>] = [:]
+        let tokens = text.split(separator: " ", omittingEmptySubsequences: false)
+        for raw in tokens {
+            guard let (_, core, _) = numericCore(of: String(raw)) else { continue }
+            let separators = Set(core.filter { ".,'\u{2019}".contains($0) })
+            guard !separators.isEmpty else { continue }
+            let digitsOnly = String(core.filter { $0.isNumber })
+            guard !digitsOnly.isEmpty else { continue }
+            var existing = digitsToSeparatorSets[digitsOnly] ?? []
+            existing.insert(separators)
+            digitsToSeparatorSets[digitsOnly] = existing
+            if existing.count >= 2 {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Reformat a single token. Strips a single trailing punctuation
+    /// character (`.`, `,`, `;`, `:`, `?`, `!`) before parsing and
+    /// re-attaches it to the output. Also strips a single leading currency
+    /// glyph (€, $, £) per W7 and re-attaches it. Returns the input
+    /// verbatim on any parse failure.
+    private static func reformatToken(_ raw: Substring) -> String {
+        let token = String(raw)
+        guard !token.isEmpty else { return token }
+
+        guard let (leadingGlyph, core, tail) = numericCore(of: token) else {
             return token
+        }
+
+        // Phase 49.7 D-09: re-render an existing single thousands group
+        // with the Swiss apostrophe before the German/Swiss parse dispatch
+        // below — see `thousandsGroupRegex` doc comment for the full rule.
+        if let regex = thousandsGroupRegex {
+            let range = NSRange(core.startIndex..<core.endIndex, in: core)
+            if let match = regex.firstMatch(in: core, options: [], range: range) {
+                func capturedGroup(_ idx: Int) -> String? {
+                    guard let r = Range(match.range(at: idx), in: core) else { return nil }
+                    return String(core[r])
+                }
+                if let intPart = capturedGroup(2), let groupPart = capturedGroup(3) {
+                    let sign = capturedGroup(1) ?? ""
+                    var rendered = "\(sign)\(intPart)'\(groupPart)"
+                    if let decimalTail = capturedGroup(4) {
+                        rendered += ".\(decimalTail)"
+                    }
+                    return leadingGlyph + rendered + tail
+                }
+            }
         }
 
         // B3 (Phase 19.5 revision): pre-classify by punctuation pattern,
@@ -332,7 +427,7 @@ public struct SwissNumberFormatter {
             return token
         }
         let body = emitSwiss(value, originalSampleForFractionDigits: core)
-        return leadingGlyph + body + (tail.map(String.init) ?? "")
+        return leadingGlyph + body + tail
     }
 
     private static func parseSwiss(_ s: String) -> Decimal? {

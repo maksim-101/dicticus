@@ -15,21 +15,23 @@ final class SwissNumberFormatterTests: XCTestCase {
                        "Apostrophe-strike: no U+2019 expected. Got: \(result)")
     }
 
-    // B3 LOCK (Phase 20.08 update) — German-thousands input still parses
-    // correctly, but emits without grouping.
+    // B3 LOCK (Phase 20.08 update). Phase 49.7 D-09: an existing German
+    // thousands group is now re-rendered with the Swiss apostrophe rather
+    // than flattened to a bare integer.
     func testGermanThousandsParsesAsInteger() {
-        // 1.250 (German thousands) → 1250 (no grouping).
+        // 1.250 (German thousands) → 1'250 (Phase 49.7 D-09 apostrophe group).
         let result = SwissNumberFormatter.format("1.250")
-        XCTAssertEqual(result, "1250",
-                       "B3: German-thousands input must reformat to ungrouped integer")
+        XCTAssertEqual(result, "1'250",
+                       "Phase 49.7 D-09: German-thousands input re-renders with the Swiss apostrophe")
     }
 
-    // B3 LOCK (Phase 20.08 update) — Swiss-apostrophe input still parses
-    // correctly; emits without grouping.
-    func testSwissApostropheNormalisesToUngrouped() {
+    // B3 LOCK (Phase 20.08 update), renamed for Phase 49.7 D-09: an existing
+    // Swiss-apostrophe group is now preserved (idempotent) rather than
+    // flattened to a bare integer.
+    func testSwissApostropheGroupIsPreserved() {
         let result = SwissNumberFormatter.format("1'250")
-        XCTAssertEqual(result, "1250",
-                       "Apostrophe-strike: legacy Swiss-apostrophe input flattens to digits")
+        XCTAssertEqual(result, "1'250",
+                       "Phase 49.7 D-09: an existing Swiss-apostrophe group round-trips unchanged (idempotent)")
     }
 
     // Year preservation — 4-digit years must NOT acquire any thousands separator.
@@ -76,7 +78,9 @@ final class SwissNumberFormatterTests: XCTestCase {
         XCTAssertEqual(SwissNumberFormatter.format("1.23.456"), "1.23.456")
         XCTAssertEqual(SwissNumberFormatter.format("v2.4.0"), "v2.4.0")
         XCTAssertEqual(SwissNumberFormatter.format("1.234.567"), "1234567")
-        XCTAssertEqual(SwissNumberFormatter.format("1.250"), "1250")
+        // Phase 49.7 D-09: "1.250" is now a single existing thousands group,
+        // re-rendered with the apostrophe rather than flattened.
+        XCTAssertEqual(SwissNumberFormatter.format("1.250"), "1'250")
     }
 
     func testNonNumericTokensUnchanged() {
@@ -162,12 +166,12 @@ final class SwissNumberFormatterTests: XCTestCase {
     func testSplitCentsDoesNotEatThousandsPattern() {
         // "1.250 Franken 50" must NOT match "250 Franken 50" inside the
         // thousand pattern. The `(?<![.,'\u{2019}])` lookbehind prevents this.
-        // Apostrophe-strike (Phase 20.08): German-thousands "1.250" flattens
-        // to "1250" with no grouping; Bridge-2 still doesn't fire because the
+        // Phase 49.7 D-09: German-thousands "1.250" now re-renders with the
+        // Swiss apostrophe ("1'250"); Bridge-2 still doesn't fire because the
         // pre-format lookbehind sees the period in front of "250".
         XCTAssertEqual(
             SwissNumberFormatter.format("1.250 Franken 50"),
-            "1250 Franken 50"
+            "1'250 Franken 50"
         )
     }
 
