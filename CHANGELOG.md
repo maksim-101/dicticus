@@ -6,6 +6,14 @@ Dicticus is a fully local, on-device dictation app (ASR via WhisperKit/Whisper l
 
 ---
 
+## Unreleased
+
+- **Fixed: AI cleanup no longer ships half of a coupled rewrite** — when EditGuard rejects a content edit, the cosmetic edits the LLM made around it in the same sentence (word order, function words, punctuation, casing) now revert with it instead of being kept alone, which could leave German verb-position clauses reading differently from both what you said and what the LLM proposed. macOS + iOS.
+- **Fixed: conjunctions and negators are no longer treated as cosmetic** — swaps or insertions of `and`/`or`/`but`/`not`/`nicht`/`kein` and their kin are blocked as meaning changes, and a hyphen inserted between a word and a version number (`Fable 5` → `Fable-5`) is blocked too. macOS + iOS.
+- **Fixed: spacing around ellipses and dashes after AI cleanup** (Phase 49.5) — punctuation runs (`...`, `!!`) are handled as one unit and spacing at edit seams is derived from the source text, ending glued words (`possible.points`) and stray spaces before dashes. macOS + iOS.
+
+---
+
 ## 1.1.0 — Dictation Reliability & Cleanup Fixes — 2026-09-02
 
 - **Fixed: push-to-talk media pause could launch Apple Music unprompted** — on audio sources macOS can't address directly (some browser tabs, bare-bones IPTV/streaming apps), the pause toggle could hit the system's "no active player" fallback and launch Music instead of just pausing what was already playing. Switched to discrete pause/resume commands that have no such fallback. macOS.
