@@ -214,7 +214,7 @@ struct ITNUtility {
             nouns = ["phasen", "kapitel", "schritte", "abschnitte", "teile", "stufen"]
             connector = "bis"
         } else {
-            nouns = ["phases", "chapters", "steps", "items", "sections", "parts", "levels", "stages"]
+            nouns = ["phases", "chapters", "steps", "items", "sections", "parts", "levels", "stages", "clusters"] // Phase 49.7 D-13: clusters (+ replay-sized members) — audited 08-25:32
             connector = "to"
         }
         let nounAlt = nouns.joined(separator: "|")
