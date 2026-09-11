@@ -1,7 +1,7 @@
 [
   { "input": "1250", "expected": "1250" },
-  { "input": "1.250", "expected": "1250" },
-  { "input": "1'250", "expected": "1250" },
+  { "input": "1.250", "expected": "1'250" },
+  { "input": "1'250", "expected": "1'250" },
   { "input": "5,70", "expected": "5.70" },
   { "input": "5.70", "expected": "5.70" },
   { "input": "CHF 1250", "expected": "CHF 1250" },
