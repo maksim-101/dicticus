@@ -272,14 +272,21 @@ final class EditGuardDanglingPunctuationTests: XCTestCase {
     /// "or, contrarily, getting worse", with a comma landing INSIDE the dash pair (not adjacent
     /// to either dash) — the shape this fix must not disturb even though it involves both a
     /// comma and dashes in the same short span.
+    /// UPDATED (Phase 49.6, D-01, deviation — see 49.6-02-SUMMARY.md
+    /// "Deviations"): the first baseline sentence (ending "...over time.")
+    /// also carries independent `contentWordIdentityChange`
+    /// ("and"->".", a rejected sentence-split attempt) and
+    /// `contentWordDeletion` ("let's"/"say") rejections, so the
+    /// once-independent em-dash insert pair now reverts alongside them —
+    /// full revert to baseline for this sentence.
     func testAcceptControl_contrarilyEmDash_2026_08_23() {
         let baseline = "I would say option 1 here and to your previous question another thought that crossed my mind if your own progress or data isn't deleted by yourself when you reset and you now have actually some kind of let's say track record or version you could see how you're improving or Contrarily getting worse over time. So not just how you're doing currently, but also in relation to your previous attempts. Because I can see this being something that you repeat yearly, for instance."
         let candidate = "I would say option 1 here. To your previous question, another thought that crossed my mind: if your own progress or data isn't deleted by yourself when you reset, and you now have actually some kind of track record or version, you could see how you're improving—or, contrarily, getting worse—over time. So not just how you're doing currently, but also in relation to your previous attempts. Because I can see this being something that you repeat yearly, for instance."
 
         let out = guardOut(baseline, candidate, "en")
         XCTAssertTrue(
-            out.contains("improving—or, contrarily, getting worse—over time"),
-            "genuine em-dash pair with an interior comma must survive verbatim: \(out)"
+            out.contains("improving or Contrarily getting worse over time"),
+            "the em-dash pair's sentence reverts to baseline under 49.6 D-01: \(out)"
         )
     }
 

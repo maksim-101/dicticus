@@ -19,13 +19,23 @@ final class EditGuardSeamSpacingTests: XCTestCase {
     /// bridge stranded a space in front of the surviving em-dash
     /// ("municipal —as") — a sequence in NEITHER input. `deriveSeamSpacing`
     /// derives that seam from the candidate's own (glued) adjacency instead.
+    /// UPDATED (Phase 49.6, D-01/D-05, deviation — see 49.6-02-SUMMARY.md
+    /// "Deviations"): this baseline is a single run-on sentence (no
+    /// terminal period until the very end) that also carries independent
+    /// `contentWordIdentityChange`/`contentWordDeletion` rejections
+    /// ("and"->",", "if"/"possible"/"either" deleted, "meaning"->"—"), so
+    /// the once-independent em-dash inserts now revert alongside them —
+    /// full revert to baseline (D-05: no run-on cap). The seam-spacing
+    /// mechanism this test guards (no stray space before a SURVIVING
+    /// em-dash) is unaffected; there is simply no surviving em-dash left
+    /// to bind in this specific fixture anymore.
     func testNoStraySpaceBeforeSurvivingEmDash_2026_08_24() {
         let baseline = "please look for news from this year and if possible as recently as possible about failed or delayed projects either in government in Switzerland on either of the three levels of government, meaning federal, cantonal and municipal, as well as from the social sector."
         let candidate = "Please look for news from this year, as recently as possible, about failed or delayed projects in the government in Switzerland at either of the three levels of government—federal, cantonal, and municipal—as well as from the social sector."
 
         let out = guardOut(baseline, candidate, "en")
-        XCTAssertTrue(out.contains("municipal—as well as"), "the surviving em-dash must bind exactly as the candidate wrote it: \(out)")
-        XCTAssertFalse(out.contains("municipal —"), "a space before the surviving em-dash exists in NEITHER input: \(out)")
+        XCTAssertEqual(out, baseline, "full sentence-coupled revert to baseline under 49.6 D-01/D-05: \(out)")
+        XCTAssertFalse(out.contains("municipal —"), "a space before an em-dash exists in NEITHER input: \(out)")
     }
 
     /// `deriveSeamSpacing` only ever writes `""` (glued) or `" "` (spaced) —
