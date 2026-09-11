@@ -107,7 +107,17 @@ enum EditGuardFixtures {
         language: "de",
         baseline: "Weil die Fragen werden ja gleich sofort ausgewertet und du wohnst dort.",
         candidate: "Weil die Fragen ja gleich sofort ausgewertet werden und ich wohne dort.",
-        expectedText: "Weil die Fragen ja gleich sofort ausgewertet werden und du wohnst dort.",
+        // 49.6 D-01: reconciled — deviation from the plan's own stated
+        // expectation (see 49.6-02-SUMMARY.md "Deviations"). Both edits sit
+        // in the SAME baseline sentence (there is only one sentence): the
+        // `wordOrderRepair` move of "werden" is D-02 revert-eligible
+        // (context-dependent, per the locked D-02 class list), and the
+        // "du wohnst"->"ich wohne" `pronounPersonChange` substitute is a
+        // D-03 trigger. Under the literal, locked D-01..D-04 mechanism the
+        // whole sentence reverts, including the repair — this fixture's
+        // original point (edit-granularity independence) is superseded by
+        // 49.6's coarser sentence-level unit for this specific case.
+        expectedText: "Weil die Fragen werden ja gleich sofort ausgewertet und du wohnst dort.",
         editKind: .move,
         tokenClass: .contentWord,
         position: .interior,
@@ -233,7 +243,18 @@ enum EditGuardFixtures {
         language: "en",
         baseline: "Because to be fair, as of now we're not 100% sure and we will be surfacing what we suspect of course, but then I would also argue it's not my job to fix Apple's problems, at least not at my own expense, which is what has happened here. And I think some kind of......goodshine......that roughly covers a new iPhone would be......appropriate.",
         candidate: "Because to be fair, as of now we're not 100% sure, and we will be surfacing what we suspect. However, I would also argue it's not my job to fix Apple's problems, at least not at my own expense, which is what has happened here. And I think some kind of \"goodshine\" — that roughly covers a new iPhone — would be appropriate.",
-        expectedText: "Because to be fair, as of now we're not 100% sure, and we will be surfacing what we suspect of course, but then I would also argue it's not my job to fix Apple's problems, at least not at my own expense, which is what has happened here. And I think some kind of \"goodshine\" — that roughly covers a new iPhone — would be appropriate.",
+        // 49.6 D-01: reconciled — deviation from the plan's own stated
+        // expectation (see 49.6-02-SUMMARY.md "Deviations"). The comma
+        // insert after "sure" (`punctuationOrCasing`, D-02 revert-eligible)
+        // shares its baseline sentence with independent, correctly
+        // trigger-classed rejections later in the SAME long first sentence
+        // ("of"->"." and "course"->"However", both `contentWordIdentityChange`;
+        // "but"/"then" deletions, `contentWordDeletion`) — unrelated to the
+        // punctuation-move mechanism this fixture was authored to guard.
+        // D-05 (no run-on cap) applies: the comma reverts alongside them.
+        // The goodshine em-dash repair itself (the fixture's actual
+        // regression-net purpose) is untouched.
+        expectedText: "Because to be fair, as of now we're not 100% sure and we will be surfacing what we suspect of course, but then I would also argue it's not my job to fix Apple's problems, at least not at my own expense, which is what has happened here. And I think some kind of \"goodshine\" — that roughly covers a new iPhone — would be appropriate.",
         editKind: .move,
         tokenClass: .contentWord,
         position: .interior,

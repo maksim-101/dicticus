@@ -195,6 +195,17 @@ final class EditGuardGrammarRegressionTests: XCTestCase {
     /// is a baseline nor a candidate bigram). Their assertions were updated
     /// accordingly (see those tests' own doc comments) rather than treated
     /// as a sign the coupling pass is over-broad.
+    ///
+    /// UPDATED 49.6 (D-01 sentence-coupled revert): 17 -> 16. Lost repairs:
+    /// `fx-d01-bundled-repair-and-corruption-de` (-1, its "werden"
+    /// `wordOrderRepair` move shares its only baseline sentence with a
+    /// rejected `pronounPersonChange` substitute — see that fixture's own
+    /// 49.6 D-01 reconciliation note in EditGuardFixtures.swift). Measured
+    /// via a temporary per-fixture diagnostic print (before/after
+    /// `applySentenceCoupledRevert`'s three call sites, same 260719-8am
+    /// scratch-test precedent), deleted in this commit. No other fixture's
+    /// accepted `wordOrderRepair` count changed; all 3 named German
+    /// verb-order repairs (sind/ist/werden) below remain preserved.
     func testRepairYieldFloor_wordOrderRepairsPreserved() {
         var acceptedWordOrderRepairs = 0
         for fixture in EditGuardFixtures.all {
@@ -208,6 +219,6 @@ final class EditGuardGrammarRegressionTests: XCTestCase {
                 $0.acceptClass == EditGuard.AcceptClass.wordOrderRepair.rawValue
             }.count
         }
-        XCTAssertEqual(acceptedWordOrderRepairs, 17, "post-fix repair-yield floor (260723-rif): entire 23->17 drop traces to fx-mov-content-de-crossclause-manicht-knownopen alone; all 3 named German verb-order repairs preserved")
+        XCTAssertEqual(acceptedWordOrderRepairs, 16, "post-fix repair-yield floor (49.6): 17->16 drop traces to fx-d01-bundled-repair-and-corruption-de alone; all 3 named German verb-order repairs preserved")
     }
 }
