@@ -164,14 +164,27 @@ final class EditGuardPauseSplitMergeTests: XCTestCase {
     // `gelöst`->`behoben` substitute is a genuine content-identity change,
     // correctly rejected.
 
+    /// UPDATED (Phase 49.6, D-01/D-02, deviation — see 49.6-02-SUMMARY.md
+    /// "Deviations"): this is exactly the CASE-SHAPES.md case-E residual
+    /// shape — the neighbouring "gelöst"->"behoben"
+    /// `contentWordIdentityChange` rejection shares the SAME baseline
+    /// sentence as the period-delete, and D-02's locked class list
+    /// explicitly includes `pauseSplitMerge` in the revert-eligible set
+    /// (the July punctuation-only-group exemption that used to protect it
+    /// does NOT carry over here, by design — see D-02). The whole sentence
+    /// now reverts, including the once-independent merge — full revert to
+    /// baseline. The pause-split-merge PREDICATE itself
+    /// (`isPauseSplitPeriod`) is unaffected; only its coexistence with an
+    /// UNRELATED same-sentence rejection changed.
     func testPositive_pauseSplitGerman_lowercaseContinuation() {
         let baseline = "Wir haben das Problem gelöst. dann können wir weitermachen."
         let llm = "Wir haben das Problem behoben dann können wir weitermachen."
-        let expected = "Wir haben das Problem gelöst dann können wir weitermachen."
+        let expected = baseline
         let result = guardOut(baseline, llm, "de")
         XCTAssertEqual(result.text, expected)
         assertNeitherSourceClean(result.text, baseline, llm)
-        assertPauseSplitMergeFired(result)
+        XCTAssertTrue(result.edits.contains { $0.rejectClass == "sentenceCoupledRevert" },
+            "expected the period-delete to revert via 49.6 sentenceCoupledRevert — got: \(result.edits)")
     }
 
     // MARK: - P4: no-substitution-neighbour shape — REJECTED insert only

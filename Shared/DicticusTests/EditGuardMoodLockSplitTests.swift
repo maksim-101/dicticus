@@ -47,12 +47,29 @@ final class EditGuardMoodLockSplitTests: XCTestCase {
     // MARK: - Negatives: verb-fronting reorders still reject
 
     /// fx-mov-func-en-moodlock pair.
+    ///
+    /// UPDATED (Phase 49.6, D-01, deviation — see 49.6-02-SUMMARY.md
+    /// "Deviations"): this single-sentence utterance ALSO carries an
+    /// independent `contentWordDeletion` trigger ("do" deleted), so
+    /// `applySentenceCoupledRevert` — which runs immediately after the
+    /// FIRST `applyAtomicGroupCoupling` call, before the mood-lock loop
+    /// ever executes — already reverts the fronting move + "Can"
+    /// substitute as `sentenceCoupledRevert`. The mood-lock loop then finds
+    /// nothing left to violate (the rebuilt first word is already back to
+    /// baseline order) and never fires its own `moodLockSentenceInitialVerb`
+    /// label. The load-bearing property this test guards — a genuine
+    /// verb-fronting reorder reverts to baseline — still holds
+    /// (`XCTAssertEqual(result.text, baseline)` below); only the SPECIFIC
+    /// rejection class differs.
     func testNegative_verbFrontingEn() {
         let baseline = "You can push the commits and then I'm wondering where do we stand."
         let candidate = "Can you push the commits and then I'm wondering where we stand."
         let result = guardOut(baseline, candidate)
         XCTAssertEqual(result.text, baseline)
-        assertMoodLockFired(result)
+        XCTAssertTrue(
+            result.edits.contains { $0.rejectClass == "moodLockSentenceInitialVerb" || $0.rejectClass == "sentenceCoupledRevert" },
+            "expected the reorder to revert via moodLockSentenceInitialVerb or (49.6) sentenceCoupledRevert — got: \(result.edits)"
+        )
     }
 
     /// fx-mov-func-de-moodlock pair.

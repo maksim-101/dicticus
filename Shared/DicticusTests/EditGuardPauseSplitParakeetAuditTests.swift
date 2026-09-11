@@ -146,13 +146,22 @@ final class EditGuardPauseSplitParakeetAuditTests: XCTestCase {
     // unchanged; this test PINS the current (over-eager) behaviour as a
     // regression net for a future corpus that does exercise it.
 
+    /// UPDATED (Phase 49.6, D-01/D-02, deviation — see 49.6-02-SUMMARY.md
+    /// "Deviations"): same CASE-SHAPES.md case-E residual shape as
+    /// `EditGuardPauseSplitMergeTests.testPositive_pauseSplitGerman_
+    /// lowercaseContinuation` — the neighbouring "already"->"promptly"
+    /// `contentWordIdentityChange` rejection shares the baseline sentence
+    /// with the period-delete, and D-02 puts `pauseSplitMerge` in the
+    /// revert-eligible set with no punctuation-only-group exemption. Full
+    /// revert to baseline.
     func testPositive_genuineBoundaryLowercaseContinuation_overEager_en() {
         let baseline = "I have closed the ticket already. now let's move to the next one."
         let llm = "I have closed the ticket promptly now let's move to the next one."
-        let expected = "I have closed the ticket already now let's move to the next one."
+        let expected = baseline
         let result = guardOut(baseline, llm)
         XCTAssertEqual(result.text, expected)
-        assertPauseSplitMergeFired(result)
+        XCTAssertTrue(result.edits.contains { $0.rejectClass == "sentenceCoupledRevert" },
+            "expected the period-delete to revert via 49.6 sentenceCoupledRevert — got: \(result.edits)")
     }
 
     // MARK: - P2: hand-authored, genuine Parakeet-shaped sentence boundary
@@ -167,13 +176,20 @@ final class EditGuardPauseSplitParakeetAuditTests: XCTestCase {
     // FINDING: OVER-EAGER (theoretical, not measured live) — same reasoning
     // as P1. Pinned as a regression net, `EditGuard.swift` left unchanged.
 
+    /// UPDATED (Phase 49.6, D-01/D-02, deviation — see 49.6-02-SUMMARY.md
+    /// "Deviations"): same CASE-SHAPES.md case-E residual shape as the
+    /// English P1 fixture above — the neighbouring
+    /// "erledigt"->"abgeschlossen" `contentWordIdentityChange` rejection
+    /// shares the baseline sentence with the period-delete. Full revert to
+    /// baseline.
     func testPositive_genuineBoundaryLowercaseContinuation_overEager_de() {
         let baseline = "Wir haben die Aufgabe bereits erledigt. dann können wir weitermachen."
         let llm = "Wir haben die Aufgabe bereits abgeschlossen dann können wir weitermachen."
-        let expected = "Wir haben die Aufgabe bereits erledigt dann können wir weitermachen."
+        let expected = baseline
         let result = guardOut(baseline, llm, "de")
         XCTAssertEqual(result.text, expected)
-        assertPauseSplitMergeFired(result)
+        XCTAssertTrue(result.edits.contains { $0.rejectClass == "sentenceCoupledRevert" },
+            "expected the period-delete to revert via 49.6 sentenceCoupledRevert — got: \(result.edits)")
     }
 
     // MARK: - N4: German capitalised NOUN continuation (R4 excludes) — the
