@@ -879,25 +879,24 @@ enum EditGuardFixtures {
             language: "en",
             baseline: "I have not idea what happened.",
             candidate: "I have no idea what happened.",
-            expectedText: "I have no idea what happened.",
+            expectedText: "I have not idea what happened.",
             editKind: .substitute, tokenClass: .functionWord, position: .interior,
-            expectedVerdict: .accept, expectedClass: "functionWordSubstitution",
-            note: "A genuine EN repair where BOTH sides are negation " +
-                "tokens — proves the fix does not block negation<->negation " +
-                "substitution wholesale."
+            expectedVerdict: .reject, expectedClass: "contentWordIdentityChange",
+            note: "49.6 D-09 (CLASSIFY-01): negator-to-negator swaps are " +
+                "content-bearing; this repair is a documented lost repair " +
+                "(REVERT-TO-RAW), not a regression."
         ),
         Fixture(
             id: "fx-sub-func-de-negation-swap-nicht-keine",
             language: "de",
             baseline: "Ich habe nicht Ahnung davon.",
             candidate: "Ich habe keine Ahnung davon.",
-            expectedText: "Ich habe keine Ahnung davon.",
+            expectedText: "Ich habe nicht Ahnung davon.",
             editKind: .substitute, tokenClass: .functionWord, position: .interior,
-            expectedVerdict: .accept, expectedClass: "functionWordSubstitution",
-            note: "The 'nicht'->'kein...' repair FunctionWords.swift's own " +
-                "doc comment names as the reason negation is in the " +
-                "substitutable set at all ('Negation is included so that " +
-                "nicht->kein reads as a function substitution')."
+            expectedVerdict: .reject, expectedClass: "contentWordIdentityChange",
+            note: "49.6 D-09 (CLASSIFY-01): negator-to-negator swaps are " +
+                "content-bearing; this repair is a documented lost repair " +
+                "(REVERT-TO-RAW), not a regression."
         )
     ]
 
