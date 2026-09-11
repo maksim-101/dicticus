@@ -182,6 +182,17 @@ public enum EditGuard {
         /// (`cleanup-2026-08-15.jsonl`): a negation deleted from text pasted
         /// at the user's cursor.
         case negationChange
+        /// Phase 49.6 (EDITGUARD-03, D-06): assigned by
+        /// `applySentenceCoupledRevert` when an otherwise-accepted
+        /// CONTEXT-DEPENDENT edit (D-02) is flipped to rejected because a
+        /// CONTENT-BEARING rejection (D-03) sits in the same BASELINE
+        /// sentence (D-01/D-04) — the unit is the raw sentence, not the
+        /// keep-bounded run `atomicGroupRevert` uses, and the
+        /// punctuation-only-group exemption `atomicGroupRevert` honors does
+        /// NOT apply here (D-02). Confirmed live evidence (cited by
+        /// `MM-DD:N` only, per D-12 — no record text): 08-30:16, 08-30:27,
+        /// 08-20:21, 08-20:10, 08-20:13, 09-03:25.
+        case sentenceCoupledRevert
     }
 
     /// The log-shaped record: one classified edit, ready to serialize
@@ -1791,6 +1802,167 @@ public enum EditGuard {
         }
     }
 
+    /// Phase 49.6 (D-04): the raw-sentence key for
+    /// `applySentenceCoupledRevert`. Returns the baseline `sentenceIndex`
+    /// the edit at `edits[i]` belongs to, read ONLY from the raw (baseline)
+    /// side — never `to.sentenceIndex` (D-04: the candidate side is
+    /// fragile under an LLM sentence split/merge, per 260825-q1w).
+    ///
+    /// For `.keep`/`.substitute`/`.delete`/`.move`, `from` is always
+    /// non-nil and its `sentenceIndex` is the answer directly. A `.move`'s
+    /// `from` is its baseline ORIGIN token, so a move belongs to the raw
+    /// sentence it was moved OUT OF — its candidate destination is never
+    /// consulted (D-04 forbids the candidate side entirely).
+    ///
+    /// For a pure `.insert` (no baseline anchor of its own), scan FORWARD
+    /// from `i+1` for the first edit with a non-nil `from` and return ITS
+    /// `from.sentenceIndex`. In the order-preserving `edits` array, the
+    /// token immediately after an insertion point is the first raw token
+    /// the inserted word attaches to in reading order — the correct anchor
+    /// for a sentence-INITIAL insert (the LLM adding a word right after a
+    /// raw period), where the PRECEDING anchor would incorrectly resolve
+    /// to the previous sentence's terminal token. The preceding anchor
+    /// (scan BACKWARD from `i-1`) is used only as a fallback when no
+    /// forward anchor exists (end-of-text). Returns `nil` when neither
+    /// scan finds an anchored edit — the insert has no raw sentence and is
+    /// neither a trigger nor a revert-eligible member.
+    private static func baselineSentenceIndex(ofEditAt i: Int, in edits: [Edit]) -> Int? {
+        if let from = edits[i].from {
+            return from.sentenceIndex
+        }
+        var j = i + 1
+        while j < edits.count {
+            if let from = edits[j].from { return from.sentenceIndex }
+            j += 1
+        }
+        j = i - 1
+        while j >= 0 {
+            if let from = edits[j].from { return from.sentenceIndex }
+            j -= 1
+        }
+        return nil
+    }
+
+    /// Phase 49.6 (D-03): trigger classes for `applySentenceCoupledRevert`
+    /// — a rejected edit whose `rejectClass` is one of these is
+    /// content-bearing and fires the revert. Deliberately absent:
+    /// `unclassified` (rejected punctuation moves and unpairable edits
+    /// carry no content signal) and this pass's own derived class
+    /// (`sentenceCoupledRevert`) plus `atomicGroupRevert` (also derived) —
+    /// a derived verdict is never itself a trigger, which is what keeps
+    /// this pass idempotent (see `applySentenceCoupledRevert`'s doc
+    /// comment).
+    private static let sentenceRevertTriggerClasses: Set<String> = [
+        RejectionClass.contentWordIdentityChange.rawValue,
+        RejectionClass.contentWordInsertion.rawValue,
+        RejectionClass.contentWordDeletion.rawValue,
+        RejectionClass.derivationalSuffixChange.rawValue,
+        RejectionClass.negationChange.rawValue,
+        RejectionClass.digitValueChange.rawValue,
+        RejectionClass.numberInsertion.rawValue,
+        RejectionClass.pronounDeleted.rawValue,
+        RejectionClass.pronounPersonChange.rawValue,
+        RejectionClass.moodLockSentenceInitialVerb.rawValue,
+    ]
+
+    /// Phase 49.6 (D-02): the revert-eligible (CONTEXT-DEPENDENT) accept
+    /// classes for `applySentenceCoupledRevert` — an accepted edit only
+    /// reverts if its `acceptClass` is one of these. The SELF-CONTAINED
+    /// survive classes (`fillerDeletion`, `repetitionDeletion`,
+    /// `nonWordRepair`, `hyphenCompoundJoin`, `numberFormChange`) are
+    /// deliberately NOT coded here — anything not in this set survives, by
+    /// construction.
+    private static let sentenceRevertContextDependentClasses: Set<String> = [
+        AcceptClass.functionWordSubstitution.rawValue,
+        AcceptClass.functionWordInsertion.rawValue,
+        AcceptClass.wordOrderRepair.rawValue,
+        AcceptClass.punctuationOrCasing.rawValue,
+        AcceptClass.pauseSplitMerge.rawValue,
+        AcceptClass.disfluencyCollapse.rawValue,
+        AcceptClass.inflectionFix.rawValue,
+    ]
+
+    /// Phase 49.6 (EDITGUARD-03, D-01..D-06): the sixth coupling pass —
+    /// the raw-SENTENCE coupled revert. Audit finding 3
+    /// (`.planning/research/v2.6-log-audit-2026-09-10.md`): six live
+    /// records (08-30:16, 08-30:27, 08-20:21, 08-20:10, 08-20:13, 09-03:25
+    /// — German verb-position clauses) shipped text worse than either raw
+    /// or the LLM proposal because `applyAtomicGroupCoupling` only groups
+    /// adjacency-bounded runs of consecutive non-keep edits, and exempts
+    /// punctuation-only groups: a rejected content-bearing edit can sit
+    /// several `.keep`-separated tokens away from an accepted
+    /// context-dependent edit in the SAME raw sentence, and the two never
+    /// land in the same atomic-group cluster.
+    ///
+    /// **Unit (D-01/D-04):** the whole RAW (baseline) sentence containing
+    /// the rejected edit — see `baselineSentenceIndex`'s doc comment.
+    ///
+    /// **Trigger (D-03):** `sentenceRevertTriggerClasses`.
+    /// **Revert set (D-02):** `sentenceRevertContextDependentClasses`.
+    /// Unlike `applyAtomicGroupCoupling`, this pass does NOT exempt
+    /// punctuation-only groups (D-02): the July exemption guarded a
+    /// glued-ellipsis mechanism 49.5's run tokenization removed, and
+    /// shielding it here would leave `09-03:25` and `08-20:13`'s defects
+    /// unfixed.
+    ///
+    /// **Algorithm:** (a) collect the `baselineSentenceIndex` of every
+    /// edit whose verdict is rejected with a trigger-class `rejectClass`,
+    /// into a `Set<Int>`; (b) if empty, no-op; (c) for every edit that is
+    /// NOT a `.keep`, is currently ACCEPTED with a revert-set
+    /// `acceptClass`, and whose `baselineSentenceIndex` is in that trigger
+    /// set, flip it to rejected with `rejectClass: sentenceCoupledRevert`,
+    /// using the same `ClassifiedEdit` reconstruction idiom
+    /// `applyAtomicGroupCoupling` uses.
+    ///
+    /// **No run-on cap (D-05):** a raw sentence with no terminal period
+    /// can be a whole utterance; this pass does not subdivide it or cap
+    /// how many edits it reverts — accepted, measured by plan 04's replay.
+    ///
+    /// **Idempotence/monotonicity:** derived purely from `edits`
+    /// (immutable within one `rebuild` call) plus each verdict's OWN
+    /// class — its own output class (`sentenceCoupledRevert`) is never a
+    /// trigger, so re-running this pass after a later verdict mutation
+    /// (the mood-lock loop) can only find MORE edits to revert, never
+    /// un-revert a prior flip — the same accept-to-reject-only contract
+    /// every other coupling pass in this file holds. Called immediately
+    /// after `applyAtomicGroupCoupling` at all three `rebuild` call sites
+    /// (initial pass + both mood-lock re-invocations), so it sees that
+    /// pass's flips: because `applyAtomicGroupCoupling` treats ANY
+    /// rejection in a group as a group rejection, a later mood-lock
+    /// re-invocation of THIS pass may additionally revert a SURVIVE-class
+    /// edit that sits in the same keep-bounded run as an edit this pass
+    /// flipped on an earlier call — an accepted consequence: the direction
+    /// is always toward raw, and the replay reports it.
+    private static func applySentenceCoupledRevert(edits: [Edit], verdicts: inout [ClassifiedEdit]) {
+        guard !edits.isEmpty else { return }
+
+        var triggered = Set<Int>()
+        for i in edits.indices {
+            guard !verdicts[i].accepted,
+                  let rejectClass = verdicts[i].rejectClass,
+                  sentenceRevertTriggerClasses.contains(rejectClass),
+                  let sentenceIndex = baselineSentenceIndex(ofEditAt: i, in: edits)
+            else { continue }
+            triggered.insert(sentenceIndex)
+        }
+        guard !triggered.isEmpty else { return }
+
+        for i in edits.indices {
+            guard edits[i].kind != .keep,
+                  verdicts[i].accepted,
+                  let acceptClass = verdicts[i].acceptClass,
+                  sentenceRevertContextDependentClasses.contains(acceptClass),
+                  let sentenceIndex = baselineSentenceIndex(ofEditAt: i, in: edits),
+                  triggered.contains(sentenceIndex)
+            else { continue }
+            verdicts[i] = ClassifiedEdit(
+                kind: verdicts[i].kind, from: verdicts[i].from, to: verdicts[i].to,
+                accepted: false, acceptClass: nil,
+                rejectClass: RejectionClass.sentenceCoupledRevert.rawValue
+            )
+        }
+    }
+
     /// The candidate-stream walk (Part C step 1-5, 7): emits accepted
     /// candidate-side tokens in candidate order, restores rejected
     /// delete/move tokens near their nearest surviving baseline anchor, and
@@ -2477,6 +2649,7 @@ public enum EditGuard {
         applyArticleAgreementCoupling(edits: edits, verdicts: &verdicts, language: language)
         applyAdjacentDeletionSubstituteCoupling(edits: edits, verdicts: &verdicts)
         applyAtomicGroupCoupling(edits: edits, verdicts: &verdicts)
+        applySentenceCoupledRevert(edits: edits, verdicts: &verdicts)
 
         var tokens = materialize(baseline: baseline, candidate: candidate, edits: edits, verdicts: verdicts)
 
@@ -2515,6 +2688,7 @@ public enum EditGuard {
                     )
                 }
                 applyAtomicGroupCoupling(edits: edits, verdicts: &verdicts)
+                applySentenceCoupledRevert(edits: edits, verdicts: &verdicts)
                 tokens = materialize(baseline: baseline, candidate: candidate, edits: edits, verdicts: verdicts)
             }
 
@@ -2550,6 +2724,7 @@ public enum EditGuard {
                 }
                 if punctuationReverted {
                     applyAtomicGroupCoupling(edits: edits, verdicts: &verdicts)
+                    applySentenceCoupledRevert(edits: edits, verdicts: &verdicts)
                     tokens = materialize(baseline: baseline, candidate: candidate, edits: edits, verdicts: verdicts)
                 }
             }

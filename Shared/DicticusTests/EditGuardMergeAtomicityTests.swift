@@ -139,7 +139,13 @@ final class EditGuardMergeAtomicityTests: XCTestCase {
     func testAtomicRevert_ofForHeartrateInstance() {
         let baseline = "She wants to be able to click in a dial and move the finger around to see individual data points. Like what was the value at any given time of heartrate for instance and then also along the way lost the info about the workouts so when I click on the workouts a small pop-up should show up"
         let llm = "She wants to be able to click in a dial and move the finger around to see individual data points, like the value at any given time for heartrate, and then also along the way, lost the info about workouts. So when I click on the workouts, a small pop-up should show up."
-        let expected = "She wants to be able to click in a dial and move the finger around to see individual data points. Like what was the value at any given time of heartrate for instance and then also along the way, lost the info about the workouts so when I click on the workouts, a small pop-up should show up."
+        // 49.6 D-01: reconciled — the second (run-on, no terminal period)
+        // baseline sentence also carries independent `contentWordDeletion`
+        // ("of") and `contentWordIdentityChange` ("instance"->",")
+        // rejections, so the whole-sentence coupled revert now takes the
+        // once-independent comma inserts and "So" capitalization down with
+        // it too (D-05: no run-on cap) — full revert to baseline.
+        let expected = baseline
         let out = guardOut(baseline, llm)
         XCTAssertEqual(out, expected)
         assertNeitherSourceClean(out, baseline, llm)
@@ -152,7 +158,12 @@ final class EditGuardMergeAtomicityTests: XCTestCase {
     func testAtomicRevert_itsIs() {
         let baseline = "Also in the current layout it's unclear to what time period this report is referring to."
         let llm = "Also, in the current layout, it is unclear to what time period this report refers."
-        let expected = "Also, in the current layout it's unclear to what time period this report is referring to."
+        // 49.6 D-01: reconciled — this single-sentence utterance also
+        // carries an independent `pronounPersonChange` rejection
+        // ("it's"->"it"), so the whole-sentence coupled revert now takes
+        // the once-independent "Also," comma insert down with it too —
+        // full revert to baseline.
+        let expected = baseline
         let out = guardOut(baseline, llm)
         XCTAssertEqual(out, expected)
         assertNeitherSourceClean(out, baseline, llm)
@@ -165,7 +176,12 @@ final class EditGuardMergeAtomicityTests: XCTestCase {
     func testAtomicRevert_wannaTo() {
         let baseline = "- Yes, we can go ahead, but first I wanna clear the context window because it's already 75% full."
         let llm = "Yes, we can go ahead, but first I want to clear the context window because it's already 75% full."
-        let expected = "Yes, we can go ahead, but first I wanna clear the context window because it's already 75% full."
+        // 49.6 D-01: reconciled — this single-sentence utterance also
+        // carries an independent `contentWordIdentityChange` rejection
+        // ("wanna"->"want"), so the whole-sentence coupled revert now takes
+        // the once-independent leading "- " deletion down with it too —
+        // full revert to baseline.
+        let expected = baseline
         let out = guardOut(baseline, llm)
         XCTAssertEqual(out, expected)
         assertNeitherSourceClean(out, baseline, llm)
@@ -231,7 +247,15 @@ final class EditGuardMergeAtomicityTests: XCTestCase {
     func testCrossedSubstituteRestore_havingSeeking() {
         let baseline = "The title at the top meaning when was this report generated or what time period is this referring to can be a little bit more prominent. So as not to having to seek what time period this report is about."
         let llm = "The title at the top, indicating when this report was generated or what time period it refers to, could be a little more prominent so as not to require seeking out the time period this report is about."
-        let expected = "The title at the top meaning when this report was generated or what time period is this referring to, could be a little bit more prominent so as not to having to seek what time period this report is about."
+        // 49.6 D-01: reconciled — the first baseline sentence also carries
+        // multiple independent content-bearing rejections
+        // (`contentWordIdentityChange` "meaning"->",", `contentWordInsertion`
+        // "indicating", `pronounPersonChange` "is"->"it",
+        // `contentWordIdentityChange` "referring"->"refers",
+        // `contentWordDeletion` "this"), which now also takes the
+        // once-independent `pauseSplitMerge` period-delete (the sentence
+        // merge) down with it — full revert to baseline.
+        let expected = baseline
         let out = guardOut(baseline, llm)
         XCTAssertEqual(out, expected)
         assertNeitherSourceClean(out, baseline, llm)
@@ -249,7 +273,15 @@ final class EditGuardMergeAtomicityTests: XCTestCase {
     func testCrossedSubstituteRestore_eineSchoenGelatetePdf() {
         let baseline = "Es geht vor allem auch um die aktuell laufenden oder zukünftigen Geschäfte. Wie wir mit vergangenen umgehen, das müsste man noch schauen. Und Exportfunktionen nach Excel beispielsweise oder in eine schön gelatete PDF sollten ebenfalls verfügbar sein. Zudem sollte es auch Suchfunktionen geben, da wir davon ausgehen, dass es da nicht nur ein, zwei Geschäfte geben wird, sondern gleich mehrere, gerade wenn wir vielleicht auch eine Historie haben. Das sind mal die Punkte, die mir zum aktuellen Zeitpunkt einfallen. Analysiere das Ganze genauestens, stelle auch Verständnisfragen und komme mit Vorschlägen und Varianten zurück. Wir planen das jetzt gemeinsam."
         let llm = "\nEs geht vor allem auch um die aktuell laufenden oder zukünftigen Geschäfte. Wie wir mit vergangenen Geschäften umgehen, muss man noch schauen. Exportfunktionen nach Excel oder in eine gut lesbare PDF sollten ebenfalls verfügbar sein. Zudem sollte es auch Suchfunktionen geben, da wir davon ausgehen, dass es da nicht nur ein oder zwei, sondern mehrere Geschäfte geben wird, gerade wenn wir vielleicht auch eine Historie haben. Das sind mal die Punkte, die mir zum aktuellen Zeitpunkt einfallen. Analysiere das Ganze genau, stelle Verständnisfragen und komme mit Vorschlägen und Varianten zurück. Wir planen das jetzt gemeinsam.\n</corrected_text>"
-        let expected = "Es geht vor allem auch um die aktuell laufenden oder zukünftigen Geschäfte. Wie wir mit vergangenen umgehen, das müsste man noch schauen. Und Exportfunktionen nach Excel beispielsweise oder in eine schön gelatete PDF sollten ebenfalls verfügbar sein. Zudem sollte es auch Suchfunktionen geben, da wir davon ausgehen, dass es da nicht nur ein, zwei, sondern gleich mehrere Geschäfte geben wird, gerade wenn wir vielleicht auch eine Historie haben. Das sind mal die Punkte, die mir zum aktuellen Zeitpunkt einfallen. Analysiere das Ganze genauestens, stelle auch Verständnisfragen und komme mit Vorschlägen und Varianten zurück. Wir planen das jetzt gemeinsam."
+        // 49.6 D-01: reconciled — every baseline sentence in this
+        // multi-sentence record also carries its own independent
+        // content-bearing rejection (`contentWordIdentityChange`,
+        // `contentWordInsertion`, `contentWordDeletion` — e.g.
+        // "müsste"->"muss", "beispielsweise" deleted, "schön"/"gelatete"->
+        // "gut"/"lesbare"), so the whole-sentence coupled revert now takes
+        // every once-independent accepted repair in each sentence down
+        // with it too — full revert to baseline.
+        let expected = baseline
         let out = guardOut(baseline, llm, "de")
         XCTAssertEqual(out, expected)
         assertNeitherSourceClean(out, baseline, llm)
@@ -294,7 +326,16 @@ final class EditGuardMergeAtomicityTests: XCTestCase {
     func testRestoredTerminalPunctuation_keepsInterSentenceSpace_labeledSo() {
         let baseline = "So help me adjust the feedback email or however it's labeled. So it matches these new states because I haven't sent it yet. I only was in contact with Pearcom support and now I want to go that separate lane as well because this is not acceptable anymore."
         let llm = "So, help me adjust the feedback email—or however it's labeled—to match these new states, because I haven't sent it yet. I was only in contact with Pearcom support, and now I want to go down that separate lane as well, because this is not acceptable anymore.</corrected_text>"
-        let expected = "So, help me adjust the feedback email—or however it's labeled. So it matches these new states, because I haven't sent it yet. I was only in contact with Pearcom support, and now I want to go that separate lane as well, because this is not acceptable anymore."
+        // 49.6 D-01: reconciled — sentences 2 and 3 each carry an
+        // independent content-bearing rejection (`contentWordInsertion`
+        // "down"; the `.move` of "only"), so the whole-sentence coupled
+        // revert now takes their once-independent accepted comma inserts
+        // down with them too. Sentence 1 has no trigger of its own, so its
+        // "So," comma and em-dash survive unchanged — this is still the
+        // load-bearing assertion for the original defect this test guards
+        // (the restored "." keeps its own baseline space, no
+        // "labeled.So" glue).
+        let expected = "So, help me adjust the feedback email—or however it's labeled. So it matches these new states because I haven't sent it yet. I only was in contact with Pearcom support and now I want to go that separate lane as well because this is not acceptable anymore."
         let out = guardOut(baseline, llm)
         XCTAssertEqual(out, expected)
         assertNeitherSourceClean(out, baseline, llm)
