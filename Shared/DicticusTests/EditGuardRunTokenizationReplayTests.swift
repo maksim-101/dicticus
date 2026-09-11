@@ -80,6 +80,20 @@ import XCTest
 ///   there). AFTER = raw for sentences 2 and 3.
 ///
 /// The other 8 golden entries stayed byte-identical this phase.
+///
+/// Phase 49.6 gap plans 06/07 (D-14, second re-run): re-baselined a SECOND
+/// time on top of commit `9dc5786`, after plan 06 (D-15 boundary coupling,
+/// EDITGUARD-03) and plan 07 (D-16 bounded unit — measured and declined by
+/// the user; `w0`, no bound shipped, so the shipped code under test is
+/// plan 06's). No committed golden entry's value changed this run:
+/// `testProductionRecordsMatchPreChangeGolden_orImprove` stayed green with
+/// zero diffs. The two D-15-shape ts plan 06 closed on the live corpus
+/// (`2026-09-06T09:08:57.561Z`, `2026-09-07T03:18:14.984Z` — see
+/// `49.6-GATE-DIFF-2.md` §1) are not among the 15 committed golden ids, so
+/// the D-15 fix has nothing to re-baseline here — "post-49.6-gaps lock".
+/// `testKnownDefectStringsNeverReturn_49_6_gaps` below pins plan 06's two
+/// D-15 synthetic defect substrings independently, per the same discipline
+/// as the blocks above. Full evidence: `49.6-GATE-DIFF-2.md` §1c.
 @MainActor
 final class EditGuardRunTokenizationReplayTests: XCTestCase {
 
@@ -319,6 +333,43 @@ final class EditGuardRunTokenizationReplayTests: XCTestCase {
             guardOut("we compared it against Fable 5 yesterday", "we compared it against Fable-5 yesterday", "en")
                 .contains("Fable-5"),
             "a word-then-digit hyphen insert must not ship as prosodic punctuation")
+    }
+
+    /// 49.6 gap plans 06/07 (D-14, second re-run) — extends
+    /// `testKnownDefectStringsNeverReturn_49_6` (above) with plan 06's two
+    /// D-15 synthetic defect substrings, pinned independently of
+    /// `preChangeGolden` (same discipline as the two 49.5 blocks and the
+    /// 49.6-04 block). Both pairs are copied inline from
+    /// `EditGuardCoupledRevertTests.swift`'s `testD15_*` fixtures (D-12:
+    /// invented sentences, no live dictation text) with the exact substring
+    /// that identified the defect in that fixture's RED run
+    /// (`49.6-06-SUMMARY.md`). No committed golden entry's value changed
+    /// this run (see file header) — this block is the run's only new pin.
+    func testKnownDefectStringsNeverReturn_49_6_gaps() {
+        // testD15_periodSubstituteMergeRevertsNextSentenceCasing shape: a
+        // restored terminal period must couple the next sentence's casing
+        // substitute — the lowercase "which" must never survive unreverted.
+        let outA = guardOut(
+            "We should confirm our vendor today. Which team is installing the update this week.",
+            "We should confirm our supplier today, which team is installing the update this week?",
+            "en")
+        XCTAssertFalse(outA.contains("today. which"),
+                       "a restored period must couple the next sentence's casing substitute")
+        XCTAssertTrue(outA.contains("today. Which"),
+                      "the correctly-coupled casing must ship")
+
+        // testD15_periodDeleteMergeRevertsNextSentenceCasing shape: a
+        // deleted terminal period (LLM sentence-merge) must couple the next
+        // sentence's casing substitute — the lowercase "because" must never
+        // survive unreverted.
+        let outB = guardOut(
+            "It is rarely clear where to begin. Because both routes carry the same toll.",
+            "It is rarely obvious where to begin because both routes carry the same toll.",
+            "en")
+        XCTAssertFalse(outB.contains("begin. because"),
+                       "a deleted period's merge must couple the next sentence's casing substitute")
+        XCTAssertTrue(outB.contains("begin. Because"),
+                      "the correctly-coupled casing must ship")
     }
 
     // MARK: - D-04: per-sentence divergence gate window
