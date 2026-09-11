@@ -197,6 +197,7 @@
 		E6B06B07E666852ADC5A61AA /* CurrencyAntiFlip.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D6C7FC280420E7160A996AD /* CurrencyAntiFlip.swift */; };
 		E95F2079082597A0ABF52F78 /* PasteProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 581D101921D572E116C6A241 /* PasteProbe.swift */; };
 		E96FCDD523E8F5CAEDD1B303 /* AiCleanupPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBC4C4363B1672EAB82E3084 /* AiCleanupPane.swift */; };
+		E98DF26857206CBF0E7D21C7 /* DictionaryExactPassCaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85844C88385261660FE6757B /* DictionaryExactPassCaseTests.swift */; };
 		ECCC98D4D7A901320AB0DCF0 /* BrandMatcherShortAcronymGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E6914B9852E32683771AD7A /* BrandMatcherShortAcronymGuardTests.swift */; };
 		ED8AAA311BAE60C64947B802 /* starter-pack-general.csv in Resources */ = {isa = PBXBuildFile; fileRef = 9F67747AC990B3EB48B970E0 /* starter-pack-general.csv */; };
 		EE01BCC7E61ED1CCF053C586 /* EditGuardCoupledRevertTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A1127E11BB8DCD53B9C486D /* EditGuardCoupledRevertTests.swift */; };
@@ -335,6 +336,7 @@
 		81DE763C61392CC53C40C123 /* starter-pack-brands.csv */ = {isa = PBXFileReference; path = "starter-pack-brands.csv"; sourceTree = "<group>"; };
 		839A422D88E41D76CCFE3A59 /* .gitkeep */ = {isa = PBXFileReference; path = .gitkeep; sourceTree = "<group>"; };
 		852A9A64040275AE2A20C425 /* lexicon-de.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "lexicon-de.txt"; sourceTree = "<group>"; };
+		85844C88385261660FE6757B /* DictionaryExactPassCaseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryExactPassCaseTests.swift; sourceTree = "<group>"; };
 		86C8FAFE9D79752C793994C1 /* FactPreservationGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FactPreservationGuard.swift; sourceTree = "<group>"; };
 		8799101AACF438EABD65E929 /* BoilerplateHallucination.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BoilerplateHallucination.swift; sourceTree = "<group>"; };
 		8810FF393D80E2B884135F36 /* SwissGermanToggleRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwissGermanToggleRow.swift; sourceTree = "<group>"; };
@@ -734,6 +736,7 @@
 				BC99727F95E5677BCD436B4B /* DictionaryCanonicalCollisionTests.swift */,
 				9CC505406DD81429427683C4 /* DictionaryDataLossGuardTests.swift */,
 				9307719330E20141175DCB2A /* DictionaryEntryEditTests.swift */,
+				85844C88385261660FE6757B /* DictionaryExactPassCaseTests.swift */,
 				3C663B6748FAF52FDB35F72A /* DictionaryImportPreviewTests.swift */,
 				28BD10DC1CB7282C442BA92C /* EditDiffTests.swift */,
 				B859D997214D179829112730 /* EditGuardCalibrationTests.swift */,
@@ -1096,6 +1099,7 @@
 				F6179E0AAD9D90AA6E38C0F2 /* DictionaryCanonicalCollisionTests.swift in Sources */,
 				90C3C0F705B6F795EB1DD7FD /* DictionaryDataLossGuardTests.swift in Sources */,
 				9DAA166333118D8A52D40CD0 /* DictionaryEntryEditTests.swift in Sources */,
+				E98DF26857206CBF0E7D21C7 /* DictionaryExactPassCaseTests.swift in Sources */,
 				343DB4913F68FD632327DCC5 /* DictionaryIOServiceTests.swift in Sources */,
 				12EF6766C54C8FC193BC048B /* DictionaryImportPreviewTests.swift in Sources */,
 				707548B3DD5BD5C30A385546 /* DictionaryServiceTests.swift in Sources */,
