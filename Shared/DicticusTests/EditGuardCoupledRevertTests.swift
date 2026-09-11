@@ -170,4 +170,79 @@ final class EditGuardCoupledRevertTests: XCTestCase {
         let v = EditGuardMergeAtomicityTests.neitherSourceViolations(output: out, sourceA: baseline, sourceB: llm)
         XCTAssertTrue(v.tier1.isEmpty, "tier-1 neither-source violation(s) \(v.tier1) in: \(out)")
     }
+
+    // MARK: - D-15 boundary coupling (gap plan 06)
+
+    /// Positive, substitute form — period form, ts-cited in
+    /// `49.6-GATE-DIFF.md` §4. A restored terminal `.` at the end of raw
+    /// sentence N must couple the `punctuationOrCasing` casing substitute on
+    /// raw sentence N+1's first word token. Invented topic: a vendor status
+    /// update. RED before the fix: the pre-fix actual string contains
+    /// "today. which" (lowercase `which` surviving unreverted).
+    func testD15_periodSubstituteMergeRevertsNextSentenceCasing() {
+        let baseline = "We should confirm our vendor today. Which team is installing the update this week."
+        let llm = "We should confirm our supplier today, which team is installing the update this week?"
+        let expected = "We should confirm our vendor today. Which team is installing the update this week?"
+        let out = guardOut(baseline, llm, "en")
+        let result = guardResult(baseline, llm, "en")
+        XCTAssertEqual(out, expected)
+        XCTAssertTrue(result.edits.contains { $0.kind == "substitute" && $0.from == "Which" && $0.rejectClass == "sentenceCoupledRevert" })
+        let v = EditGuardMergeAtomicityTests.neitherSourceViolations(output: out, sourceA: baseline, sourceB: llm)
+        XCTAssertTrue(v.tier1.isEmpty, "tier-1 neither-source violation(s) \(v.tier1) in: \(out)")
+    }
+
+    /// Positive, delete form — period form, ts-cited in
+    /// `49.6-GATE-DIFF.md` §4. A restored terminal `.` deleted by the LLM's
+    /// merge must couple the casing substitute on raw sentence N+1's first
+    /// word token. Invented topic: two routes to a destination. RED before
+    /// the fix: the pre-fix actual string contains "begin. because"
+    /// (lowercase `because` surviving unreverted).
+    func testD15_periodDeleteMergeRevertsNextSentenceCasing() {
+        let baseline = "It is rarely clear where to begin. Because both routes carry the same toll."
+        let llm = "It is rarely obvious where to begin because both routes carry the same toll."
+        let expected = baseline
+        let out = guardOut(baseline, llm, "en")
+        let result = guardResult(baseline, llm, "en")
+        XCTAssertEqual(out, expected)
+        XCTAssertTrue(result.edits.contains { $0.kind == "substitute" && $0.from == "Because" && $0.rejectClass == "sentenceCoupledRevert" })
+        let v = EditGuardMergeAtomicityTests.neitherSourceViolations(output: out, sourceA: baseline, sourceB: llm)
+        XCTAssertTrue(v.tier1.isEmpty, "tier-1 neither-source violation(s) \(v.tier1) in: \(out)")
+    }
+
+    /// Negative, ellipsis form — the shape of the two ellipsis-form rows
+    /// exported in `49.6-AMBIGUOUS.md`. The restored `...` run is not a
+    /// member of `sentenceTerminalMarks` (it is a single multi-character run
+    /// token, not one of the three single-character marks), so it must NOT
+    /// couple the next sentence's casing — the user's own REVERT-TO-RAW
+    /// ruling on the two ellipsis rows, pinned. GREEN both before and after
+    /// the fix.
+    func testD15_ellipsisBoundaryKeepsNextSentenceCasing() {
+        let baseline = "We worry the plan will let the whole team lose... Patience with the rollout plan."
+        let llm = "We worry the plan will let the whole crew lose patience with the rollout plan."
+        let expected = "We worry the plan will let the whole team lose... patience with the rollout plan."
+        let out = guardOut(baseline, llm, "en")
+        let result = guardResult(baseline, llm, "en")
+        XCTAssertEqual(out, expected)
+        XCTAssertTrue(result.edits.contains { $0.kind == "substitute" && $0.from == "Patience" && $0.accepted && $0.acceptClass == "punctuationOrCasing" })
+        let v = EditGuardMergeAtomicityTests.neitherSourceViolations(output: out, sourceA: baseline, sourceB: llm)
+        XCTAssertTrue(v.tier1.isEmpty, "tier-1 neither-source violation(s) \(v.tier1) in: \(out)")
+    }
+
+    /// Negative, N+1 carries its own trigger — the substitute-form pair
+    /// above, with an additional rejected content substitute inside raw
+    /// sentence N+1. The pre-49.6-06 sentence rule already fully reverts
+    /// N+1 on its own trigger; this pins that the D-15 refinement adds
+    /// nothing where the sentence rule already fires. GREEN both before and
+    /// after the fix.
+    func testD15_nextSentenceOwnTriggerByteIdentical() {
+        let baseline = "We should confirm our vendor today. Which team is installing the update this week."
+        let llm = "We should confirm our supplier today, which team is enabling the update this week?"
+        let expected = baseline
+        let out = guardOut(baseline, llm, "en")
+        let result = guardResult(baseline, llm, "en")
+        XCTAssertEqual(out, expected)
+        XCTAssertTrue(result.edits.contains { $0.kind == "substitute" && $0.from == "installing" && $0.rejectClass != nil })
+        let v = EditGuardMergeAtomicityTests.neitherSourceViolations(output: out, sourceA: baseline, sourceB: llm)
+        XCTAssertTrue(v.tier1.isEmpty, "tier-1 neither-source violation(s) \(v.tier1) in: \(out)")
+    }
 }
