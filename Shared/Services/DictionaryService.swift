@@ -342,6 +342,53 @@ class DictionaryService: ObservableObject {
         return (dict, false)
     }
 
+    /// Pure, injectable core of the exact-match pass (Phase 49.7 D-19) — the same
+    /// pattern as `loadGuarded`; `applyWithTrace` is the production caller; tests
+    /// call this directly with a local `entries` map so no test needs the
+    /// singleton.
+    nonisolated static func applyExactPass(to text: String, entries: [String: DictionaryMetadata], caseSensitive: Bool) -> (text: String, replacements: [Replacement]) {
+        var result = text
+        var replacements: [Replacement] = []
+
+        let sortedKeys = entries.keys.sorted { $0.count > $1.count }
+
+        for original in sortedKeys {
+            guard let metadata = entries[original] else { continue }
+
+            // \b only works between \w (alphanumeric) and \W (non-alphanumeric).
+            // It fails for "Swiss \" because " matches \W.
+            // We use lookarounds to simulate word boundaries for any string.
+            let escaped = NSRegularExpression.escapedPattern(for: original)
+
+            // Pattern: Ensure match is not preceded or followed by an alphanumeric character
+            // unless the original string itself starts/ends with one.
+            let pattern = "(?<![a-zA-Z0-9])\(escaped)(?![a-zA-Z0-9])"
+
+            let options: NSRegularExpression.Options = caseSensitive ? [] : [.caseInsensitive]
+
+            do {
+                let regex = try NSRegularExpression(pattern: pattern, options: options)
+                let nsResult = result as NSString
+                let fullRange = NSRange(location: 0, length: nsResult.length)
+                let matches = regex.matches(in: result, options: [], range: fullRange)
+                if !matches.isEmpty {
+                    // Capture matched substrings (in original positions) before
+                    // mutating `result` so trace.from carries the actual text.
+                    for m in matches {
+                        let matched = nsResult.substring(with: m.range)
+                        replacements.append(Replacement(key: original, from: matched, to: metadata.replacement))
+                    }
+                    result = regex.stringByReplacingMatches(in: result, options: [], range: fullRange, withTemplate: metadata.replacement)
+                }
+            } catch {
+                // Fallback: best-effort replacement; cannot reliably emit trace entries here.
+                result = result.replacingOccurrences(of: original, with: metadata.replacement, options: caseSensitive ? [] : [.caseInsensitive])
+            }
+        }
+
+        return (result, replacements)
+    }
+
     /// Rolling one-step backup key: `save()` copies the PREVIOUS persisted blob
     /// here before overwriting, so a single bad overwrite is always recoverable
     /// (belt-and-suspenders behind the init data-loss guard; 2026-07-19).
@@ -627,45 +674,10 @@ class DictionaryService: ObservableObject {
     /// trace arrays. Both arrays are empty when nothing happened (D-07 default-
     /// empty contract for downstream JSONL stability).
     public func applyWithTrace(to text: String) -> (text: String, replacements: [Replacement], blocked: [BlockedMatch]) {
-        var result = text
-        var replacements: [Replacement] = []
+        let exact = Self.applyExactPass(to: text, entries: dictionary, caseSensitive: isCaseSensitive)
+        var result = exact.text
+        var replacements = exact.replacements
         var blocked: [BlockedMatch] = []
-
-        let sortedKeys = dictionary.keys.sorted { $0.count > $1.count }
-
-        for original in sortedKeys {
-            guard let metadata = dictionary[original] else { continue }
-
-            // \b only works between \w (alphanumeric) and \W (non-alphanumeric).
-            // It fails for "Swiss \" because " matches \W.
-            // We use lookarounds to simulate word boundaries for any string.
-            let escaped = NSRegularExpression.escapedPattern(for: original)
-
-            // Pattern: Ensure match is not preceded or followed by an alphanumeric character
-            // unless the original string itself starts/ends with one.
-            let pattern = "(?<![a-zA-Z0-9])\(escaped)(?![a-zA-Z0-9])"
-
-            let options: NSRegularExpression.Options = isCaseSensitive ? [] : [.caseInsensitive]
-
-            do {
-                let regex = try NSRegularExpression(pattern: pattern, options: options)
-                let nsResult = result as NSString
-                let fullRange = NSRange(location: 0, length: nsResult.length)
-                let matches = regex.matches(in: result, options: [], range: fullRange)
-                if !matches.isEmpty {
-                    // Capture matched substrings (in original positions) before
-                    // mutating `result` so trace.from carries the actual text.
-                    for m in matches {
-                        let matched = nsResult.substring(with: m.range)
-                        replacements.append(Replacement(key: original, from: matched, to: metadata.replacement))
-                    }
-                    result = regex.stringByReplacingMatches(in: result, options: [], range: fullRange, withTemplate: metadata.replacement)
-                }
-            } catch {
-                // Fallback: best-effort replacement; cannot reliably emit trace entries here.
-                result = result.replacingOccurrences(of: original, with: metadata.replacement, options: isCaseSensitive ? [] : [.caseInsensitive])
-            }
-        }
 
         // Phase 25.1-03: fuzzy second pass after exact-match completes.
         let fuzzy = applyFuzzyPassWithTrace(result)
