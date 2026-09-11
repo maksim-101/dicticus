@@ -149,6 +149,7 @@ struct DictionaryView: View {
                             .textFieldStyle(.roundedBorder)
                             .controlSize(.regular)
                             .font(.system(size: 13))
+                            .help("Matching ignores case — except a single all-uppercase original (e.g. HEY), which only matches when dictated in capitals.")
                             .onChange(of: newOriginal) { _, newValue in
                                 withAnimation(.easeInOut(duration: 0.2)) {
                                     checkForDuplicate(newValue)

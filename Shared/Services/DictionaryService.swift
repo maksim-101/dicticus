@@ -364,7 +364,14 @@ class DictionaryService: ObservableObject {
             // unless the original string itself starts/ends with one.
             let pattern = "(?<![a-zA-Z0-9])\(escaped)(?![a-zA-Z0-9])"
 
-            let options: NSRegularExpression.Options = caseSensitive ? [] : [.caseInsensitive]
+            // Phase 49.7 D-07: a single-token all-uppercase key (HEY, HEI —
+            // Whisper's all-caps rendering of a spoken tool name) matches
+            // case-sensitively so the capitalised greeting form is left
+            // alone; multi-word all-caps keys (USB C, A I) and everything
+            // else keep the global toggle.
+            let keyCaseSensitive = caseSensitive ||
+                (!original.contains(where: { $0.isWhitespace }) && original.allSatisfy { $0.isUppercase })
+            let options: NSRegularExpression.Options = keyCaseSensitive ? [] : [.caseInsensitive]
 
             do {
                 let regex = try NSRegularExpression(pattern: pattern, options: options)
@@ -382,7 +389,7 @@ class DictionaryService: ObservableObject {
                 }
             } catch {
                 // Fallback: best-effort replacement; cannot reliably emit trace entries here.
-                result = result.replacingOccurrences(of: original, with: metadata.replacement, options: caseSensitive ? [] : [.caseInsensitive])
+                result = result.replacingOccurrences(of: original, with: metadata.replacement, options: keyCaseSensitive ? [] : [.caseInsensitive])
             }
         }
 

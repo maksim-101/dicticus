@@ -36,6 +36,7 @@ private struct AddEntrySheet: View {
                 } header: {
                     Text("Original Phrase")
                 } footer: {
+                    Text("Matching ignores case — except a single all-uppercase original (e.g. HEY), which only matches when dictated in capitals.")
                     if let warning = duplicateWarning {
                         Text(warning).foregroundColor(Color.orange)
                     }
