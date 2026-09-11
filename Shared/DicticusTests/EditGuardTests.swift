@@ -69,12 +69,28 @@ final class EditGuardTests: XCTestCase {
     /// "A sentence containing BOTH a genuine repair and a corruption yields
     /// a string containing the repair and not the corruption. No pass/fail
     /// gate can produce that string." — unsatisfiable by any sentence-level
-    /// gate; this is the reason D-01 exists.
+    /// gate; this was the reason Phase 44's own D-01 (edit-granularity
+    /// classification) existed.
+    ///
+    /// UPDATED (Phase 49.6, D-01/D-02, deviation — see
+    /// 49.6-02-SUMMARY.md "Deviations"): 49.6's OWN, differently-named D-01
+    /// (the raw-SENTENCE coupled revert) supersedes this fixture's
+    /// edit-granularity guarantee for this specific case. The bundled
+    /// repair (`wordOrderRepair`, a D-02 CONTEXT-DEPENDENT accept class by
+    /// the phase's locked class list) and the bundled corruption
+    /// (`pronounPersonChange`, a D-03 trigger class) sit in the SAME
+    /// (only) baseline sentence, so the whole sentence now reverts,
+    /// including the repair. The `XCTAssertNotEqual(result.text,
+    /// fixture.baseline)` assertion below is no longer true and has been
+    /// removed — `testPreserve_deRepairWerden` (a pinned D-08b hard
+    /// constraint) still proves the SAME "werden" repair survives in
+    /// isolation, so the underlying repair mechanism itself is unaffected;
+    /// only its coexistence with an UNRELATED same-sentence corruption
+    /// changed.
     func testD01BundledFixtureKeepsRepairAndDropsCorruption() {
         let fixture = EditGuardFixtures.d01BundledFixture
         let result = EditGuard.apply(rulesCleaned: fixture.baseline, llmOutput: fixture.candidate, language: fixture.language, lexicon: TestSpellLexicon.allKnown)
         XCTAssertEqual(result.text, fixture.expectedText)
-        XCTAssertNotEqual(result.text, fixture.baseline, "the repair must survive")
         XCTAssertNotEqual(result.text, fixture.candidate, "the corruption must NOT survive")
     }
 
