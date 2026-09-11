@@ -1969,6 +1969,37 @@ public enum EditGuard {
     /// can be a whole utterance; this pass does not subdivide it or cap
     /// how many edits it reverts — accepted, measured by plan 04's replay.
     ///
+    /// **Boundary coupling (D-15, gap plan 06):** plan 04's replay bar
+    /// found a residual: when this pass restores a single-character
+    /// terminal mark (`.`/`!`/`?`, `sentenceTerminalMarks`) at the end of
+    /// a TRIGGERED raw sentence N, the immediately following edit — raw
+    /// sentence N+1's first word token, if it is an accepted
+    /// `punctuationOrCasing` casing substitute — is coupled and reverted
+    /// with it, even though N+1 itself carries no trigger. Without this,
+    /// the restored period/mark is followed by an un-reverted lowercase
+    /// word (`…router. what…`, `…start. because…` — cited by ts only,
+    /// `49.6-GATE-DIFF.md` §4: `2026-09-06T09:08:57.561Z`,
+    /// `2026-09-07T03:18:14.984Z`). The membership check is
+    /// `sentenceTerminalMarks` (single-character set) — a multi-character
+    /// run such as `...`/`!!`/`??` is NEVER a member, so an ellipsis (or
+    /// any run) boundary does NOT couple the next sentence's casing (the
+    /// two ellipsis-form rows in the same export were correctly labelled
+    /// REVERT-TO-RAW, not REGRESSION). ADJACENCY in `edits` (index `i` the
+    /// terminal-mark edit, `i + 1` the next sentence's first-word
+    /// substitute) is what makes "first word token of raw sentence N+1"
+    /// unambiguous: nothing can sit between the terminal mark and that
+    /// word in either stream, so an accepted insert between them
+    /// (`. So what`) deliberately does NOT couple — the inserted word
+    /// changes the casing context and the LLM's lowercase is then
+    /// correct. This step does not gate on which class the terminal-mark
+    /// edit itself carried (`punctuationOrCasing` for `.`->`,`,
+    /// `pauseSplitMerge` for a merge-delete, `unclassified` for a
+    /// rejected punctuation move, or this pass's own
+    /// `sentenceCoupledRevert`) — the observable fact is that the mark is
+    /// restored (`!verdicts[i].accepted`) while its sentence is in
+    /// `triggered`; nor does it require the mark to have been flipped in
+    /// THIS call, so it stays idempotent across the three call sites.
+    ///
     /// **Idempotence/monotonicity:** derived purely from `edits`
     /// (immutable within one `rebuild` call) plus each verdict's OWN
     /// class — its own output class (`sentenceCoupledRevert`) is never a
@@ -2008,6 +2039,37 @@ public enum EditGuard {
             else { continue }
             verdicts[i] = ClassifiedEdit(
                 kind: verdicts[i].kind, from: verdicts[i].from, to: verdicts[i].to,
+                accepted: false, acceptClass: nil,
+                rejectClass: RejectionClass.sentenceCoupledRevert.rawValue
+            )
+        }
+
+        // Phase 49.6 gap plan 06 (D-15): boundary coupling — see the
+        // "Boundary coupling" doc-comment paragraph above. A restored
+        // single-character terminal mark ending a TRIGGERED raw sentence N
+        // takes the immediately following (adjacent) edit — raw sentence
+        // N+1's first-word `punctuationOrCasing` casing substitute — down
+        // with it, whether or not N+1 itself has any trigger of its own.
+        for i in edits.indices {
+            guard edits[i].kind != .keep,
+                  let markToken = edits[i].from,
+                  markToken.kind == .punctuation,
+                  sentenceTerminalMarks.contains(markToken.text),
+                  !verdicts[i].accepted,
+                  triggered.contains(markToken.sentenceIndex)
+            else { continue }
+            let n = markToken.sentenceIndex
+            let j = i + 1
+            guard j < edits.count,
+                  edits[j].kind == .substitute,
+                  verdicts[j].accepted,
+                  verdicts[j].acceptClass == AcceptClass.punctuationOrCasing.rawValue,
+                  let nextWordToken = edits[j].from,
+                  nextWordToken.kind == .word,
+                  nextWordToken.sentenceIndex == n + 1
+            else { continue }
+            verdicts[j] = ClassifiedEdit(
+                kind: verdicts[j].kind, from: verdicts[j].from, to: verdicts[j].to,
                 accepted: false, acceptClass: nil,
                 rejectClass: RejectionClass.sentenceCoupledRevert.rawValue
             )
