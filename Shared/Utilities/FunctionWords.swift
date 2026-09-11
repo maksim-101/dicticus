@@ -257,11 +257,51 @@ public enum FunctionWords {
     /// `functionWordSubstitution`. This set exists so that leak is
     /// structurally closed while `nicht`->`kein...`/`kein`<->`keine` (both
     /// sides negation) still reads as a repair.
-    public static let germanNegation: Set<String> = ["nicht", "kein", "keine", "keinen"]
+    ///
+    /// Phase 49.6 D-09 (CLASSIFY-01): extended with `keinem`/`keiner`/
+    /// `keines` (completing the `kein` declension paradigm alongside the
+    /// pre-existing `kein`/`keine`/`keinen`) and `nie` (temporal negator).
+    /// `germanSubstitutable`'s MEMBERSHIP grows by exactly these five
+    /// tokens (it unions this set) — a negator that was not substitutable
+    /// before is now substitutable, and (per `classifySubstitute`'s new
+    /// lock below) any substitute/insert touching it is rejected as
+    /// content-bearing rather than accepted as a repair, EXCEPT the
+    /// existing polarity-flip carve-out (`negationChange`), which still
+    /// fires first.
+    public static let germanNegation: Set<String> = [
+        "nicht", "kein", "keine", "keinen", "keinem", "keiner", "keines", "nie"
+    ]
 
     /// The negation members of `englishSubstitutable`. Same rationale as
     /// `germanNegation`; EN half of the same confirmed production defect.
-    public static let englishNegation: Set<String> = ["not", "no"]
+    ///
+    /// Phase 49.6 D-09 (CLASSIFY-01): extended with `never` (temporal
+    /// negator, EN counterpart of German `nie`). Same membership-growth
+    /// and rejection consequence as `germanNegation` above.
+    public static let englishNegation: Set<String> = ["not", "no", "never"]
+
+    // MARK: - Coordinator sets (Phase 49.6, D-09)
+
+    /// D-09's criterion, stated before the list: *a word whose
+    /// substitution, insertion or deletion changes the logical relation
+    /// between clauses or the polarity of a claim.* Coordinators are the
+    /// "logical relation" half of that criterion; the negation sets above
+    /// are the "polarity" half.
+    ///
+    /// The overlap with `germanInsertable`'s conjunction members
+    /// (`und`/`oder`/`aber`/`sondern`) is DELIBERATE — `germanInsertable`
+    /// remains the D-06 insertion allowlist and is NOT edited by this
+    /// phase; `classifyInsert`'s new lock (see `EditGuard.swift`) consults
+    /// THIS set BEFORE `isInsertable` is ever reached, so a coordinator is
+    /// never blanket-inserted regardless of also appearing in the D-06
+    /// list.
+    public static let germanCoordinator: Set<String> = ["und", "oder", "aber", "sondern"]
+
+    /// EN counterpart of `germanCoordinator`. `nor` is NEW to this file —
+    /// it appears in neither `englishInsertable` nor `englishSubstitutable`
+    /// before this phase — so it only ever REJECTS (never blanket-inserted,
+    /// never a function<->function substitution partner).
+    public static let englishCoordinator: Set<String> = ["and", "or", "but", "nor"]
 
     // MARK: - Public API
 
@@ -296,5 +336,25 @@ public enum FunctionWords {
         let lower = token.lowercased()
         let prefix = language.prefix(2).lowercased()
         return prefix == "en" ? englishNegation.contains(lower) : germanNegation.contains(lower)
+    }
+
+    /// Phase 49.6 D-09: is `token` a member of `germanCoordinator` /
+    /// `englishCoordinator`? Same lookup convention as `isInsertable`/
+    /// `isSubstitutable`/`isNegation`.
+    public static func isCoordinator(_ token: String, language: String) -> Bool {
+        let lower = token.lowercased()
+        let prefix = language.prefix(2).lowercased()
+        return prefix == "en" ? englishCoordinator.contains(lower) : germanCoordinator.contains(lower)
+    }
+
+    /// Phase 49.6 D-09 (CLASSIFY-01): is `token` a coordinator OR a
+    /// negator? The single accessor `EditGuard.classifySubstitute` and
+    /// `EditGuard.classifyInsert` both consult to reject a conjunction/
+    /// negator touched by a substitute, insert, or (already, via
+    /// `classifyDelete`'s existing fall-through) delete — D-09's
+    /// criterion is "changes the logical relation between clauses OR the
+    /// polarity of a claim", and this is exactly that disjunction.
+    public static func isConjunctionOrNegator(_ token: String, language: String) -> Bool {
+        isCoordinator(token, language: language) || isNegation(token, language: language)
     }
 }

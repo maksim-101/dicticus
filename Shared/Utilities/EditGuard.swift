@@ -889,6 +889,20 @@ public enum EditGuard {
             if aIsNegation != bIsNegation {
                 return (false, nil, .negationChange)
             }
+            // Phase 49.6 D-09 / CLASSIFY-01, audit 08-23:52 (`and`->`or`)
+            // and 08-30:16 (`kein`->`nicht`): a substitute touching a
+            // criterion-derived coordinator or negator changes the
+            // logical relation between clauses or the polarity of a
+            // claim, even when both sides are already-substitutable
+            // function words and the polarity check above did not fire
+            // (both sides negation, or a coordinator<->coordinator swap).
+            // Reuses `contentWordIdentityChange` (an existing D-03
+            // trigger) rather than a new label — one rule, no new
+            // vocabulary.
+            if FunctionWords.isConjunctionOrNegator(a.normalized, language: language)
+                || FunctionWords.isConjunctionOrNegator(b.normalized, language: language) {
+                return (false, nil, .contentWordIdentityChange)
+            }
             return (true, .functionWordSubstitution, nil)
         }
         // 6.5. Quick task 260723-sx1, criterion A: non-word repair
@@ -936,6 +950,31 @@ public enum EditGuard {
         // changes meaning ("C" -> "C++"), so it is classed like any other
         // invented content, not blanket-accepted.
         if b.kind == .punctuation {
+            // Phase 49.6 D-11 / CLASSIFY-03, audit 08-22:65 (`Fable 5` ->
+            // `Fable-5`): a hyphen fused onto a word-then-digit identifier
+            // changes the identifier — `digitValueChange` is the class the
+            // digit lock already uses for identifier/version integrity.
+            // Checked BEFORE the prosodic accept below, narrowly scoped to
+            // `-` with a WORD immediately to its left and a digit-bearing
+            // token immediately to its right. Digit-then-word inserts
+            // (`5-Tage-Woche`, `10-minute walk`) do not reach this branch
+            // at all when `EditDiff` pairs them as `hyphenCompoundJoin`
+            // substitutes (the common shape — verified via `debugEG`); on
+            // the rare path where one DOES reach here as a pure insert,
+            // the left-neighbour-is-`.word` guard still excludes it,
+            // since the left neighbour would be `.numeric`. Hyphen DELETES
+            // are untouched — this predicate lives only in `classifyInsert`;
+            // `–`/`—` are untouched — only the bare ASCII hyphen is
+            // digit-adjacent enough to read as identifier fusion.
+            // `candidate[i].index == i` holds by tokenizer construction
+            // (the same invariant `classifyDelete`'s repetition check and
+            // `isPauseSplitPeriod` already rely on).
+            if b.text == "-",
+               b.index - 1 >= 0, b.index + 1 < candidate.count,
+               candidate[b.index - 1].kind == .word,
+               EditGuardTokenizer.isDigitBearing(candidate[b.index + 1].text) {
+                return (false, nil, .digitValueChange)
+            }
             if isProsodicPunctuation(b.text) {
                 return (true, .punctuationOrCasing, nil)
             }
@@ -957,6 +996,18 @@ public enum EditGuard {
         // case above.
         if isFillerToken(b.normalized, language: language) {
             return (false, nil, .unclassified)
+        }
+        // Phase 49.6 D-09 / CLASSIFY-01: a coordinator or negator inserted
+        // asserts a logical relation or a polarity the speaker never said
+        // — checked BEFORE `isInsertable` so a coordinator (already in
+        // `germanInsertable`/`englishInsertable` for `und`/`oder`/`aber`/
+        // `sondern`/`and`/`or`/`but`) is never blanket-inserted. Negators
+        // were already excluded from both `*Insertable` sets (see
+        // `ClosedListTests.testNoNegationTokenIsInsertable`) — this lock
+        // makes coordinators join them under the same D-09 criterion; the
+        // D-06 allowlist itself is untouched.
+        if FunctionWords.isConjunctionOrNegator(b.normalized, language: language) {
+            return (false, nil, .contentWordInsertion)
         }
         if FunctionWords.isInsertable(b.normalized, language: language) {
             return (true, .functionWordInsertion, nil)
