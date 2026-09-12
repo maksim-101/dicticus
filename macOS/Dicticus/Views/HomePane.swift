@@ -75,7 +75,13 @@ struct HomePane: View {
                     .font(.callout)
                     .foregroundStyle(.primary)
                     .fixedSize(horizontal: false, vertical: true)
-                // Phase 50-09 Task 3 (D-02 gap): denied-state caption is added here.
+
+                if notificationService.authorizationStatus == .denied {
+                    Text("Notifications are off for Dicticus \u{2014} System Settings \u{2192} Notifications.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         }
         .padding(.horizontal, 16)
