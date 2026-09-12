@@ -119,4 +119,81 @@ final class TextInjectorTests: XCTestCase {
         XCTAssertEqual(TextInjector.DeliveryBlocker.secureInput.rawValue, "secure_input")
         XCTAssertEqual(TextInjector.DeliveryBlocker.frontmostChanged.rawValue, "frontmost_changed")
     }
+
+    // MARK: - Phase 50 D-02: injectText four-exit seam-driven fixtures
+
+    func testInjectText_secureInput_fallsBackToClipboardWithoutPaste() async {
+        let pasteboard = NSPasteboard.general
+        let originalSaved = injector.saveClipboard(pasteboard)
+        defer { injector.restoreClipboard(pasteboard, saved: originalSaved) }
+
+        var pasteCount = 0
+        injector.axTrustedProbe = { true }
+        injector.secureInputProbe = { true }
+        injector.pasteSynthesizer = { pasteCount += 1 }
+
+        let outcome = await injector.injectText("alpha beta", expectedFrontmostBundleID: nil)
+
+        XCTAssertEqual(outcome, .fallbackToClipboard(.secureInput))
+        XCTAssertEqual(pasteboard.string(forType: .string), "alpha beta")
+        XCTAssertEqual(pasteCount, 0)
+    }
+
+    func testInjectText_frontmostChanged_fallsBackToClipboardWithoutPaste() async {
+        let pasteboard = NSPasteboard.general
+        let originalSaved = injector.saveClipboard(pasteboard)
+        defer { injector.restoreClipboard(pasteboard, saved: originalSaved) }
+
+        var pasteCount = 0
+        injector.axTrustedProbe = { true }
+        injector.secureInputProbe = { false }
+        injector.frontmostBundleIDProvider = { "com.example.other" }
+        injector.pasteSynthesizer = { pasteCount += 1 }
+
+        let outcome = await injector.injectText("alpha beta", expectedFrontmostBundleID: "com.example.target")
+
+        XCTAssertEqual(outcome, .fallbackToClipboard(.frontmostChanged))
+        XCTAssertEqual(pasteboard.string(forType: .string), "alpha beta")
+        XCTAssertEqual(pasteCount, 0)
+    }
+
+    func testInjectText_delivered_pastesOnceAndRestoresClipboard() async {
+        let pasteboard = NSPasteboard.general
+        let originalSaved = injector.saveClipboard(pasteboard)
+        defer { injector.restoreClipboard(pasteboard, saved: originalSaved) }
+
+        pasteboard.clearContents()
+        pasteboard.setString("before", forType: .string)
+
+        var pasteCount = 0
+        injector.axTrustedProbe = { true }
+        injector.secureInputProbe = { false }
+        injector.frontmostBundleIDProvider = { "com.example.target" }
+        injector.pasteSynthesizer = { pasteCount += 1 }
+
+        let outcome = await injector.injectText("alpha beta", expectedFrontmostBundleID: "com.example.target")
+
+        XCTAssertEqual(outcome, .delivered)
+        XCTAssertEqual(pasteCount, 1)
+        XCTAssertEqual(pasteboard.string(forType: .string), "before")
+    }
+
+    func testInjectText_axUntrusted_isBlockedWithoutTouchingClipboard() async {
+        let pasteboard = NSPasteboard.general
+        let originalSaved = injector.saveClipboard(pasteboard)
+        defer { injector.restoreClipboard(pasteboard, saved: originalSaved) }
+
+        pasteboard.clearContents()
+        pasteboard.setString("before", forType: .string)
+
+        var pasteCount = 0
+        injector.axTrustedProbe = { false }
+        injector.pasteSynthesizer = { pasteCount += 1 }
+
+        let outcome = await injector.injectText("alpha beta")
+
+        XCTAssertEqual(outcome, .blocked)
+        XCTAssertEqual(pasteCount, 0)
+        XCTAssertEqual(pasteboard.string(forType: .string), "before")
+    }
 }
