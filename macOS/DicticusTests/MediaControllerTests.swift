@@ -561,6 +561,83 @@ final class MediaControllerTests: XCTestCase {
         XCTAssertNil(degradedController.pendingVerifyTask, "a degraded press send falling through to the mute last-resort must never schedule tier-2b verification")
     }
 
+    // MARK: - D-13/D-15 (Phase 50): raised fire threshold + reported-RMS clamp
+
+    /// A live noise-fire RMS (5e-4, one of the four CONTEXT-named 2026-08-31/
+    /// 09-01/09-06/09-10 noise fires) must never send a discrete PAUSE once
+    /// `tier2bFireThreshold` (1e-3) sits above it. RED on pre-change code:
+    /// today only `silenceThreshold` (1e-4) gates, and 5e-4 > 1e-4 fires.
+    func testNoiseFire_5e4_NeverSendsPause() {
+        var toggleCallCount = 0
+
+        let controller = MediaController.makeForTesting(
+            tier1RunningPlayers: { [] },
+            outputRMS: { 5e-4 },
+            mediaRemoteToggle: { _ in
+                toggleCallCount += 1
+                return true
+            },
+            isOutputMuted: { false },
+            setOutputMuted: { _ in true }
+        )
+
+        controller.pauseMediaIfPlaying()
+        XCTAssertEqual(toggleCallCount, 0, "a 5e-4 press RMS — a live noise fire — must never send a PAUSE once the fire threshold is raised to 1e-3 (D-13)")
+
+        controller.resumeMediaIfPaused()
+        XCTAssertEqual(toggleCallCount, 0, "resume must not send anything when press did not fire")
+    }
+
+    /// D-14: the common real-playback case (9.2e-3, the corpus floor for every
+    /// genuine fire) must still pause on press and resume on release under the
+    /// raised threshold.
+    func testRealPlayback_9_2e3_StillSendsPause() {
+        var commandsSent: [Int] = []
+
+        let controller = MediaController.makeForTesting(
+            tier1RunningPlayers: { [] },
+            outputRMS: { 9.2e-3 },
+            mediaRemoteToggle: { command in
+                commandsSent.append(command)
+                return true
+            },
+            isOutputMuted: { false },
+            setOutputMuted: { _ in true }
+        )
+
+        controller.pauseMediaIfPlaying()
+        XCTAssertEqual(commandsSent, [Self.kMRPause], "a real-playback RMS at the corpus floor (9.2e-3) must still send the discrete PAUSE (D-14)")
+
+        controller.resumeMediaIfPaused()
+        XCTAssertEqual(commandsSent, [Self.kMRPause, Self.kMRPlay], "release must still send the discrete PLAY to resume (D-14)")
+    }
+
+    /// Pure decision table for `MediaController.tier2bShouldFire(measuredRMS:)`
+    /// (D-13) — no controller instance, no seams, just the boundary cases.
+    func testTier2bShouldFire_PureDecisionTable() {
+        XCTAssertFalse(MediaController.tier2bShouldFire(measuredRMS: nil), "a nil (tap-unavailable) sample must never fire")
+        XCTAssertFalse(MediaController.tier2bShouldFire(measuredRMS: 0.0), "digital silence must never fire")
+        XCTAssertFalse(MediaController.tier2bShouldFire(measuredRMS: 4.8354622216656084e-44), "a live denormal-magnitude reading must never fire")
+        XCTAssertFalse(MediaController.tier2bShouldFire(measuredRMS: 5e-4), "a live noise-fire value (5e-4) must not fire under the raised threshold")
+        XCTAssertFalse(MediaController.tier2bShouldFire(measuredRMS: 1e-3), "exactly at the threshold must not fire")
+        XCTAssertTrue(MediaController.tier2bShouldFire(measuredRMS: (1e-3).nextUp), "one ULP above the threshold must fire")
+        XCTAssertTrue(MediaController.tier2bShouldFire(measuredRMS: 9.2e-3), "a real-playback RMS at the corpus floor must fire")
+        XCTAssertTrue(MediaController.tier2bShouldFire(measuredRMS: 0.5), "a clearly-playing RMS must fire")
+    }
+
+    /// Pure clamp table for `MediaController.tier2bReportedRMS(_:)` (D-15) —
+    /// the logged press RMS must be exactly 0.0 whenever the gate does not
+    /// fire, the raw value otherwise, and nil stays nil.
+    func testTier2bReportedRMS_ClampsAtOrBelowThreshold() {
+        XCTAssertNil(MediaController.tier2bReportedRMS(nil), "nil stays nil — no sample was ever taken")
+        XCTAssertEqual(MediaController.tier2bReportedRMS(0.0), 0.0, "digital silence reports exactly 0.0")
+        XCTAssertEqual(MediaController.tier2bReportedRMS(4.8354622216656084e-44), 0.0, "a live denormal-magnitude reading clamps to exactly 0.0")
+        XCTAssertEqual(MediaController.tier2bReportedRMS(5e-4), 0.0, "a live noise-fire value clamps to exactly 0.0 under the raised threshold")
+        XCTAssertEqual(MediaController.tier2bReportedRMS(1e-3), 0.0, "exactly at the threshold clamps to 0.0")
+        XCTAssertEqual(MediaController.tier2bReportedRMS((1e-3).nextUp), (1e-3).nextUp, "one ULP above the threshold reports the raw value")
+        XCTAssertEqual(MediaController.tier2bReportedRMS(9.2e-3), 9.2e-3, "a real-playback RMS reports the raw value")
+    }
+
     // MARK: - Canary: every seam in this file is a mock, never a real-media closure
 
     func testCanary_AllSeamsAreMocksNeverRealMedia() {
