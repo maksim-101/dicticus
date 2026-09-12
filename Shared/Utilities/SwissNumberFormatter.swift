@@ -293,9 +293,12 @@ public struct SwissNumberFormatter {
     /// falls through since `[1-9]` excludes it), and an optional 1-2-digit
     /// decimal tail is kept, re-emitted with a period. Bare integers never
     /// match (no separator to anchor on), so the Phase 20.08 year fix stays
-    /// intact; multi-group tokens (`12,500,000`) do not match either.
+    /// intact; multi-group tokens (`12,500,000`) do not match either. The
+    /// decimal-tail separator must DIFFER from the group separator (review
+    /// CR-01, 49.7): `1.200.5` / `192.168.1` are dotted identifiers, not
+    /// "group + decimal", and fall through to the multi-separator net below.
     private static let thousandsGroupRegex = try? NSRegularExpression(
-        pattern: "^([+-]?)([1-9]\\d{0,2})[.,'\u{2019}](\\d{3})(?:[.,](\\d{1,2}))?$"
+        pattern: "^([+-]?)([1-9]\\d{0,2})([.,'\u{2019}])(\\d{3})(?:([.,])(\\d{1,2}))?$"
     )
 
     /// Detach a leading currency glyph (€, $, £, W7) and a trailing
@@ -393,10 +396,11 @@ public struct SwissNumberFormatter {
                     guard let r = Range(match.range(at: idx), in: core) else { return nil }
                     return String(core[r])
                 }
-                if let intPart = capturedGroup(2), let groupPart = capturedGroup(3) {
+                if let intPart = capturedGroup(2), let groupSep = capturedGroup(3),
+                   let groupPart = capturedGroup(4), capturedGroup(5) != groupSep {
                     let sign = capturedGroup(1) ?? ""
                     var rendered = "\(sign)\(intPart)'\(groupPart)"
-                    if let decimalTail = capturedGroup(4) {
+                    if let decimalTail = capturedGroup(6) {
                         rendered += ".\(decimalTail)"
                     }
                     return leadingGlyph + rendered + tail
