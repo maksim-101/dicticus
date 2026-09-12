@@ -9,7 +9,9 @@ import Carbon.HIToolbox
 /// Requires Accessibility permission for CGEvent posting (already checked by PermissionManager).
 ///
 /// Per D-06: Clipboard + Cmd+V paste strategy.
-/// Per D-07: Original clipboard contents preserved after injection (~100ms delay).
+/// Per D-07: original clipboard contents are restored after
+/// `clipboardRestoreDelayMilliseconds`, and only if the pasteboard is unchanged
+/// since the transcript was written (Phase 50 plan 11).
 /// Per D-08: Single Cmd+V code path for all apps including terminal emulators.
 /// @MainActor isolation ensures all NSPasteboard and CGEvent calls happen on the main thread.
 /// NSPasteboard.general and CGEvent.post are both main-thread-only AppKit/CoreGraphics APIs.
@@ -37,7 +39,8 @@ class TextInjector {
 
     /// Phase 50 D-02: the outcome of one `injectText` call.
     enum Outcome: Equatable {
-        /// The pre-check passed, Cmd+V was synthesized, and the prior clipboard was restored.
+        /// The pre-check passed, Cmd+V was synthesized, and the prior clipboard was restored
+        /// unless something else wrote to the pasteboard during the wait (Phase 50 plan 11).
         case delivered
         /// The pre-check failed before any paste was attempted; the transcript is left on the
         /// general pasteboard as a real user copy (no trailing space, no restore — D-02).
@@ -62,6 +65,24 @@ class TextInjector {
         return nil
     }
 
+    /// Phase 50 plan 11: how long to wait after synthesizing Cmd+V before restoring the saved
+    /// clipboard. Live record 2026-09-12 (`paste-2026-09-12.jsonl` line 122, `exit: success`):
+    /// the first dictation into Gemini for macOS after an idle `model_reload` pasted the
+    /// PREVIOUS clipboard content, not the transcript — the app's Electron renderer read the
+    /// pasteboard asynchronously after the old fixed-delay restore had already run. Asymmetry: an
+    /// early restore silently pastes the wrong text (data corruption); a late restore only
+    /// leaves the transcript on the clipboard a little longer, which is the D-02 fallback state
+    /// anyway. 750 is 7.5x the failing value — above an idle renderer's page-in plus IPC
+    /// clipboard read, below the gap before a user's next deliberate Cmd+C/Cmd+V. This is a
+    /// bias, not an elimination; the four `PasteProbe` fields (plan 11) make the next
+    /// occurrence attributable.
+    static let clipboardRestoreDelayMilliseconds: UInt64 = 750
+
+    /// Phase 50 plan 11: the restore re-installs the saved clipboard only when nobody else has
+    /// written since our `setString`; a user's Cmd+C, a clipboard manager re-declaring types, or
+    /// the target app writing on paste each move `NSPasteboard.changeCount` and must win.
+    nonisolated static func shouldRestoreClipboard(changeCountAfterWrite: Int, changeCountAtRestore: Int) -> Bool { changeCountAfterWrite == changeCountAtRestore }
+
     /// Test seams (Phase 50 D-02/D-05) — `var` properties, not initializer parameters, because
     /// `TextInjector()` is constructed bare at `HotkeyManager.swift:99` and by `revertToRaw`'s
     /// default argument. Production defaults match today's behaviour exactly.
@@ -79,7 +100,10 @@ class TextInjector {
     ///   3. Save current clipboard contents (all types per item)
     ///   4. Clear clipboard and write transcription text as plain string — exit `clipboard_write_failed`
     ///   5. Synthesize Cmd+V keystroke via CGEvent
-    ///   6. Wait ~100ms for target app to process paste (D-07), then restore original clipboard — exit `success`
+    ///   6. Wait `clipboardRestoreDelayMilliseconds` (Phase 50 plan 11), then restore the
+    ///      original clipboard only if `NSPasteboard.changeCount` is unchanged — exit `success`,
+    ///      recording `restore_delay_ms`, `changecount_after_write`, `changecount_at_restore`,
+    ///      `restore_performed`
     ///
     /// - Parameters:
     ///   - text: The transcription text to inject.
@@ -142,6 +166,9 @@ class TextInjector {
             return .blocked
         }
 
+        // changeCount right after our write — the baseline the restore guard compares against.
+        let changeCountAfterWrite = pasteboard.changeCount
+
         // Step 3: Synthesize Cmd+V
         if let pasteSynthesizer {
             pasteSynthesizer()
@@ -149,12 +176,21 @@ class TextInjector {
             synthesizePaste()
         }
 
-        // Step 4: Wait for target app to process paste
-        // 100ms is more reliable than 50ms across Electron apps and terminal emulators.
-        try? await Task.sleep(nanoseconds: 100_000_000)
+        // Step 4: Wait for the target app to process the paste (Phase 50 plan 11).
+        let clock = ContinuousClock()
+        let pasteInstant = clock.now
+        try? await Task.sleep(nanoseconds: Self.clipboardRestoreDelayMilliseconds * 1_000_000)
 
-        // Step 5: Restore original clipboard
-        restoreClipboard(pasteboard, saved: saved)
+        // Step 5: Restore original clipboard, but only if nobody else wrote to it meanwhile.
+        let changeCountAtRestore = pasteboard.changeCount
+        let restorePerformed = Self.shouldRestoreClipboard(
+            changeCountAfterWrite: changeCountAfterWrite,
+            changeCountAtRestore: changeCountAtRestore
+        )
+        if restorePerformed {
+            restoreClipboard(pasteboard, saved: saved)
+        }
+        let restoreDelayMs = Int((clock.now - pasteInstant) / .milliseconds(1))
         #if DEBUG_RECORDER
         await PasteProbe.shared.record(secureInputEnabled: secureInput, injectionSucceeded: true, exit: "success")
         #endif
