@@ -28,6 +28,8 @@ struct AiCleanupPane: View {
                         PromptEditorView(isPresented: $showPromptEditor)
                     }
                 }
+
+                IdleUnloadFormRow()
             }
 
             Section("Language") {
@@ -92,6 +94,39 @@ private struct SwissGermanFormRow: View {
             .onChange(of: isOn) { _, newValue in
                 Self.appGroupDefaults.set(newValue, forKey: "useSwissGerman")
             }
+    }
+}
+
+/// Phase 50 D-10: idle-unload period picker. Persists an `Int` minutes value under
+/// `ModelWarmupService.idleUnloadDefaultsKey`; the idle-check loop reads the key on
+/// every tick, so no restart is needed for a change to take effect. macOS-only by
+/// design (memory `feedback_verification_macos_mechanism_ios_uxui`; iOS has no idle
+/// unload — D-09).
+private struct IdleUnloadFormRow: View {
+    @State private var minutes: Int = IdleUnloadFormRow.currentValue()
+
+    private static func currentValue() -> Int {
+        DicticusDefaults.suite.object(forKey: ModelWarmupService.idleUnloadDefaultsKey) as? Int
+            ?? ModelWarmupService.idleUnloadDefaultMinutes
+    }
+
+    var body: some View {
+        LabeledContent("Unload AI model after idle") {
+            Picker("Unload AI model after idle", selection: $minutes) {
+                ForEach(ModelWarmupService.idleUnloadOptionsMinutes, id: \.self) { m in
+                    Text("\(m) min").tag(m)
+                }
+                Divider()
+                Text("Never").tag(0)
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .frame(width: 110)
+        }
+        .help("Frees ~2.7 GB of memory after this much idle time; the model reloads on your next AI-cleanup dictation.")
+        .onChange(of: minutes) { _, newValue in
+            DicticusDefaults.suite.set(newValue, forKey: ModelWarmupService.idleUnloadDefaultsKey)
+        }
     }
 }
 
