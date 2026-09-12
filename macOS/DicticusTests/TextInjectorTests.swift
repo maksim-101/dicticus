@@ -78,4 +78,45 @@ final class TextInjectorTests: XCTestCase {
         injector.synthesizePaste()
         // No crash = pass
     }
+
+    // MARK: - Phase 50 D-02: deliveryBlocker pure predicate
+
+    func testDeliveryBlocker_secureInputWins() {
+        XCTAssertEqual(
+            TextInjector.deliveryBlocker(secureInputEnabled: true, expectedBundleID: "com.a", currentBundleID: "com.a"),
+            .secureInput
+        )
+        XCTAssertEqual(
+            TextInjector.deliveryBlocker(secureInputEnabled: true, expectedBundleID: nil, currentBundleID: nil),
+            .secureInput
+        )
+        XCTAssertEqual(
+            TextInjector.deliveryBlocker(secureInputEnabled: true, expectedBundleID: "com.a", currentBundleID: "com.b"),
+            .secureInput
+        )
+    }
+
+    func testDeliveryBlocker_frontmostChanged() {
+        XCTAssertEqual(
+            TextInjector.deliveryBlocker(secureInputEnabled: false, expectedBundleID: "com.a", currentBundleID: "com.b"),
+            .frontmostChanged
+        )
+        XCTAssertNil(
+            TextInjector.deliveryBlocker(secureInputEnabled: false, expectedBundleID: "com.a", currentBundleID: "com.a")
+        )
+        XCTAssertNil(
+            TextInjector.deliveryBlocker(secureInputEnabled: false, expectedBundleID: nil, currentBundleID: "com.b")
+        )
+        XCTAssertNil(
+            TextInjector.deliveryBlocker(secureInputEnabled: false, expectedBundleID: "com.a", currentBundleID: nil)
+        )
+        XCTAssertNil(
+            TextInjector.deliveryBlocker(secureInputEnabled: false, expectedBundleID: nil, currentBundleID: nil)
+        )
+    }
+
+    func testDeliveryBlockerRawValues_matchProbeVocabulary() {
+        XCTAssertEqual(TextInjector.DeliveryBlocker.secureInput.rawValue, "secure_input")
+        XCTAssertEqual(TextInjector.DeliveryBlocker.frontmostChanged.rawValue, "frontmost_changed")
+    }
 }
