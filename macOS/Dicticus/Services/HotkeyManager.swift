@@ -303,6 +303,11 @@ class HotkeyManager: ObservableObject {
         guard !isKeyDown else { return }
         isKeyDown = true
 
+        // Phase 50-09 (D-02 gap): this press supersedes any notice left over from the
+        // previous one — a fresh .modelLoading/.llmLoading/.busy/.recordingFailed post
+        // below sets a new notice for THIS press if applicable.
+        NotificationService.shared.unreadNotice = nil
+
         // D-17: Model not ready check
         guard let warmupService, warmupService.isReady else {
             let notification = DicticusNotification.modelLoading

@@ -10,6 +10,7 @@ struct DicticusApp: App {
     @StateObject private var hotkeyManager = HotkeyManager()
     @StateObject private var modifierListener = ModifierHotkeyListener()
     @StateObject private var updater = SparkleUpdater()
+    @ObservedObject private var notificationService = NotificationService.shared
 
     // TranscriptionService is created once from the warm WhisperKit instance.
     // Held here so Phase 3 hotkey wiring can access it without re-initialization.
@@ -227,7 +228,9 @@ struct DicticusApp: App {
         case .cleaning:
             return "sparkles"  // D-14/D-15: AI cleanup in progress
         case .idle:
-            return "mic"  // Ready or warming (pulse animation handles warming per Phase 1)
+            // Phase 50-09 (D-02 gap): an unread in-app notice flips idle to a warning glyph —
+            // the surface does not depend on Notification Center delivery.
+            return notificationService.unreadNotice != nil ? "exclamationmark.triangle" : "mic"
         }
     }
 }

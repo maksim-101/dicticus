@@ -19,6 +19,7 @@ struct HomePane: View {
     @EnvironmentObject var hotkeyManager: HotkeyManager
     @EnvironmentObject var modifierListener: ModifierHotkeyListener
     @ObservedObject var historyService = HistoryService.shared
+    @ObservedObject var notificationService = NotificationService.shared
 
     // Used by the hotkey-registration-failed branch to open the Settings window (Hotkeys pane).
     @Environment(\.openSettings) private var openSettings
@@ -32,6 +33,10 @@ struct HomePane: View {
             VStack(alignment: .leading, spacing: 0) {
                 statusBlock
                     .padding(16)
+
+                if let notice = notificationService.unreadNotice {
+                    noticeRow(for: notice)
+                }
 
                 Divider()
                     .padding(.horizontal, 16)
@@ -49,6 +54,34 @@ struct HomePane: View {
         // Re-render when Fn-combo bindings change (already @Published on modifierListener).
         .onChange(of: modifierListener.plainDictationCombo) { _, _ in refreshSubline() }
         .onChange(of: modifierListener.cleanupCombo) { _, _ in refreshSubline() }
+        // Phase 50-09 (D-02 gap): closing the popover or leaving the Home tab marks the
+        // notice read — the next press also clears it (HotkeyManager.handleKeyDown).
+        .onDisappear {
+            notificationService.unreadNotice = nil
+        }
+    }
+
+    // MARK: - Notice row (Phase 50-09, D-02 gap)
+
+    /// In-app notice surface: does not depend on Notification Center delivery, which a Focus
+    /// mode the app cannot observe may silently suppress (50-GATE-DIFF.md §7).
+    @ViewBuilder
+    private func noticeRow(for notice: DicticusNotification) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle")
+                .foregroundStyle(Color(hex: "#F5A524"))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(notice.message)
+                    .font(.callout)
+                    .foregroundStyle(.primary)
+                    .fixedSize(horizontal: false, vertical: true)
+                // Phase 50-09 Task 3 (D-02 gap): denied-state caption is added here.
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 12)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Notice: \(notice.message)")
     }
 
     // MARK: - Status block

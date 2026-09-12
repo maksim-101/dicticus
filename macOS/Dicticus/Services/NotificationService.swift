@@ -76,10 +76,17 @@ enum DicticusNotification {
 /// @MainActor ensures Swift 6 concurrency safety for the singleton pattern.
 /// All call sites (HotkeyManager, app lifecycle) are already on @MainActor.
 @MainActor
-class NotificationService {
+class NotificationService: ObservableObject {
     static let shared = NotificationService()
 
-    private init() {}
+    /// D-02 gap: the in-app notice surface. Set as the first statement of `post(_:)` so every
+    /// existing call site gets it without edits. Cleared on read (`HomePane.onDisappear`) and
+    /// superseded at the top of `HotkeyManager.handleKeyDown` before the next press's own post.
+    @Published var unreadNotice: DicticusNotification?
+
+    /// Internal (not `private`) so tests can construct their own instance (D-18) — `.shared`
+    /// stays the production singleton.
+    init() {}
 
     /// Request notification authorization on first use.
     /// macOS grants by default for bundled apps — this is a no-op in most cases.
@@ -94,6 +101,8 @@ class NotificationService {
     /// Delivered immediately via UNNotificationRequest with nil trigger.
     /// Identifier is unique per request to prevent deduplication.
     func post(_ notification: DicticusNotification) {
+        unreadNotice = notification
+
         let content = UNMutableNotificationContent()
         content.title = notification.title
         content.body = notification.message
