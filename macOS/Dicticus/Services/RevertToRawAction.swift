@@ -33,5 +33,5 @@ func revertToRaw(history: HistoryService = .shared, injector: TextInjector = Tex
     guard let last = history.entries.first, last.rawText != last.text else {
         return
     }
-    await injector.injectText(last.rawText)
+    _ = await injector.injectText(last.rawText)
 }
