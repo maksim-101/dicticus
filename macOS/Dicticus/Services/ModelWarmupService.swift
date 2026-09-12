@@ -108,6 +108,49 @@ class ModelWarmupService: ObservableObject {
     @Published var llmStatus: LlmStatus = .idle
     private var cleanupService: CleanupService?
 
+    // MARK: - Phase 50 D-10/D-11: idle unload / reload lifecycle
+
+    /// Whether the cleanup LLM was unloaded by the idle-check tick. `isLlmReady` and
+    /// `llmStatus` are NOT touched by this — AI cleanup remains "Ready" per D-12; only
+    /// this flag (and the key-down table) knows the model needs a reload before use.
+    @Published private(set) var isCleanupUnloaded = false
+
+    /// Whether a reload is currently in flight — used by the key-up path to decide
+    /// whether to surface `.llmLoading` while it waits.
+    var isCleanupReloadInFlight: Bool { reloadTask != nil }
+
+    /// When the model was last (re)loaded — the idle clock's fallback when the service
+    /// has never actually run an inference (`cleanupService.lastInferenceAt == nil`),
+    /// per the RELY-03 "empty" edge case: a loaded-but-never-used model still holds its
+    /// ~2.7 GB, so the clock must start somewhere other than "never".
+    private var llmLoadedAt: Date?
+
+    /// The idle-check loop — a `Task.sleep` loop mirroring `watchdogTask`'s idiom
+    /// (no `Timer`, no `DispatchSourceTimer`), started once the LLM first finishes
+    /// loading and left running for the app's lifetime.
+    private var idleUnloadTask: Task<Void, Never>?
+
+    /// The in-flight reload triggered by `reloadCleanupServiceIfNeeded()`. Non-nil for
+    /// the duration of one reload; `awaitCleanupReload()` awaits its `.value`.
+    private var reloadTask: Task<Bool, Never>?
+
+    /// How many key-up callers are currently awaiting `reloadTask`, purely for the
+    /// `cleanupWaited` field on the `LlmLifecycleProbe.recordReload` call.
+    private var reloadWaiterCount = 0
+
+    /// Outcome of `awaitCleanupReload()`.
+    enum CleanupReloadWait: Equatable {
+        /// No reload was in flight — either the model was already loaded, or a prior
+        /// reload attempt failed and none is currently running (retried on the next
+        /// key-down).
+        case notNeeded
+        /// The reload finished successfully; `waitedMs` is how long this caller waited.
+        case loaded(waitedMs: Double)
+        /// The reload failed (or none is in flight AND the model is still marked
+        /// unloaded) — the caller should treat this like `.notLoaded`.
+        case failed
+    }
+
     /// Reference to the in-flight warmup Task for cancellation support.
     private var warmupTask: Task<Void, Never>?
 
@@ -237,6 +280,10 @@ class ModelWarmupService: ObservableObject {
                         self?.cleanupService = cleanup
                         self?.isLlmReady = true
                         self?.llmStatus = .ready
+                        // Phase 50 D-10: the idle clock starts now; the loop itself
+                        // starts once, here, and runs for the app's lifetime.
+                        self?.llmLoadedAt = Date()
+                        self?.startIdleUnloadLoop()
                     }
 
                     // Phase 44 Plan 14: same benchmark as iOS, same 8 real corpus utterances, so
@@ -305,6 +352,129 @@ class ModelWarmupService: ObservableObject {
         warmupTask?.cancel()
         warmupTask = nil
         isWarming = false
+    }
+
+    // MARK: - Phase 50 D-10/D-11: idle unload / reload lifecycle
+
+    /// Start the idle-check loop. Called once, when the cleanup LLM first finishes
+    /// loading (Step 4 of `warmup()`), and runs for the app's lifetime — mirrors
+    /// `watchdogTask`'s `Task { try? await Task.sleep(...) }` idiom (no `Timer`, no
+    /// `DispatchSourceTimer`, per RESEARCH "Don't Hand-Roll").
+    func startIdleUnloadLoop() {
+        idleUnloadTask?.cancel()
+        idleUnloadTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: Self.idleCheckIntervalSeconds * 1_000_000_000)
+                guard let self, !Task.isCancelled else { return }
+                self.idleUnloadTick(now: Date())
+            }
+        }
+    }
+
+    /// One tick of the idle-check loop. Reads the configured threshold and the
+    /// service's actual last-activity timestamp, and unloads when `shouldUnload` says
+    /// the model has been idle long enough.
+    ///
+    /// A tick that finds a reload already in flight, or finds the model already
+    /// unloaded (or not loaded at all), is a no-op — `cleanupService.unload()`'s own
+    /// `isInferring`/`warmUpTask` guard additionally covers "a real cleanup or
+    /// warm-up is running right now": that call returns `false` and this tick simply
+    /// does nothing, retrying a full threshold later on the next tick (D-10's
+    /// "adjacency" edge case — the completing inference bumps `lastInferenceAt`, so
+    /// the next eligible unload is a full threshold after that, not an immediate
+    /// retry).
+    func idleUnloadTick(now: Date) {
+        guard let cleanupService, cleanupService.isLoaded, reloadTask == nil else { return }
+        let threshold = Self.idleUnloadThreshold(from: DicticusDefaults.suite)
+        // D-10 "empty" edge case: a loaded-but-never-inferred model still holds its
+        // ~2.7 GB, so the clock falls back to the load time, not "never idle".
+        let lastActivity = cleanupService.lastInferenceAt ?? llmLoadedAt ?? now
+        guard Self.shouldUnload(lastActivityAt: lastActivity, now: now, idleThreshold: threshold) else { return }
+
+        if cleanupService.unload() {
+            isCleanupUnloaded = true
+            #if DEBUG_RECORDER
+            Task {
+                await LlmLifecycleProbe.shared.recordUnload(
+                    idleSeconds: now.timeIntervalSince(lastActivity),
+                    thresholdSeconds: threshold ?? -1
+                )
+            }
+            #endif
+        }
+        // unload() returning false means an inference or warm-up is in flight right
+        // now (D-10's mid-cleanup guard) — this tick simply skips.
+    }
+
+    /// Reload the (idle-unloaded) cleanup LLM on the SAME `CleanupService` instance —
+    /// never a new one (D-09's strong-ref finding: `TextProcessingService`,
+    /// `HotkeyManager`, and this class all hold the same instance).
+    ///
+    /// Triggered from `HotkeyManager.handleKeyDown` when `aiCleanupKeyDownAction`
+    /// returns `.reloadAndProceed` (D-11). Runs `downloadIfNeeded()` first — the
+    /// cheap stamp check (D-08) — before `loadModel`, so a reload re-verifies the
+    /// file exactly like a fresh launch would. `unload()` has already nil'd the
+    /// pointers, so `loadModel`'s DEBUG assert cannot fire here.
+    ///
+    /// No-op if no reload is needed (`isCleanupUnloaded == false`), one is already
+    /// running, or there is no `cleanupService` to reload.
+    func reloadCleanupServiceIfNeeded() {
+        guard isCleanupUnloaded, reloadTask == nil, let cleanupService else { return }
+        let start = Date()
+        reloadTask = Task.detached(priority: .userInitiated) { [weak self] in
+            do {
+                try await ModelDownloadService.downloadIfNeeded()
+                try cleanupService.loadModel(from: ModelDownloadService.modelPath().path)
+                let loadMs = Date().timeIntervalSince(start) * 1000
+                let waited = await MainActor.run { () -> Bool in
+                    guard let self else { return false }
+                    self.isCleanupUnloaded = false
+                    self.llmLoadedAt = Date()
+                    let w = self.reloadWaiterCount > 0
+                    self.reloadWaiterCount = 0
+                    self.reloadTask = nil
+                    return w
+                }
+                #if DEBUG_RECORDER
+                await LlmLifecycleProbe.shared.recordReload(loadMs: loadMs, cleanupWaited: waited, success: true)
+                #endif
+                return true
+            } catch {
+                // isCleanupUnloaded stays true — the next key-down retries. A
+                // ModelIntegrityError here means the stamp no longer matches and
+                // re-verification failed twice — the same session-disable as at
+                // launch (Step 4's catch arm).
+                await MainActor.run {
+                    self?.llmStatus = .failed("AI cleanup unavailable")
+                    self?.reloadWaiterCount = 0
+                    self?.reloadTask = nil
+                }
+                #if DEBUG_RECORDER
+                await LlmLifecycleProbe.shared.recordReload(
+                    loadMs: Date().timeIntervalSince(start) * 1000,
+                    cleanupWaited: false,
+                    success: false
+                )
+                #endif
+                return false
+            }
+        }
+    }
+
+    /// Await an in-flight reload (D-11: the key-up path calls this between
+    /// `stopRecordingAndTranscribe()` and `TextProcessingService.process`, so
+    /// `isLoaded` is true by the time `process` checks it).
+    ///
+    /// Returns `.notNeeded` when no reload is in flight and the model is not marked
+    /// unloaded (the common case — nothing to wait for). Returns `.failed` when no
+    /// reload is in flight but the model IS still marked unloaded (a prior reload
+    /// attempt failed and none is currently retrying).
+    func awaitCleanupReload() async -> CleanupReloadWait {
+        guard let reloadTask else { return isCleanupUnloaded ? .failed : .notNeeded }
+        reloadWaiterCount += 1
+        let start = Date()
+        let ok = await reloadTask.value
+        return ok ? .loaded(waitedMs: Date().timeIntervalSince(start) * 1000) : .failed
     }
 
     /// Expose the initialized WhisperKit instance for TranscriptionService.
