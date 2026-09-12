@@ -204,7 +204,8 @@ public actor DiscardProbe {
         segments: [SegmentInfo]? = nil,
         lowConfidenceShort: Bool? = nil,
         noSpeechProbSource: String? = nil,
-        energyMetricsSource: String? = nil
+        energyMetricsSource: String? = nil,
+        gateBypassedByDuration: Bool? = nil
     ) {
         ensureDirectory()
         purgeIfNeeded()
@@ -228,6 +229,11 @@ public actor DiscardProbe {
         if let lowConfidenceShort { line["low_confidence_short"] = lowConfidenceShort }
         if let noSpeechProbSource { line["no_speech_prob_source"] = noSpeechProbSource }
         if let energyMetricsSource { line["energy_metrics_source"] = energyMetricsSource }
+        // Phase 50 D-01: true iff this clip reached WhisperKit only because of the
+        // duration bypass (gateBypassDurationSeconds), not because the adaptive gate
+        // detected voice. Sizes the accepted-risk class on noResult/boilerplateHallucination
+        // records, not only pass.
+        if let gateBypassedByDuration { line["gate_bypassed_by_duration"] = gateBypassedByDuration }
         if let segments {
             line["segment_count"] = segments.count
             line["segments"] = segments.map { seg -> [String: Any] in
