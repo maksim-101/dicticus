@@ -192,7 +192,15 @@ class TextInjector {
         }
         let restoreDelayMs = Int((clock.now - pasteInstant) / .milliseconds(1))
         #if DEBUG_RECORDER
-        await PasteProbe.shared.record(secureInputEnabled: secureInput, injectionSucceeded: true, exit: "success")
+        await PasteProbe.shared.record(
+            secureInputEnabled: secureInput,
+            injectionSucceeded: true,
+            exit: "success",
+            restoreDelayMs: restoreDelayMs,
+            changeCountAfterWrite: changeCountAfterWrite,
+            changeCountAtRestore: changeCountAtRestore,
+            restorePerformed: restorePerformed
+        )
         #endif
         return .delivered
     }

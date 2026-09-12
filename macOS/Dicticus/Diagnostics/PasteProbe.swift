@@ -22,6 +22,19 @@
 // on `delivery_precheck_failed`, naming which D-02 signal blocked delivery:
 // `secure_input` or `frontmost_changed`.
 //
+// Phase 50 plan 11: the restore-before-read race. A live record (2026-09-12,
+// `paste-2026-09-12.jsonl` line 122, `exit: success`) shows the first
+// dictation into Gemini for macOS after an idle model reload pasting the
+// PREVIOUS clipboard content — its Electron renderer read the pasteboard
+// asynchronously, after the old fixed-delay restore had already run. The
+// `success` record now carries `restore_delay_ms` (measured wait before the
+// restore decision), `changecount_after_write` and `changecount_at_restore`
+// (`NSPasteboard.changeCount` before/after the wait), and `restore_performed`
+// (whether the saved clipboard was actually re-installed). Reading rule for
+// the next audit: a wrong-text report with `restore_performed: true` and
+// `restore_delay_ms` at or above `TextInjector.clipboardRestoreDelayMilliseconds`
+// falsifies the delay hypothesis and points at AX insertion instead.
+//
 // COMPILED OUT unless built with `-D DEBUG_RECORDER` (same gate as DebugRecorder).
 // NEVER present in the public Release / GitHub artifact.
 //
@@ -71,7 +84,14 @@ public actor PasteProbe {
     ///     `clipboard_write_failed`, `delivery_precheck_failed`, `success`.
     ///   - failureSignal: on `delivery_precheck_failed` only, which D-02 signal
     ///     blocked delivery — `secure_input` or `frontmost_changed`.
-    public func record(secureInputEnabled: Bool, injectionSucceeded: Bool, exit: String, failureSignal: String? = nil) {
+    ///   - restoreDelayMs: on `success` only (Phase 50 plan 11), the measured wait between
+    ///     the Cmd+V post and the restore decision.
+    ///   - changeCountAfterWrite: on `success` only, `NSPasteboard.changeCount` read directly
+    ///     after our `setString`.
+    ///   - changeCountAtRestore: on `success` only, `NSPasteboard.changeCount` read after the wait.
+    ///   - restorePerformed: on `success` only; `false` means a third party wrote to the
+    ///     pasteboard during the wait and the saved clipboard was deliberately not re-installed.
+    public func record(secureInputEnabled: Bool, injectionSucceeded: Bool, exit: String, failureSignal: String? = nil, restoreDelayMs: Int? = nil, changeCountAfterWrite: Int? = nil, changeCountAtRestore: Int? = nil, restorePerformed: Bool? = nil) {
         ensureDirectory()
         purgeIfNeeded()
 
@@ -83,6 +103,18 @@ public actor PasteProbe {
         line["exit"] = exit
         if let failureSignal {
             line["failure_signal"] = failureSignal
+        }
+        if let restoreDelayMs {
+            line["restore_delay_ms"] = restoreDelayMs
+        }
+        if let changeCountAfterWrite {
+            line["changecount_after_write"] = changeCountAfterWrite
+        }
+        if let changeCountAtRestore {
+            line["changecount_at_restore"] = changeCountAtRestore
+        }
+        if let restorePerformed {
+            line["restore_performed"] = restorePerformed
         }
         appendJsonl(line)
     }
