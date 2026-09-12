@@ -237,4 +237,31 @@ final class TextInjectorTests: XCTestCase {
         XCTAssertEqual(pasteCount, 1)
         XCTAssertEqual(pasteboard.string(forType: .string), "copied-meanwhile")
     }
+
+    // MARK: - Phase 50 plan 12: overlapping calls (CR-01)
+
+    func testInjectText_overlappingCalls_restoresUserOriginalClipboard() async {
+        let pasteboard = NSPasteboard.general
+        let originalSaved = injector.saveClipboard(pasteboard)
+        defer { injector.restoreClipboard(pasteboard, saved: originalSaved) }
+
+        pasteboard.clearContents()
+        pasteboard.setString("user-original", forType: .string)
+
+        var pasteCount = 0
+        injector.axTrustedProbe = { true }
+        injector.secureInputProbe = { false }
+        injector.frontmostBundleIDProvider = { "com.example.target" }
+        injector.pasteSynthesizer = { pasteCount += 1 }
+
+        let first = Task { await injector.injectText("alpha", expectedFrontmostBundleID: "com.example.target") }
+        try? await Task.sleep(for: .milliseconds(150))
+        let second = await injector.injectText("bravo", expectedFrontmostBundleID: "com.example.target")
+        let firstOutcome = await first.value
+
+        XCTAssertEqual(firstOutcome, .delivered)
+        XCTAssertEqual(second, .delivered)
+        XCTAssertEqual(pasteCount, 2)
+        XCTAssertEqual(pasteboard.string(forType: .string), "user-original")
+    }
 }
