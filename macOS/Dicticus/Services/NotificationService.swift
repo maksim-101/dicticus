@@ -1,4 +1,7 @@
 import UserNotifications
+import os
+
+private let notificationLog = Logger(subsystem: "com.dicticus", category: "notifications")
 
 /// Notification types for user-facing error states.
 ///
@@ -64,14 +67,32 @@ enum DicticusNotification {
             return "Couldn't paste \u{2014} text is on your clipboard, \u{2318}V to paste."
         }
     }
+
+    /// Bare case identifier for logging (T-50-09-01) — never the payload. The two
+    /// payload-carrying cases (`transcriptionFailed`, `recordingFailed`) never interpolate
+    /// their `Error`; a log reader gets the case name only.
+    var caseName: String {
+        switch self {
+        case .busy: return "busy"
+        case .modelLoading: return "modelLoading"
+        case .transcriptionFailed: return "transcriptionFailed"
+        case .recordingFailed: return "recordingFailed"
+        case .unexpectedLanguage: return "unexpectedLanguage"
+        case .cleanupFailed: return "cleanupFailed"
+        case .cleanupSkippedTooLong: return "cleanupSkippedTooLong"
+        case .cleanupTimedOut: return "cleanupTimedOut"
+        case .llmLoading: return "llmLoading"
+        case .pasteUndeliverable: return "pasteUndeliverable"
+        }
+    }
 }
 
 /// Thin wrapper around UNUserNotificationCenter for posting error notifications.
 ///
-/// Per RESEARCH.md: UNUserNotificationCenter works for bundled LSUIElement apps (A1).
-/// Notifications are delivered immediately (trigger: nil).
-/// No notification permission prompt needed — macOS allows notifications by default
-/// for bundled apps; user can disable in System Settings > Notifications.
+/// Authorization is requested once from `HotkeyManager.setup` and its result logged under the
+/// `notifications` category (`50-GATE-DIFF.md` §7). Notification Center delivery is subject to
+/// the user's Focus/Do Not Disturb, which the app cannot observe, so `unreadNotice` (menu-bar
+/// icon + popover notice row) is the guaranteed surface, independent of authorization/DND state.
 ///
 /// @MainActor ensures Swift 6 concurrency safety for the singleton pattern.
 /// All call sites (HotkeyManager, app lifecycle) are already on @MainActor.
@@ -84,15 +105,46 @@ class NotificationService: ObservableObject {
     /// superseded at the top of `HotkeyManager.handleKeyDown` before the next press's own post.
     @Published var unreadNotice: DicticusNotification?
 
+    /// Latest authorization status, refreshed after each `setup()` authorization round-trip.
+    @Published private(set) var authorizationStatus: UNAuthorizationStatus = .notDetermined
+
     /// Internal (not `private`) so tests can construct their own instance (D-18) — `.shared`
     /// stays the production singleton.
     init() {}
 
-    /// Request notification authorization on first use.
-    /// macOS grants by default for bundled apps — this is a no-op in most cases.
+    private static func statusName(_ status: UNAuthorizationStatus) -> String {
+        switch status {
+        case .notDetermined: return "notDetermined"
+        case .denied: return "denied"
+        case .authorized: return "authorized"
+        case .provisional: return "provisional"
+        case .ephemeral: return "ephemeral"
+        @unknown default: return "unknown(\(status.rawValue))"
+        }
+    }
+
+    /// Request notification authorization on first use and log the full round-trip — the
+    /// result used to be discarded (50-VERIFICATION.md Anti-Patterns row 1).
     func setup() {
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { _, _ in
-            // No error handling needed — notifications are best-effort for error reporting
+        let center = UNUserNotificationCenter.current()
+        Task { @MainActor in
+            let before = await center.notificationSettings()
+            var granted = false
+            var errorText = "nil"
+            do {
+                granted = try await center.requestAuthorization(options: [.alert])
+            } catch {
+                errorText = String(describing: error)
+            }
+            let after = await center.notificationSettings()
+            self.authorizationStatus = after.authorizationStatus
+            notificationLog.notice("""
+                authorization before=\(Self.statusName(before.authorizationStatus), privacy: .public) \
+                granted=\(granted, privacy: .public) \
+                error=\(errorText, privacy: .public) \
+                after=\(Self.statusName(after.authorizationStatus), privacy: .public) \
+                alertStyle=\(after.alertStyle.rawValue, privacy: .public)
+                """)
         }
     }
 
@@ -107,11 +159,17 @@ class NotificationService: ObservableObject {
         content.title = notification.title
         content.body = notification.message
 
+        let name = notification.caseName
         let request = UNNotificationRequest(
             identifier: UUID().uuidString,
             content: content,
             trigger: nil  // Deliver immediately
         )
-        UNUserNotificationCenter.current().add(request)
+        UNUserNotificationCenter.current().add(request) { error in
+            notificationLog.notice("""
+                post case=\(name, privacy: .public) \
+                add_error=\(String(describing: error), privacy: .public)
+                """)
+        }
     }
 }
