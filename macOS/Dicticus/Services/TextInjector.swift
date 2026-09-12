@@ -159,9 +159,11 @@ class TextInjector {
         // another call's not-yet-restored transcript. One ContinuousClock instance serves this
         // wait, the busy deadline below, and the restoreDelayMs measurement.
         let clock = ContinuousClock()
+        let entryInstant = clock.now
         while !Task.isCancelled, let busyUntil = pasteboardBusyUntil, clock.now < busyUntil {
             try? await Task.sleep(until: busyUntil, clock: clock)
         }
+        let waitedForPriorMs = Int((clock.now - entryInstant) / .milliseconds(1))
 
         let pasteboard = NSPasteboard.general
 
@@ -183,7 +185,8 @@ class TextInjector {
                 secureInputEnabled: secureInput,
                 injectionSucceeded: false,
                 exit: "delivery_precheck_failed",
-                failureSignal: blocker.rawValue
+                failureSignal: blocker.rawValue,
+                waitedForPriorMs: waitedForPriorMs
             )
             #endif
             return .fallbackToClipboard(blocker)
@@ -201,7 +204,7 @@ class TextInjector {
         if !wrote {
             restoreClipboard(pasteboard, saved: saved)
             #if DEBUG_RECORDER
-            await PasteProbe.shared.record(secureInputEnabled: secureInput, injectionSucceeded: false, exit: "clipboard_write_failed")
+            await PasteProbe.shared.record(secureInputEnabled: secureInput, injectionSucceeded: false, exit: "clipboard_write_failed", waitedForPriorMs: waitedForPriorMs)
             #endif
             return .blocked
         }
@@ -243,7 +246,8 @@ class TextInjector {
             restoreDelayMs: restoreDelayMs,
             changeCountAfterWrite: changeCountAfterWrite,
             changeCountAtRestore: changeCountAtRestore,
-            restorePerformed: restorePerformed
+            restorePerformed: restorePerformed,
+            waitedForPriorMs: waitedForPriorMs
         )
         #endif
         return .delivered

@@ -35,6 +35,14 @@
 // `restore_delay_ms` at or above `TextInjector.clipboardRestoreDelayMilliseconds`
 // falsifies the delay hypothesis and points at AX insertion instead.
 //
+// Phase 50 plan 12 — the same-app race (CR-01, 50-REVIEW.md 2026-09-12): a second paste or
+// Revert to Raw inside a prior paste's 750 ms window used to save that paste's transcript as
+// the "previous clipboard" and re-install it; calls now queue behind the open window on one
+// shared `TextInjector`. Reading rule for the next audit: `waited_for_prior_ms` above `0` means
+// the call queued; paired with `restore_performed: true` on that same record, the clipboard
+// that came back is the user's own prior content; a wrong-clipboard report whose records all
+// show `waited_for_prior_ms: 0` is a different defect.
+//
 // COMPILED OUT unless built with `-D DEBUG_RECORDER` (same gate as DebugRecorder).
 // NEVER present in the public Release / GitHub artifact.
 //
@@ -91,7 +99,10 @@ public actor PasteProbe {
     ///   - changeCountAtRestore: on `success` only, `NSPasteboard.changeCount` read after the wait.
     ///   - restorePerformed: on `success` only; `false` means a third party wrote to the
     ///     pasteboard during the wait and the saved clipboard was deliberately not re-installed.
-    public func record(secureInputEnabled: Bool, injectionSucceeded: Bool, exit: String, failureSignal: String? = nil, restoreDelayMs: Int? = nil, changeCountAfterWrite: Int? = nil, changeCountAtRestore: Int? = nil, restorePerformed: Bool? = nil) {
+    ///   - waitedForPriorMs: on every exit after the AX guard (Phase 50 plan 12, CR-01), the
+    ///     measured milliseconds this call spent waiting for a prior call's restore window to
+    ///     close (`0` when it did not wait).
+    public func record(secureInputEnabled: Bool, injectionSucceeded: Bool, exit: String, failureSignal: String? = nil, restoreDelayMs: Int? = nil, changeCountAfterWrite: Int? = nil, changeCountAtRestore: Int? = nil, restorePerformed: Bool? = nil, waitedForPriorMs: Int? = nil) {
         ensureDirectory()
         purgeIfNeeded()
 
@@ -115,6 +126,9 @@ public actor PasteProbe {
         }
         if let restorePerformed {
             line["restore_performed"] = restorePerformed
+        }
+        if let waitedForPriorMs {
+            line["waited_for_prior_ms"] = waitedForPriorMs
         }
         appendJsonl(line)
     }
