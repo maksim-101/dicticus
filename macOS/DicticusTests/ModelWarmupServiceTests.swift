@@ -112,4 +112,52 @@ final class ModelWarmupServiceTests: XCTestCase {
         // the guard condition logic: if isWarming is true, the state remains unchanged
         XCTAssertTrue(wasWarming, "isWarming should still be true — guard prevents re-entry")
     }
+
+    // MARK: - Phase 50 D-10/D-11: idle-unload pure decision + threshold reader
+
+    func testShouldUnload_boundary() {
+        let now = Date()
+        XCTAssertTrue(
+            ModelWarmupService.shouldUnload(lastActivityAt: now.addingTimeInterval(-600), now: now, idleThreshold: 600),
+            "elapsed time exactly equal to idleThreshold must count as idle (inclusive boundary, mirrors shouldWarmUp)"
+        )
+        XCTAssertFalse(
+            ModelWarmupService.shouldUnload(lastActivityAt: now.addingTimeInterval(-599), now: now, idleThreshold: 600),
+            "one second short of the threshold must not unload"
+        )
+        XCTAssertTrue(
+            ModelWarmupService.shouldUnload(lastActivityAt: now.addingTimeInterval(-1800), now: now, idleThreshold: 1800),
+            "elapsed time exactly equal to a 30-minute threshold must count as idle"
+        )
+        XCTAssertFalse(
+            ModelWarmupService.shouldUnload(lastActivityAt: now.addingTimeInterval(-86400), now: now, idleThreshold: nil),
+            "nil threshold means Never — must never unload regardless of elapsed time"
+        )
+    }
+
+    func testIdleUnloadThreshold_fromDefaults() {
+        XCTAssertEqual(ModelWarmupService.idleUnloadDefaultsKey, "llmIdleUnloadMinutes")
+        XCTAssertEqual(ModelWarmupService.idleUnloadDefaultMinutes, 10)
+
+        let defaults = InMemoryUserDefaults()
+        XCTAssertEqual(
+            ModelWarmupService.idleUnloadThreshold(from: defaults), 600,
+            "absent key must fall back to the 10-minute default"
+        )
+
+        defaults.set(5, forKey: ModelWarmupService.idleUnloadDefaultsKey)
+        XCTAssertEqual(ModelWarmupService.idleUnloadThreshold(from: defaults), 300)
+
+        defaults.set(30, forKey: ModelWarmupService.idleUnloadDefaultsKey)
+        XCTAssertEqual(ModelWarmupService.idleUnloadThreshold(from: defaults), 1800)
+
+        defaults.set(0, forKey: ModelWarmupService.idleUnloadDefaultsKey)
+        XCTAssertNil(ModelWarmupService.idleUnloadThreshold(from: defaults), "0 minutes means Never (nil threshold)")
+
+        defaults.set(-3, forKey: ModelWarmupService.idleUnloadDefaultsKey)
+        XCTAssertEqual(
+            ModelWarmupService.idleUnloadThreshold(from: defaults), 600,
+            "garbage (negative) value must fall back to the default"
+        )
+    }
 }

@@ -686,6 +686,39 @@ final class CleanupServiceTests: XCTestCase {
         XCTAssertEqual(service.state, .idle,
             "repeated warmUp() calls on an unloaded service must remain inert and not crash")
     }
+
+    // MARK: - Phase 50 D-09: unload() (strong-ref mechanism adaptation)
+
+    func testUnload_onUnloadedService_returnsFalseAndStaysUnloaded() {
+        let service = CleanupService()
+        XCTAssertFalse(service.unload(), "unload() on an already-unloaded service must return false")
+        XCTAssertFalse(service.isLoaded)
+        XCTAssertEqual(service.state, .idle)
+    }
+
+    func testUnloadThenReload_roundTrip() async throws {
+        try XCTSkipUnless(
+            ModelDownloadService.isModelCached(),
+            "Gemma 3 1B GGUF model not cached — skipping integration test"
+        )
+
+        CleanupService.initializeBackend()
+        let service = CleanupService()
+        try service.loadModel(from: ModelDownloadService.modelPath().path)
+        XCTAssertTrue(service.isLoaded)
+
+        XCTAssertTrue(service.unload(), "unload() on a loaded, idle service must return true")
+        XCTAssertFalse(service.isLoaded)
+
+        let rawResult = await service.cleanup(text: "hello world", language: "en")
+        XCTAssertEqual(rawResult, "hello world", "cleanup() on an unloaded service returns the input unchanged (.notLoaded path)")
+
+        try service.loadModel(from: ModelDownloadService.modelPath().path)
+        XCTAssertTrue(service.isLoaded)
+
+        let cleanedResult = await service.cleanup(text: "um so i went to the uh store", language: "en")
+        XCTAssertFalse(cleanedResult.isEmpty, "cleanup() after reload must produce non-empty output")
+    }
 }
 
 // MARK: - Phase 28 Plan 03 / Phase 36.6 Plan 03: Contraction Gate Tests
