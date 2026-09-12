@@ -223,7 +223,12 @@ final class TextInjectorTests: XCTestCase {
         injector.frontmostBundleIDProvider = { "com.example.target" }
         injector.pasteSynthesizer = {
             pasteCount += 1
-            NSPasteboard.general.setString("copied-meanwhile", forType: .string)
+            // A real third-party write (user Cmd+C, clipboard manager) calls clearContents()
+            // before writing — that's what actually bumps NSPasteboard.changeCount; a bare
+            // setString() for an already-declared type does not move the counter.
+            let thirdParty = NSPasteboard.general
+            thirdParty.clearContents()
+            thirdParty.setString("copied-meanwhile", forType: .string)
         }
 
         let outcome = await injector.injectText("alpha beta", expectedFrontmostBundleID: "com.example.target")
