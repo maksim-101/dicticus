@@ -125,6 +125,42 @@ final class EditGuardClassifierRuleTests: XCTestCase {
         assertNoNeitherSourceViolation(out, baseline, llm)
     }
 
+    /// WR-02 (49.6 code review): `kein` -> `keine` is a same-lemma
+    /// case/gender-declension agreement repair — structurally the same kind
+    /// of fix as `der` -> `die` (D-02's article-agreement carve-out) — but
+    /// both sides are members of `germanNegation`, so D-09's
+    /// coordinator/negator lock fires (both sides pass the `aIsNegation !=
+    /// bIsNegation` polarity check unchanged, since both ARE negation, then
+    /// hit `isConjunctionOrNegator` at step 6) and the substitute is
+    /// rejected as `contentWordIdentityChange`, same as a genuine
+    /// negator-to-negator swap. GREEN pin, not RED: this is current
+    /// behaviour as of Task 2, not a defect this test drives a fix for.
+    ///
+    /// Orchestrator decision (2026-09-12, measured): across the full local
+    /// debug-log corpus, only 5 German records contain any `kein`-form
+    /// alongside an LLM output, and ZERO of those 5 show a
+    /// `kein`<->`keine`/`keinen`/`keinem`/`keiner`/`keines` substitution —
+    /// this lock has never blocked a live declension repair. Per the
+    /// phase's "no mechanism without a live record" rule (49.6-CONTEXT.md
+    /// standing constraint), the behaviour is PINNED as-is rather than
+    /// narrowed. A live record showing this substitution would re-open WR-02
+    /// as a narrowing (e.g. via `InflectionRules.isAllowedInflection` or a
+    /// dedicated `keinDeclension` set carved out before the
+    /// coordinator/negator check fires) — see `49.6-REVIEW.md` WR-02.
+    func testD09_keinDeclensionSubstituteIsRejected_pinnedNoLiveRecord() {
+        let baseline = "Ich habe keine Auto und keine Zeit."
+        let llm = "Ich habe kein Auto und keine Zeit."
+        let out = guardOut(baseline, llm, "de")
+        XCTAssertEqual(out, baseline)
+        let result = guardResult(baseline, llm, "de")
+        guard let edit = result.edits.first(where: { $0.from == "keine" }) else {
+            return XCTFail("expected a substitute edit from 'keine'")
+        }
+        XCTAssertFalse(edit.accepted)
+        XCTAssertEqual(edit.rejectClass, EditGuard.RejectionClass.contentWordIdentityChange.rawValue)
+        assertNoNeitherSourceViolation(out, baseline, llm)
+    }
+
     // MARK: - D-09 (CLASSIFY-01): insert — coordinator/negator insertion is content
 
     /// Audit shape: a missing coordinator inserted asserts a relation the
