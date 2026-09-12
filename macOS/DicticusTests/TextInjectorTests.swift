@@ -196,4 +196,40 @@ final class TextInjectorTests: XCTestCase {
         XCTAssertEqual(pasteCount, 0)
         XCTAssertEqual(pasteboard.string(forType: .string), "before")
     }
+
+    // MARK: - Phase 50 plan 11: changeCount-guarded restore + delay floor
+
+    func testShouldRestoreClipboard_onlyWhenChangeCountUnchanged() {
+        XCTAssertTrue(TextInjector.shouldRestoreClipboard(changeCountAfterWrite: 41, changeCountAtRestore: 41))
+        XCTAssertFalse(TextInjector.shouldRestoreClipboard(changeCountAfterWrite: 41, changeCountAtRestore: 42))
+        XCTAssertFalse(TextInjector.shouldRestoreClipboard(changeCountAfterWrite: 41, changeCountAtRestore: 40))
+    }
+
+    func testClipboardRestoreDelay_floorPinnedAgainstReLowering() {
+        XCTAssertGreaterThanOrEqual(TextInjector.clipboardRestoreDelayMilliseconds, 400)
+    }
+
+    func testInjectText_delivered_skipsRestoreWhenPasteboardChangedDuringWindow() async {
+        let pasteboard = NSPasteboard.general
+        let originalSaved = injector.saveClipboard(pasteboard)
+        defer { injector.restoreClipboard(pasteboard, saved: originalSaved) }
+
+        pasteboard.clearContents()
+        pasteboard.setString("before", forType: .string)
+
+        var pasteCount = 0
+        injector.axTrustedProbe = { true }
+        injector.secureInputProbe = { false }
+        injector.frontmostBundleIDProvider = { "com.example.target" }
+        injector.pasteSynthesizer = {
+            pasteCount += 1
+            NSPasteboard.general.setString("copied-meanwhile", forType: .string)
+        }
+
+        let outcome = await injector.injectText("alpha beta", expectedFrontmostBundleID: "com.example.target")
+
+        XCTAssertEqual(outcome, .delivered)
+        XCTAssertEqual(pasteCount, 1)
+        XCTAssertEqual(pasteboard.string(forType: .string), "copied-meanwhile")
+    }
 }
