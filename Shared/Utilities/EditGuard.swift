@@ -2568,7 +2568,9 @@ public enum EditGuard {
             let current = result[i].trailing
             let newTrailing: String
             if !spaced {
-                newTrailing = ""
+                // A dictated line break is never destroyed by a glued vote
+                // (review 49.5 WR-01): only a space can be removed.
+                newTrailing = current.contains("\n") ? current : ""
             } else if current.isEmpty {
                 newTrailing = " "
             } else {
