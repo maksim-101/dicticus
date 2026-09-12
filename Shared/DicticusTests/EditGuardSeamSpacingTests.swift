@@ -48,6 +48,19 @@ final class EditGuardSeamSpacingTests: XCTestCase {
         XCTAssertTrue(out.contains("\n"), "a dictated line break must never be flattened to a space nor invented/destroyed: \(out)")
     }
 
+    /// Review 49.5 WR-01: when the same normalized pair occurs both glued and
+    /// newline-separated in the utterance, the adjacency vote is ambiguous and
+    /// the fallback (next token is punctuation ⇒ glued) must NOT destroy the
+    /// dictated line break — `deriveSeamSpacing`'s contract is "never
+    /// fabricated or destroyed".
+    func testLineBreakSurvivesAmbiguousAdjacencyBeforePunctuation() {
+        let baseline = "so ist es halt.\nso ist es halt\n. fertig"
+        let candidate = "So ist es halt.\nSo ist es halt\n. Fertig."
+        let out = guardOut(baseline, candidate, "de")
+        XCTAssertEqual(out.filter { $0 == "\n" }.count, 2,
+                       "both dictated line breaks must survive an ambiguous adjacency vote: \(out.debugDescription)")
+    }
+
     /// Reimplements the "observed adjacency spacing" concept as TEST code
     /// (EditGuard.observedAdjacencySpacing is `private`, not reachable even
     /// via @testable import) and sweeps the whole corpus: for every output
