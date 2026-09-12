@@ -31,8 +31,12 @@ enum RevertToRawState {
 /// Phase 50 D-02: the secure-input pre-check applies here too; the frontmost-app
 /// check does not — a menu action has no release instant to capture an expected
 /// bundle id against, so `expectedFrontmostBundleID` is left nil.
+/// Phase 50 plan 12 (CR-01): the default injector is the app's shared instance, so a revert
+/// pressed inside a dictation's restore window queues behind it instead of saving that
+/// dictation's transcript as the "previous clipboard"; both callers (`HomePane`'s button and
+/// the `.revertToRaw` hotkey in `DicticusApp`) use this default.
 @MainActor
-func revertToRaw(history: HistoryService = .shared, injector: TextInjector = TextInjector()) async {
+func revertToRaw(history: HistoryService = .shared, injector: TextInjector = .shared) async {
     guard let last = history.entries.first, last.rawText != last.text else {
         return
     }

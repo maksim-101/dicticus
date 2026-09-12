@@ -96,7 +96,9 @@ class HotkeyManager: ObservableObject {
 
     /// TextInjector for clipboard-based text injection.
     /// Isolated to @MainActor via HotkeyManager's own isolation.
-    private let textInjector = TextInjector()
+    /// The app-wide shared instance (Phase 50 plan 12, CR-01) — `revertToRaw` pastes through
+    /// the same one so the pasteboard busy window covers both callers.
+    private let textInjector = TextInjector.shared
 
     /// MediaRemote-backed service for PTT media auto-pause (Phase 30, MEDIA-PAUSE-01).
     /// dlopen happens once at construction; guard inside MediaController handles missing framework.
