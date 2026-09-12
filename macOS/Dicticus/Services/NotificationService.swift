@@ -26,6 +26,9 @@ enum DicticusNotification {
     case cleanupTimedOut
     /// D-20: AI cleanup hotkey pressed before LLM warmup completes
     case llmLoading
+    /// Phase 50 D-02: paste delivery pre-check failed — the transcript is on the clipboard as a
+    /// real copy.
+    case pasteUndeliverable
 
     /// Notification title — always "Dicticus" per UI-SPEC copywriting contract.
     var title: String { "Dicticus" }
@@ -57,6 +60,8 @@ enum DicticusNotification {
             return "AI cleanup timed out \u{2014} inserted without it."
         case .llmLoading:
             return "AI model still loading, please wait a moment."
+        case .pasteUndeliverable:
+            return "Couldn't paste \u{2014} text is on your clipboard, \u{2318}V to paste."
         }
     }
 }

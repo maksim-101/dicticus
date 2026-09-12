@@ -1,6 +1,7 @@
 import AppKit
 import CoreGraphics
 @preconcurrency import ApplicationServices
+import Carbon.HIToolbox
 
 /// Injects text at the current cursor position via clipboard save + write + Cmd+V + restore.
 ///
@@ -19,6 +20,55 @@ class TextInjector {
     struct SavedClipboard {
         let items: [[(NSPasteboard.PasteboardType, Data)]]
     }
+
+    /// Phase 50 D-02: which deterministic signal blocked delivery of the synthesized paste.
+    /// Raw values are the exact `failure_signal` vocabulary logged by `PasteProbe` (D-05) — see
+    /// `50-GATE-DIFF.md` §C. Backlog: `macos-paste-at-cursor-intermittent-failure.md` (text lands
+    /// in history but never at the cursor) is the symptom this signal set diagnoses.
+    enum DeliveryBlocker: String, Equatable {
+        /// `IsSecureEventInputEnabled()` is true — macOS silently drops synthesized keystrokes
+        /// while a password field / secure terminal input has focus.
+        case secureInput = "secure_input"
+        /// The frontmost app at paste time differs from the frontmost app at hotkey RELEASE
+        /// (captured at key-up, not key-down, so a deliberate app switch during the hold is
+        /// honoured and only a switch during the ASR/LLM wait is caught).
+        case frontmostChanged = "frontmost_changed"
+    }
+
+    /// Phase 50 D-02: the outcome of one `injectText` call.
+    enum Outcome: Equatable {
+        /// The pre-check passed, Cmd+V was synthesized, and the prior clipboard was restored.
+        case delivered
+        /// The pre-check failed before any paste was attempted; the transcript is left on the
+        /// general pasteboard as a real user copy (no trailing space, no restore — D-02).
+        case fallbackToClipboard(DeliveryBlocker)
+        /// Accessibility was untrusted, or the clipboard write itself failed; unchanged from the
+        /// pre-Phase-50 behaviour (AX already notifies; a failed write restores the clipboard
+        /// silently, so a `.pasteUndeliverable` notification there would be a lie).
+        case blocked
+    }
+
+    /// Phase 50 D-02: pure eligibility predicate for the delivery pre-check. Secure input outranks
+    /// a frontmost-app change when both hold (an even more certain OS-level drop). An unknown
+    /// bundle id on either side is never evidence of a switch — `revertToRaw` passes `nil` for
+    /// `expectedBundleID` and gets only the secure-input check.
+    nonisolated static func deliveryBlocker(secureInputEnabled: Bool, expectedBundleID: String?, currentBundleID: String?) -> DeliveryBlocker? {
+        if secureInputEnabled {
+            return .secureInput
+        }
+        if let expectedBundleID, let currentBundleID, expectedBundleID != currentBundleID {
+            return .frontmostChanged
+        }
+        return nil
+    }
+
+    /// Test seams (Phase 50 D-02/D-05) — `var` properties, not initializer parameters, because
+    /// `TextInjector()` is constructed bare at `HotkeyManager.swift:99` and by `revertToRaw`'s
+    /// default argument. Production defaults match today's behaviour exactly.
+    var axTrustedProbe: () -> Bool = { AXIsProcessTrusted() }
+    var secureInputProbe: () -> Bool = { IsSecureEventInputEnabled() }
+    var frontmostBundleIDProvider: () -> String? = { NSWorkspace.shared.frontmostApplication?.bundleIdentifier }
+    var pasteSynthesizer: (() -> Void)?
 
     /// Inject text at the current cursor position.
     ///
@@ -75,7 +125,7 @@ class TextInjector {
         // Step 5: Restore original clipboard
         restoreClipboard(pasteboard, saved: saved)
         #if DEBUG_RECORDER
-        await PasteProbe.shared.record(secureInputEnabled: secureInputEnabled, injectionSucceeded: true)
+        await PasteProbe.shared.record(secureInputEnabled: secureInputEnabled, injectionSucceeded: true, exit: "success")
         #endif
         return true
     }
