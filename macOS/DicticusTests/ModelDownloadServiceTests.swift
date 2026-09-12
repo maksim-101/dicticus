@@ -41,17 +41,165 @@ final class ModelDownloadServiceTests: XCTestCase {
 
     // MARK: - Cache check
 
-    func testIsModelCachedReturnsFalseWhenNotDownloaded() {
-        // This test verifies the cache check logic works when the model
-        // has not been downloaded to the test environment.
-        // On CI or clean machines, this will always be false.
-        // On dev machines with the model cached, this tests the positive path.
+    /// D-08 rewrite: `isModelCached()` now means "exists AND verified" — a stricter
+    /// condition than plain existence, so the old bidirectional equivalence no
+    /// longer holds. Only the one-directional implication survives: cached implies
+    /// a file is there. Read-only against the real path — never writes.
+    func testIsModelCached_impliesFileExists() {
         let isCached = ModelDownloadService.isModelCached()
         let fileExists = FileManager.default.fileExists(
             atPath: ModelDownloadService.modelPath().path
         )
-        XCTAssertEqual(isCached, fileExists,
-                        "isModelCached must reflect actual file existence")
+        XCTAssertTrue(!isCached || fileExists,
+                       "isModelCached must never be true when no file exists")
+    }
+
+    // MARK: - Expected hash constant (D-06/D-08, Wave-0 §D derived value)
+
+    func testExpectedSHA256_isThe64HexPinFromWave0() {
+        let hash = ModelDownloadService.expectedModelSHA256
+        XCTAssertEqual(hash.count, 64)
+        XCTAssertTrue(hash.range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil,
+                       "expectedModelSHA256 must be exactly 64 lowercase hex characters")
+        XCTAssertTrue(hash.hasPrefix("00fe7986"))
+        XCTAssertTrue(hash.hasSuffix("f11a4"))
+        XCTAssertEqual(ModelDownloadService.expectedModelByteCount, 2_740_937_888)
+        XCTAssertEqual(ModelDownloadService.expectedSHA256(forFileName: ModelDownloadService.modelFileName),
+                        ModelDownloadService.expectedModelSHA256)
+        XCTAssertNil(ModelDownloadService.expectedSHA256(forFileName: "other.gguf"))
+    }
+
+    // MARK: - acquireVerifiedModel retry state machine (D-08, fake downloader — hermetic)
+
+    private static let abcHash = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+
+    private final class CallCounter {
+        private(set) var count = 0
+        func increment() { count += 1 }
+    }
+
+    /// Writes `contents` to a fresh temp file and returns its URL — simulates a
+    /// downloader's returned temp-file URL without touching the network.
+    private func writeTempFile(_ contents: String, in dir: URL, named name: String = "download.tmp") -> URL {
+        let url = dir.appendingPathComponent(name).appendingPathExtension(UUID().uuidString)
+        try? contents.write(to: url, atomically: true, encoding: .utf8)
+        return url
+    }
+
+    func testAcquire_noFile_goodDownload_movesStampsAndVerifies() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("p50-acquire-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let modelURL = dir.appendingPathComponent("qwen3.5-4b-q4_k_m.gguf")
+        let downloadCount = CallCounter()
+
+        try await ModelDownloadService.acquireVerifiedModel(
+            at: modelURL,
+            expectedSHA256: Self.abcHash,
+            download: {
+                downloadCount.increment()
+                return self.writeTempFile("abc", in: dir)
+            }
+        )
+
+        XCTAssertEqual(downloadCount.count, 1)
+        XCTAssertEqual(try String(contentsOf: modelURL, encoding: .utf8), "abc")
+        XCTAssertTrue(ModelIntegrity.isVerifiedCheaply(modelURL: modelURL, expectedSHA256: Self.abcHash))
+    }
+
+    func testAcquire_existingMismatch_thenGoodDownload_succeeds() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("p50-acquire-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let modelURL = dir.appendingPathComponent("qwen3.5-4b-q4_k_m.gguf")
+        try "xyz".write(to: modelURL, atomically: true, encoding: .utf8)
+        let downloadCount = CallCounter()
+
+        try await ModelDownloadService.acquireVerifiedModel(
+            at: modelURL,
+            expectedSHA256: Self.abcHash,
+            download: {
+                downloadCount.increment()
+                return self.writeTempFile("abc", in: dir)
+            }
+        )
+
+        XCTAssertEqual(downloadCount.count, 1)
+        XCTAssertEqual(try String(contentsOf: modelURL, encoding: .utf8), "abc")
+        XCTAssertNotNil(ModelIntegrity.readStamp(for: modelURL))
+    }
+
+    func testAcquire_twoBadDownloads_throwsAndLeavesNothing() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("p50-acquire-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let modelURL = dir.appendingPathComponent("qwen3.5-4b-q4_k_m.gguf")
+        let downloadCount = CallCounter()
+
+        do {
+            try await ModelDownloadService.acquireVerifiedModel(
+                at: modelURL,
+                expectedSHA256: Self.abcHash,
+                download: {
+                    downloadCount.increment()
+                    return self.writeTempFile("xyz", in: dir)
+                }
+            )
+            XCTFail("expected acquireVerifiedModel to throw after two mismatches")
+        } catch let error as ModelIntegrityError {
+            XCTAssertEqual(error, .verificationFailed(attempts: 2))
+        }
+
+        XCTAssertEqual(downloadCount.count, 2)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: modelURL.path))
+        XCTAssertNil(ModelIntegrity.readStamp(for: modelURL))
+    }
+
+    func testAcquire_existingMismatchThenBadDownload_throwsAfterOneRedownload() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("p50-acquire-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let modelURL = dir.appendingPathComponent("qwen3.5-4b-q4_k_m.gguf")
+        try "xyz".write(to: modelURL, atomically: true, encoding: .utf8)
+        let downloadCount = CallCounter()
+
+        do {
+            try await ModelDownloadService.acquireVerifiedModel(
+                at: modelURL,
+                expectedSHA256: Self.abcHash,
+                download: {
+                    downloadCount.increment()
+                    return self.writeTempFile("xyz", in: dir)
+                }
+            )
+            XCTFail("expected acquireVerifiedModel to throw")
+        } catch let error as ModelIntegrityError {
+            XCTAssertEqual(error, .verificationFailed(attempts: 2))
+        }
+
+        XCTAssertEqual(downloadCount.count, 1)
+    }
+
+    func testAcquire_existingVerified_neverDownloads() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("p50-acquire-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let modelURL = dir.appendingPathComponent("qwen3.5-4b-q4_k_m.gguf")
+        try "abc".write(to: modelURL, atomically: true, encoding: .utf8)
+        // Pre-verify so a valid stamp exists.
+        _ = ModelIntegrity.verify(modelURL: modelURL, expectedSHA256: Self.abcHash)
+        let downloadCount = CallCounter()
+
+        try await ModelDownloadService.acquireVerifiedModel(
+            at: modelURL,
+            expectedSHA256: Self.abcHash,
+            download: {
+                downloadCount.increment()
+                return self.writeTempFile("xyz", in: dir)
+            }
+        )
+
+        XCTAssertEqual(downloadCount.count, 0)
     }
 
     // MARK: - File name constant
