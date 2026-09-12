@@ -435,7 +435,7 @@ class HotkeyManager: ObservableObject {
                 ) ?? result.text
 
                 // D-06: Inject final processed text into the active app
-                await self.textInjector.injectText(finalOutput)
+                _ = await self.textInjector.injectText(finalOutput)
 
                 // Phase 44 Plan 14 — honest fallback. The user pressed the AI-cleanup hotkey
                 // deliberately; if cleanup was SKIPPED (too long) or TIMED OUT, tell them the text

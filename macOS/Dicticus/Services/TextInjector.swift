@@ -72,27 +72,58 @@ class TextInjector {
 
     /// Inject text at the current cursor position.
     ///
-    /// Pipeline:
-    ///   1. Guard: verify Accessibility permission (CGEvent.post fails silently without it)
-    ///   2. Save current clipboard contents (all types per item)
-    ///   3. Clear clipboard and write transcription text as plain string
-    ///   4. Synthesize Cmd+V keystroke via CGEvent
-    ///   5. Wait ~100ms for target app to process paste (D-07)
-    ///   6. Restore original clipboard contents
+    /// Pipeline (Phase 50 D-02/D-05):
+    ///   1. Guard: verify Accessibility permission (CGEvent.post fails silently without it) — exit `ax_untrusted`
+    ///   2. Delivery pre-check: secure input / frontmost-app change — exit `delivery_precheck_failed`,
+    ///      leaves the transcript on the clipboard as a real user copy (no save/restore, no trailing space)
+    ///   3. Save current clipboard contents (all types per item)
+    ///   4. Clear clipboard and write transcription text as plain string — exit `clipboard_write_failed`
+    ///   5. Synthesize Cmd+V keystroke via CGEvent
+    ///   6. Wait ~100ms for target app to process paste (D-07), then restore original clipboard — exit `success`
     ///
-    /// - Parameter text: The transcription text to inject
-    /// - Returns: true if injection was attempted, false if blocked (e.g. missing permission)
+    /// - Parameters:
+    ///   - text: The transcription text to inject.
+    ///   - expectedFrontmostBundleID: The frontmost app's bundle id captured at hotkey RELEASE
+    ///     (nil for callers with no release instant, e.g. `revertToRaw` — an unknown id never blocks).
+    /// - Returns: `.delivered`, `.fallbackToClipboard(blocker)`, or `.blocked`.
     @discardableResult
-    func injectText(_ text: String) async -> Bool {
+    func injectText(_ text: String, expectedFrontmostBundleID: String? = nil) async -> Outcome {
         // Guard: Accessibility must be granted or CGEvent.post silently fails
-        guard AXIsProcessTrusted() else {
+        guard axTrustedProbe() else {
             NotificationService.shared.post(DicticusNotification.transcriptionFailed(
                 TextInjectionError.accessibilityNotGranted
             ))
-            return false
+            #if DEBUG_RECORDER
+            await PasteProbe.shared.record(secureInputEnabled: secureInputProbe(), injectionSucceeded: false, exit: "ax_untrusted")
+            #endif
+            return .blocked
         }
 
         let pasteboard = NSPasteboard.general
+
+        // Delivery pre-check (D-02): read the signals once, reuse below.
+        let secureInput = secureInputProbe()
+        let currentBundleID = frontmostBundleIDProvider()
+        if let blocker = Self.deliveryBlocker(
+            secureInputEnabled: secureInput,
+            expectedBundleID: expectedFrontmostBundleID,
+            currentBundleID: currentBundleID
+        ) {
+            // The fallback IS the user's copy (D-02) — deliberately no save/restore of the
+            // prior clipboard and no trailing space; `backlog/pasteboard-transient-marker.md`'s
+            // transient marker is scoped to the normal path only, not this one.
+            pasteboard.clearContents()
+            _ = pasteboard.setString(text, forType: .string)
+            #if DEBUG_RECORDER
+            await PasteProbe.shared.record(
+                secureInputEnabled: secureInput,
+                injectionSucceeded: false,
+                exit: "delivery_precheck_failed",
+                failureSignal: blocker.rawValue
+            )
+            #endif
+            return .fallbackToClipboard(blocker)
+        }
 
         // Step 1: Save original clipboard contents
         let saved = saveClipboard(pasteboard)
@@ -105,18 +136,18 @@ class TextInjector {
         let wrote = pasteboard.setString(text + " ", forType: .string)
         if !wrote {
             restoreClipboard(pasteboard, saved: saved)
-            return false
+            #if DEBUG_RECORDER
+            await PasteProbe.shared.record(secureInputEnabled: secureInput, injectionSucceeded: false, exit: "clipboard_write_failed")
+            #endif
+            return .blocked
         }
 
         // Step 3: Synthesize Cmd+V
-        #if DEBUG_RECORDER
-        // Quick task 260830-si1: read Carbon's secure-input flag immediately
-        // before the synthesized keystroke — macOS silently drops CGEventTap
-        // keystrokes while secure input is active, a candidate root cause for
-        // the unexplained "history has it, cursor doesn't" paste failure.
-        let secureInputEnabled = PasteProbe.secureInputEnabled()
-        #endif
-        synthesizePaste()
+        if let pasteSynthesizer {
+            pasteSynthesizer()
+        } else {
+            synthesizePaste()
+        }
 
         // Step 4: Wait for target app to process paste
         // 100ms is more reliable than 50ms across Electron apps and terminal emulators.
@@ -125,9 +156,9 @@ class TextInjector {
         // Step 5: Restore original clipboard
         restoreClipboard(pasteboard, saved: saved)
         #if DEBUG_RECORDER
-        await PasteProbe.shared.record(secureInputEnabled: secureInputEnabled, injectionSucceeded: true, exit: "success")
+        await PasteProbe.shared.record(secureInputEnabled: secureInput, injectionSucceeded: true, exit: "success")
         #endif
-        return true
+        return .delivered
     }
 
     /// Save all items and types from the pasteboard.
