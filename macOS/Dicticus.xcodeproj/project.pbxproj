@@ -34,6 +34,7 @@
 		1A9715F68BCFABF765FED77B /* BrandPhoneticsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6599AE23EF7ABF7DD28B116 /* BrandPhoneticsTests.swift */; };
 		1B17B2B6DF3165854D50076C /* CleanupPromptVariantTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAC9E0CB8C6339113702C44B /* CleanupPromptVariantTests.swift */; };
 		1C735DD0AC0053F53A5AA851 /* SwissDefaultMigration.swift in Sources */ = {isa = PBXBuildFile; fileRef = C454E415EBC55F52775B578C /* SwissDefaultMigration.swift */; };
+		1D3E3A53E9F1F09F01AC265D /* ModelIntegrityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E64B56C480933C4DC4EF2C1 /* ModelIntegrityTests.swift */; };
 		1E25100633D4BAD07FA4144C /* PermissionManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A066D94CA10532D0A572FA8 /* PermissionManagerTests.swift */; };
 		1F897D672CB96960F9F40148 /* RulesCleanupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AD3CE00483F6F398C144B49 /* RulesCleanupService.swift */; };
 		1F917CEDFAE94EF11F9AC14E /* BrandMatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CD6E7BB693486B6CE87C89D /* BrandMatcher.swift */; };
@@ -283,6 +284,7 @@
 		3D6CC095534291875D3293ED /* SwissNumberFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwissNumberFormatter.swift; sourceTree = "<group>"; };
 		3D94BDBD1381FD4122339003 /* CleanupBenchmark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CleanupBenchmark.swift; sourceTree = "<group>"; };
 		3DDAA158F46193C40A3A8358 /* CleanupPromptVNextTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CleanupPromptVNextTests.swift; sourceTree = "<group>"; };
+		3E64B56C480933C4DC4EF2C1 /* ModelIntegrityTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelIntegrityTests.swift; sourceTree = "<group>"; };
 		3EBC7E4B5E741E63FDAEF281 /* AsrModelLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsrModelLoader.swift; sourceTree = "<group>"; };
 		41F13903D57CF4BA4E734A3C /* AiCleanupInfoView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AiCleanupInfoView.swift; sourceTree = "<group>"; };
 		43BC013767531650EA0E31CE /* SelfCorrectionResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelfCorrectionResolver.swift; sourceTree = "<group>"; };
@@ -625,6 +627,7 @@
 				D6CF6C951598DD95DF8012E2 /* ITNUtilityTests.swift */,
 				C7A81C72EA64FC75CB067CF1 /* MediaControllerTests.swift */,
 				E09C1D66A0C3F4875FA7680F /* ModelDownloadServiceTests.swift */,
+				3E64B56C480933C4DC4EF2C1 /* ModelIntegrityTests.swift */,
 				CD829A0298332D7F8F73B3FE /* ModelWarmupServiceTests.swift */,
 				B9ACE74779B554BB24700B58 /* ModifierHotkeyListenerTests.swift */,
 				143CC8A466EB55916F9E58E4 /* NotificationServiceTests.swift */,
@@ -1152,6 +1155,7 @@
 				9D5A440895E06CC137824451 /* LowConfidenceShortTests.swift in Sources */,
 				A111E106D3ACF3DE58CC6C83 /* MediaControllerTests.swift in Sources */,
 				46B52C3C05E290F9EF02A653 /* ModelDownloadServiceTests.swift in Sources */,
+				1D3E3A53E9F1F09F01AC265D /* ModelIntegrityTests.swift in Sources */,
 				D40E4EE4B8E09E3462AA5918 /* ModelWarmupServiceTests.swift in Sources */,
 				F02F9ADF3A14E1893A9FB86C /* ModifierHotkeyListenerTests.swift in Sources */,
 				19DBFFF2CFFBFD1D7F1FC560 /* NoSpeechDiscardTests.swift in Sources */,
