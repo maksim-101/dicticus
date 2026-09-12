@@ -47,4 +47,18 @@ final class NotificationServiceTests: XCTestCase {
         XCTAssertEqual(notification.message, "Couldn't paste \u{2014} text is on your clipboard, \u{2318}V to paste.")
         XCTAssertEqual(notification.title, "Dicticus")
     }
+
+    // MARK: - Phase 50-09: in-app notice surface (D-02 gap)
+
+    @MainActor
+    func testPostSetsUnreadNotice() {
+        let service = NotificationService()
+        XCTAssertNil(service.unreadNotice)
+
+        service.post(.pasteUndeliverable)
+        XCTAssertEqual(service.unreadNotice?.message, DicticusNotification.pasteUndeliverable.message)
+
+        service.post(.busy)
+        XCTAssertEqual(service.unreadNotice?.message, DicticusNotification.busy.message)
+    }
 }
