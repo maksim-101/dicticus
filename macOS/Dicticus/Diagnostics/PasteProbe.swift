@@ -13,6 +13,15 @@
 // no fallback, no user-facing alert, no Carbon shortcut-registration path.
 // Follow-on work is gated on what this instrument shows in the field.
 //
+// Phase 50 D-05: the probe now records EVERY exit of `injectText`, not only
+// the success branch (it previously logged a literal `injectionSucceeded:
+// true` on success only — the two early-return exits never logged at all,
+// so "zero paste failures in the logs" was never evidence). `exit` names
+// which of the four branches fired: `ax_untrusted`, `clipboard_write_failed`,
+// `delivery_precheck_failed`, `success`. `failure_signal` is populated only
+// on `delivery_precheck_failed`, naming which D-02 signal blocked delivery:
+// `secure_input` or `frontmost_changed`.
+//
 // COMPILED OUT unless built with `-D DEBUG_RECORDER` (same gate as DebugRecorder).
 // NEVER present in the public Release / GitHub artifact.
 //
@@ -56,15 +65,25 @@ public actor PasteProbe {
     }
 
     /// Record one paste/injection attempt.
-    public func record(secureInputEnabled: Bool, injectionSucceeded: Bool) {
+    ///
+    /// - Parameters:
+    ///   - exit: which of `injectText`'s four branches fired — `ax_untrusted`,
+    ///     `clipboard_write_failed`, `delivery_precheck_failed`, `success`.
+    ///   - failureSignal: on `delivery_precheck_failed` only, which D-02 signal
+    ///     blocked delivery — `secure_input` or `frontmost_changed`.
+    public func record(secureInputEnabled: Bool, injectionSucceeded: Bool, exit: String, failureSignal: String? = nil) {
         ensureDirectory()
         purgeIfNeeded()
 
-        let line: [String: Any] = [
+        var line: [String: Any] = [
             "ts": Self.iso8601Timestamp(),
             "secure_input_enabled": secureInputEnabled,
             "injection_succeeded": injectionSucceeded
         ]
+        line["exit"] = exit
+        if let failureSignal {
+            line["failure_signal"] = failureSignal
+        }
         appendJsonl(line)
     }
 
