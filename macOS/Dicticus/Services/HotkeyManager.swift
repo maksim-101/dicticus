@@ -267,6 +267,32 @@ class HotkeyManager: ObservableObject {
         )
     }
 
+    /// What a `.aiCleanup` key-down should do, given the cleanup LLM's current state.
+    ///
+    /// Phase 50 D-11 widens the old binary D-20 guard (present-and-loaded, or abort)
+    /// into a three-way table: an idle-unloaded model no longer blocks recording — it
+    /// starts recording AND kicks a reload, so the reload runs in parallel with the
+    /// recording + ASR time that already elapses before cleanup would need the model.
+    /// `isLoaded` can be false for two different reasons that must NOT be conflated:
+    /// the initial launch load still in flight (abort, as before D-11), or the model
+    /// was idle-unloaded (reload and proceed). `isLoaded == true` always wins, even
+    /// against a stale `idleUnloaded` flag, since the model being loaded right now is
+    /// the ground truth the caller actually needs.
+    enum AiCleanupKeyDownAction: Equatable {
+        case proceed
+        case reloadAndProceed
+        case abortLlmLoading
+    }
+
+    /// Pure decision table backing `AiCleanupKeyDownAction`. `nonisolated` and static
+    /// so it is trivially unit-testable without constructing a `HotkeyManager`.
+    nonisolated static func aiCleanupKeyDownAction(cleanupServicePresent: Bool, isLoaded: Bool, idleUnloaded: Bool) -> AiCleanupKeyDownAction {
+        guard cleanupServicePresent else { return .abortLlmLoading }
+        if isLoaded { return .proceed }
+        if idleUnloaded { return .reloadAndProceed }
+        return .abortLlmLoading
+    }
+
     /// Handle hotkey key-down event — start recording if conditions met.
     ///
     /// Per D-03: Suppresses key repeat via isKeyDown guard.
@@ -286,14 +312,26 @@ class HotkeyManager: ObservableObject {
             return
         }
 
-        // D-20: Check LLM readiness for AI cleanup mode
+        // D-20 widened by Phase 50 D-11: an idle-unloaded LLM no longer aborts —
+        // it starts recording and kicks a reload in parallel. See
+        // aiCleanupKeyDownAction's doc comment for the full three-way table.
         if mode == .aiCleanup {
-            guard let cleanupService, cleanupService.isLoaded else {
+            let action = Self.aiCleanupKeyDownAction(
+                cleanupServicePresent: cleanupService != nil,
+                isLoaded: cleanupService?.isLoaded ?? false,
+                idleUnloaded: warmupService.isCleanupUnloaded
+            )
+            switch action {
+            case .abortLlmLoading:
                 let notification = DicticusNotification.llmLoading
                 lastPostedNotification = notification
                 NotificationService.shared.post(notification)
                 isKeyDown = false
                 return
+            case .reloadAndProceed:
+                warmupService.reloadCleanupServiceIfNeeded()
+            case .proceed:
+                break
             }
         }
 
@@ -427,6 +465,26 @@ class HotkeyManager: ObservableObject {
             guard let self else { return }
             do {
                 let result = try await service.stopRecordingAndTranscribe()
+
+                // Phase 50 D-11: if the key-down reload is still running, wait for it
+                // HERE — before TextProcessingService.process's isLoaded gate
+                // (TextProcessingService.swift:266) — so a real cleanup never falls
+                // through to the rules-only path just because the model reload hadn't
+                // finished yet. `.llmLoading` is shown only when there's actually
+                // something to wait for; a failed reload surfaces the existing
+                // `.cleanupFailed` (raw text still pastes — D-19's fallback contract).
+                if mode == .aiCleanup, let warmupService = self.warmupService {
+                    if warmupService.isCleanupReloadInFlight {
+                        let n = DicticusNotification.llmLoading
+                        self.lastPostedNotification = n
+                        NotificationService.shared.post(n)
+                    }
+                    if case .failed = await warmupService.awaitCleanupReload() {
+                        let n = DicticusNotification.cleanupFailed
+                        self.lastPostedNotification = n
+                        NotificationService.shared.post(n)
+                    }
+                }
 
                 // Delegate processing to TextProcessingService (TEXT-03)
                 // Flow: Dictionary -> ITN -> [LLM Cleanup]
