@@ -28,10 +28,16 @@ enum RevertToRawState {
 /// Silent no-op when there is nothing to revert (D-16 precedent: no notification
 /// for a no-op). Accessibility-missing failure is already surfaced by
 /// TextInjector.injectText via the existing transcriptionFailed notification.
+/// Phase 50 D-02: the secure-input pre-check applies here too; the frontmost-app
+/// check does not — a menu action has no release instant to capture an expected
+/// bundle id against, so `expectedFrontmostBundleID` is left nil.
 @MainActor
 func revertToRaw(history: HistoryService = .shared, injector: TextInjector = TextInjector()) async {
     guard let last = history.entries.first, last.rawText != last.text else {
         return
     }
-    _ = await injector.injectText(last.rawText)
+    let outcome = await injector.injectText(last.rawText)
+    if case .fallbackToClipboard = outcome {
+        NotificationService.shared.post(.pasteUndeliverable)
+    }
 }

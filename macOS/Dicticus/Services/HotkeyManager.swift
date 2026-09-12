@@ -416,6 +416,11 @@ class HotkeyManager: ObservableObject {
         activeRecordingBundleID = nil
         activeRecordingContext = nil
 
+        // Phase 50 D-02: captured at RELEASE (not press) so a deliberate app switch during the
+        // hold is honoured, while a switch during the ASR/LLM wait (the window that actually
+        // matters for delivery) is caught. Consumed by TextInjector's delivery pre-check below.
+        let releaseFrontmostBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+
         // Task inherits @MainActor isolation from the enclosing @MainActor class,
         // so self.textInjector access is safe without crossing isolation boundaries.
         Task { [weak self] in
@@ -434,8 +439,14 @@ class HotkeyManager: ObservableObject {
                     detectedBundleID: dictationBundleID
                 ) ?? result.text
 
-                // D-06: Inject final processed text into the active app
-                _ = await self.textInjector.injectText(finalOutput)
+                // Phase 50 D-02: Inject final processed text into the active app; consume the
+                // outcome instead of discarding it (was: Bool result thrown away, HotkeyManager:438).
+                let outcome = await self.textInjector.injectText(finalOutput, expectedFrontmostBundleID: releaseFrontmostBundleID)
+                if case .fallbackToClipboard = outcome {
+                    let notification = DicticusNotification.pasteUndeliverable
+                    self.lastPostedNotification = notification
+                    NotificationService.shared.post(notification)
+                }
 
                 // Phase 44 Plan 14 — honest fallback. The user pressed the AI-cleanup hotkey
                 // deliberately; if cleanup was SKIPPED (too long) or TIMED OUT, tell them the text
