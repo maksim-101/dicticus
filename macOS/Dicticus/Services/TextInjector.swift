@@ -12,11 +12,19 @@ import Carbon.HIToolbox
 /// Per D-07: original clipboard contents are restored after
 /// `clipboardRestoreDelayMilliseconds`, and only if the pasteboard is unchanged
 /// since the transcript was written (Phase 50 plan 11).
+/// Per Phase 50 plan 12 (CR-01): a call that arrives while a prior call's restore window is
+/// still open waits for it before reading the pre-check signals or saving the clipboard.
 /// Per D-08: Single Cmd+V code path for all apps including terminal emulators.
 /// @MainActor isolation ensures all NSPasteboard and CGEvent calls happen on the main thread.
 /// NSPasteboard.general and CGEvent.post are both main-thread-only AppKit/CoreGraphics APIs.
 @MainActor
 class TextInjector {
+
+    /// Phase 50 plan 12 (CR-01): the app pastes through ONE instance so the busy window below
+    /// (`pasteboardBusyUntil`) covers every caller — `HotkeyManager.textInjector` and
+    /// `revertToRaw`'s default argument both resolve to this instance. Tests build their own
+    /// instance and never touch this one (D-18).
+    static let shared = TextInjector()
 
     /// Saved clipboard state — array of items, each with multiple type+data pairs.
     struct SavedClipboard {
@@ -83,13 +91,35 @@ class TextInjector {
     /// the target app writing on paste each move `NSPasteboard.changeCount` and must win.
     nonisolated static func shouldRestoreClipboard(changeCountAfterWrite: Int, changeCountAtRestore: Int) -> Bool { changeCountAfterWrite == changeCountAtRestore }
 
+    /// Phase 50 plan 12 (CR-01, 50-REVIEW.md 2026-09-12): a second `injectText`/`revertToRaw`
+    /// call landing inside a prior call's restore window used to save that prior call's
+    /// just-written transcript as the "previous clipboard" and re-install it after its own
+    /// paste, silently replacing the user's real clipboard with an earlier dictation's text.
+    /// The slack exists because the prior call's own `clipboardRestoreDelayMilliseconds` sleep
+    /// starts AFTER its synthesized Cmd+V, while a waiter's deadline is computed from the same
+    /// `pasteInstant` — without slack the two timers would fire at the same instant and the
+    /// waiter could run its save before the prior call's restore decision. Both timers resume
+    /// on the main actor in fire order, so 50ms is ample margin. The wait is bounded by
+    /// construction: a waiter never waits past `pasteInstant + clipboardRestoreDelayMilliseconds
+    /// + pasteboardBusySlackMilliseconds`, even if the prior call never cleared the window.
+    static let pasteboardBusySlackMilliseconds: UInt64 = 50
+
     /// Test seams (Phase 50 D-02/D-05) — `var` properties, not initializer parameters, because
-    /// `TextInjector()` is constructed bare at `HotkeyManager.swift:99` and by `revertToRaw`'s
-    /// default argument. Production defaults match today's behaviour exactly.
+    /// production shares one instance, `TextInjector.shared` (Phase 50 plan 12, CR-01), used by
+    /// `HotkeyManager.textInjector` and `revertToRaw`'s default argument; tests construct their
+    /// own instance so per-instance seams and the busy window (`pasteboardBusyUntil`) stay
+    /// hermetic. Production defaults match today's behaviour exactly.
     var axTrustedProbe: () -> Bool = { AXIsProcessTrusted() }
     var secureInputProbe: () -> Bool = { IsSecureEventInputEnabled() }
     var frontmostBundleIDProvider: () -> String? = { NSWorkspace.shared.frontmostApplication?.bundleIdentifier }
     var pasteSynthesizer: (() -> Void)?
+
+    /// Phase 50 plan 12 (CR-01): set right after a delivered paste's synthesized Cmd+V, to
+    /// `pasteInstant` advanced by the restore delay + slack; cleared after the restore
+    /// decision. A later `injectText`/`revertToRaw` call waits until this has passed before it
+    /// reads the pre-check signals or saves the clipboard, so no save ever observes another
+    /// call's not-yet-restored write.
+    private var pasteboardBusyUntil: ContinuousClock.Instant?
 
     /// Inject text at the current cursor position.
     ///
@@ -97,7 +127,8 @@ class TextInjector {
     ///   1. Guard: verify Accessibility permission (CGEvent.post fails silently without it) — exit `ax_untrusted`
     ///   2. Delivery pre-check: secure input / frontmost-app change — exit `delivery_precheck_failed`,
     ///      leaves the transcript on the clipboard as a real user copy (no save/restore, no trailing space)
-    ///   3. Save current clipboard contents (all types per item)
+    ///   3. Save current clipboard contents (all types per item) — after waiting for a prior
+    ///      call's restore window to close (Phase 50 plan 12, CR-01)
     ///   4. Clear clipboard and write transcription text as plain string — exit `clipboard_write_failed`
     ///   5. Synthesize Cmd+V keystroke via CGEvent
     ///   6. Wait `clipboardRestoreDelayMilliseconds` (Phase 50 plan 11), then restore the
@@ -121,6 +152,15 @@ class TextInjector {
             await PasteProbe.shared.record(secureInputEnabled: secureInputProbe(), injectionSucceeded: false, exit: "ax_untrusted")
             #endif
             return .blocked
+        }
+
+        // Phase 50 plan 12 (CR-01): wait out a prior call's still-open restore window before
+        // reading the pre-check signals or saving the clipboard, so no save ever observes
+        // another call's not-yet-restored transcript. One ContinuousClock instance serves this
+        // wait, the busy deadline below, and the restoreDelayMs measurement.
+        let clock = ContinuousClock()
+        while !Task.isCancelled, let busyUntil = pasteboardBusyUntil, clock.now < busyUntil {
+            try? await Task.sleep(until: busyUntil, clock: clock)
         }
 
         let pasteboard = NSPasteboard.general
@@ -177,8 +217,9 @@ class TextInjector {
         }
 
         // Step 4: Wait for the target app to process the paste (Phase 50 plan 11).
-        let clock = ContinuousClock()
         let pasteInstant = clock.now
+        // Phase 50 plan 12 (CR-01): open this call's restore window for any overlapping caller.
+        pasteboardBusyUntil = pasteInstant.advanced(by: .milliseconds(Self.clipboardRestoreDelayMilliseconds + Self.pasteboardBusySlackMilliseconds))
         try? await Task.sleep(nanoseconds: Self.clipboardRestoreDelayMilliseconds * 1_000_000)
 
         // Step 5: Restore original clipboard, but only if nobody else wrote to it meanwhile.
@@ -190,6 +231,9 @@ class TextInjector {
         if restorePerformed {
             restoreClipboard(pasteboard, saved: saved)
         }
+        // Phase 50 plan 12 (CR-01): the restore decision is made — close this call's window
+        // before any suspension so a waiting caller can proceed.
+        pasteboardBusyUntil = nil
         let restoreDelayMs = Int((clock.now - pasteInstant) / .milliseconds(1))
         #if DEBUG_RECORDER
         await PasteProbe.shared.record(
