@@ -129,6 +129,15 @@ class CleanupService: ObservableObject, CleanupProvider {
     /// either `nonisolated(unsafe)` (model/context/sampler/isLoaded) or `let`
     /// (config), so it's safe to run from a detached background task.
     nonisolated func loadModel(from modelPath: String) throws {
+        // Phase 50 D-09/D-11: a reload after `unload()` must never overwrite a still-live
+        // set of llama.cpp pointers — unload() nils all three before returning true, so
+        // this assert pins that every reload goes through unload() first. DEBUG-only by
+        // `assert` semantics (compiled out of Release); the real fail-closed behavior is
+        // that overwriting a live `model`/`context` pointer here would leak ~2.7 GB per
+        // cycle, which is a correctness concern this assert exists to catch during
+        // development, not a runtime crash guard.
+        assert(model == nil && context == nil && sampler == nil, "loadModel on a loaded CleanupService leaks the prior llama resources — call unload() first")
+
         // Model parameters: offload all layers to Metal GPU (D-05)
         var modelParams = llama_model_default_params()
         modelParams.n_gpu_layers = 99  // All layers on Metal GPU
@@ -209,7 +218,10 @@ class CleanupService: ObservableObject, CleanupProvider {
 
     /// Timestamp of the most recent inference completion (real cleanup OR warm-up).
     /// nil means "never inferred" — always cold, so the first warm-up always fires.
-    private var lastInferenceAt: Date?
+    /// Phase 50 D-10: `private(set)` so `ModelWarmupService`'s idle-unload tick can
+    /// read it directly (falling back to the load time when never inferred) without
+    /// a duplicate accessor.
+    private(set) var lastInferenceAt: Date?
 
     /// How long the service must sit idle before a fresh warm-up is worth spending
     /// speaking-time on. 300 s (5 min) is a judgment call sized from the 2026-08-25
@@ -293,6 +305,50 @@ class CleanupService: ObservableObject, CleanupProvider {
             // Swallow all errors (including timeout) — a failed warm-up is a
             // non-event, never a user-visible failure.
         }
+    }
+
+    // MARK: - Idle unload (Phase 50 D-09)
+
+    /// Free the loaded model's llama.cpp resources without dropping the `CleanupService`
+    /// instance itself.
+    ///
+    /// D-09 mechanism adaptation, recorded (not a reversal): the original RELY-03 idea was
+    /// to drop the `CleanupService` instance and let `deinit` free the C pointers. That
+    /// cannot work here — `TextProcessingService.swift:55` holds `private let cleanupService:
+    /// CleanupProvider?`, a strong, non-reassignable reference to this exact instance
+    /// (orchestrator-verified), so `deinit` would never run while `TextProcessingService` is
+    /// alive. `ModelWarmupService.cleanupService` and `HotkeyManager.cleanupService` hold the
+    /// same instance too. Every holder already checks `isLoaded` before using the service
+    /// (`cleanup()`'s own guard above, `TextProcessingService.swift:266`,
+    /// `HotkeyManager`'s D-20 guard), so an explicit `unload()` that flips `isLoaded` to
+    /// false and frees the same three pointers `deinit` would have freed — in the same
+    /// order — reuses that existing signal instead of requiring every holder to learn a new
+    /// one. `deinit` stays as the terminal safety net for actual instance teardown (app
+    /// quit); this method is the mid-lifetime equivalent.
+    ///
+    /// Guarded against freeing resources a concurrent inference or warm-up is still using —
+    /// `isInferring`/`warmUpTask` are the same in-flight signals `cleanup()` and `warmUp()`
+    /// already serialize on. Returns `false` (no-op) when there is nothing loaded or a
+    /// cleanup/warm-up is in flight; the caller (an idle-unload tick) simply skips and
+    /// retries a full threshold later — never blocks waiting for the busy service to go
+    /// idle.
+    @discardableResult
+    func unload() -> Bool {
+        guard isLoaded else { return false }
+        guard !isInferring, warmUpTask == nil else { return false }
+
+        if let sampler { llama_sampler_free(sampler) }
+        if let context { llama_free(context) }
+        if let model { llama_model_free(model) }
+        sampler = nil
+        context = nil
+        model = nil
+        isLoaded = false
+
+        let name = loadedModelName
+        Task { await MemoryProbe.shared.mark("llm_unloaded", model: name) }
+
+        return true
     }
 
     /// ChatML turn markers (CLEANRD-01, Qwen2.5-Instruct) plus off-topic
