@@ -177,6 +177,7 @@
 		C524718AC8111D53B30A01FD /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48F103886FBBE1F7D287929D /* NotificationService.swift */; };
 		C88A581C1776F2B4EFC2C57C /* CleanupPromptTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 174AD8DEBAA5EAA8DF8734DB /* CleanupPromptTests.swift */; };
 		C8B55294C9F6764EDA4DF4E7 /* DoubleMetaphone.swift in Sources */ = {isa = PBXBuildFile; fileRef = D29E7B1780B0614E5E995EBE /* DoubleMetaphone.swift */; };
+		C917FED57FBC6BFF9FF92B38 /* GateBypassTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1054A82CCA094F63FDB0B779 /* GateBypassTests.swift */; };
 		CBBDC30D928B8712C0A88FCF /* LevenshteinDistance.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28628EC17301483856068EDB /* LevenshteinDistance.swift */; };
 		CE619AAF0826492BF849C4E1 /* EditGuardClassifierRuleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32CF080F624D37BE8538A089 /* EditGuardClassifierRuleTests.swift */; };
 		CEBF8B3840C25CA310E6D130 /* HotkeyDisplayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D52E7128C312E2EA67531500 /* HotkeyDisplayTests.swift */; };
@@ -247,6 +248,7 @@
 		0F38D6E695569BB8F6A84E53 /* DoubleMetaphoneTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DoubleMetaphoneTests.swift; sourceTree = "<group>"; };
 		0F69186AF3834EBB5DE4A863 /* EditGuard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditGuard.swift; sourceTree = "<group>"; };
 		0FF813C5993DCEF6F3C8181E /* DictionaryPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryPane.swift; sourceTree = "<group>"; };
+		1054A82CCA094F63FDB0B779 /* GateBypassTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GateBypassTests.swift; sourceTree = "<group>"; };
 		143CC8A466EB55916F9E58E4 /* NotificationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationServiceTests.swift; sourceTree = "<group>"; };
 		153DE91A83FA8BA7403E4663 /* EditGuardMaterializeInvariantTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditGuardMaterializeInvariantTests.swift; sourceTree = "<group>"; };
 		173C8AA4F1F24BE32435F426 /* allowlist-de.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "allowlist-de.txt"; sourceTree = "<group>"; };
@@ -613,6 +615,7 @@
 				0F38D6E695569BB8F6A84E53 /* DoubleMetaphoneTests.swift */,
 				CDE95E7A5477D972F264C65F /* EntitlementTests.swift */,
 				8C32AC7140BED86730FA3B98 /* Fixtures */,
+				1054A82CCA094F63FDB0B779 /* GateBypassTests.swift */,
 				7BE6288D545D882CA527E8B9 /* GroundingLiteTests.swift */,
 				2F53F54165D5AFE6D0BC7F33 /* HistoryServiceTests.swift */,
 				D52E7128C312E2EA67531500 /* HotkeyDisplayTests.swift */,
@@ -1135,6 +1138,7 @@
 				4E8963527065DC1D3A1511EB /* EditGuardTokenizerTests.swift in Sources */,
 				40E9437848A0A7B50BFC93A6 /* EntitlementTests.swift in Sources */,
 				45316FC792F1D31BC00F4B0F /* FactPreservationGuardTests.swift in Sources */,
+				C917FED57FBC6BFF9FF92B38 /* GateBypassTests.swift in Sources */,
 				2146EF1F6260B61AEB0BB076 /* GermanPosProbeFixtures.swift in Sources */,
 				7ED50B755B591C761024FB6E /* GroundingLiteTests.swift in Sources */,
 				698CDD27BAFCFBC9D3E53EB9 /* HistoryServiceTests.swift in Sources */,
