@@ -42,6 +42,14 @@ enum LlmStatus: Equatable {
     }
 }
 
+extension ModelWarmupService {
+    /// D-08: shown when a GGUF fails verification a second time — `acquireVerifiedModel`
+    /// has already deleted the bad file, so a relaunch downloads afresh. AI cleanup
+    /// stays disabled for the rest of this session (`isLlmReady` false, `cleanupService`
+    /// nil) rather than looping retries indefinitely against a possibly-corrupted URL.
+    static let verificationFailedStatus = "Model failed verification \u{2014} Retry download."
+}
+
 @MainActor
 class ModelWarmupService: ObservableObject {
     @Published var isWarming = false
@@ -136,10 +144,19 @@ class ModelWarmupService: ObservableObject {
                 // Downloads ~1.93 GB Qwen2.5-3B GGUF on first run from HuggingFace CDN (D-09, CLEANRD-01).
                 // Non-fatal: if LLM fails, plain dictation still works.
                 do {
-                    let needsDownload = !ModelDownloadService.isModelCached()
-                    warmupLog.info("LLM Step 4: cached=\(!needsDownload)")
-                    if needsDownload {
+                    let cached = ModelDownloadService.isModelCached()
+                    let fileExists = FileManager.default.fileExists(atPath: ModelDownloadService.modelPath().path)
+                    warmupLog.info("LLM Step 4: cached=\(cached) fileExists=\(fileExists)")
+                    if !fileExists {
+                        // No file at all — a genuine download.
                         await MainActor.run { self?.llmStatus = .downloading }
+                    } else if !cached {
+                        // A file exists but isn't yet cheaply verified — the
+                        // first-launch-after-upgrade hash (10-30s for 2.74 GB) is
+                        // running, not a download. Distinguishing this from
+                        // .downloading avoids a misleading "Downloading model…"
+                        // label while D-08's verify-then-stamp does its one-time work.
+                        await MainActor.run { self?.llmStatus = .loading }
                     }
 
                     try await ModelDownloadService.downloadIfNeeded()
@@ -186,6 +203,15 @@ class ModelWarmupService: ObservableObject {
                 } catch is CancellationError {
                     warmupLog.error("LLM warmup cancelled")
                     throw CancellationError()
+                } catch let error as ModelIntegrityError {
+                    // D-08: acquireVerifiedModel already deleted the bad file (and its
+                    // stamp) after the second mismatch — nothing to clean up here.
+                    // AI cleanup stays disabled for this session; a relaunch re-runs
+                    // Step 4 and downloads afresh.
+                    warmupLog.error("LLM model failed verification: \(error.localizedDescription)")
+                    await MainActor.run {
+                        self?.llmStatus = .failed(Self.verificationFailedStatus)
+                    }
                 } catch {
                     warmupLog.error("LLM warmup failed: \(error.localizedDescription)")
                     await MainActor.run {
