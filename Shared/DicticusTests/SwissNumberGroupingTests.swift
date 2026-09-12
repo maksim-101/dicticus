@@ -53,6 +53,15 @@ final class SwissNumberGroupingTests: XCTestCase {
         XCTAssertEqual(SwissNumberFormatter.format("1.250,70"), "1'250.70")
     }
 
+    // Review CR-01 (49.7): the same separator twice is a dotted/comma identifier
+    // (partial IP, version, build number), never "group + decimal". Must fall
+    // through to the pre-existing multi-separator net and stay verbatim.
+    func testD09_sameSeparatorTwiceIsNotAGroup() {
+        XCTAssertEqual(SwissNumberFormatter.format("192.168.1"), "192.168.1")
+        XCTAssertEqual(SwissNumberFormatter.format("1.200.5"), "1.200.5")
+        XCTAssertEqual(SwissNumberFormatter.format("version 1.200.5 shipped"), "version 1.200.5 shipped")
+    }
+
     func testD09_glyphAndTailPreserved() {
         XCTAssertEqual(SwissNumberFormatter.format("€2,273"), "€2'273")
         XCTAssertEqual(SwissNumberFormatter.format("2,273."), "2'273.")
