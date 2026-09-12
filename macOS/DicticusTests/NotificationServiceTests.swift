@@ -32,10 +32,19 @@ final class NotificationServiceTests: XCTestCase {
             .busy,
             .modelLoading,
             .transcriptionFailed(NSError(domain: "test", code: 1)),
-            .recordingFailed(NSError(domain: "test", code: 2))
+            .recordingFailed(NSError(domain: "test", code: 2)),
+            .pasteUndeliverable
         ]
         for notification in cases {
             XCTAssertEqual(notification.title, "Dicticus", "Title mismatch for \(notification)")
         }
+    }
+
+    // MARK: - Phase 50 D-02: paste-undeliverable fallback notification
+
+    func testPasteUndeliverableMessage() {
+        let notification = DicticusNotification.pasteUndeliverable
+        XCTAssertEqual(notification.message, "Couldn't paste \u{2014} text is on your clipboard, \u{2318}V to paste.")
+        XCTAssertEqual(notification.title, "Dicticus")
     }
 }
