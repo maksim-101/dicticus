@@ -106,6 +106,32 @@ class TranscriptionService: ObservableObject {
     /// Sub-0.3s clips are noise or accidental key presses, not speech.
     let minimumDurationSeconds: Float = 0.3
 
+    /// Phase 50 D-01: clips at/above this duration always proceed to WhisperKit
+    /// (Layer 3), even when the Layer 2 adaptive gate reports no voice. This is
+    /// an eligibility predicate, NOT a threshold — it never reintroduces a fixed
+    /// absolute energy value; `AdaptiveVoiceGate`'s constants are untouched.
+    ///
+    /// Motivated by `discard-2026-09-09.jsonl` 08:16:05 / 08:16:32 / 08:25:52 /
+    /// 08:26:19 / 09:43:56 — a low-gain input device whose speech peaked
+    /// 0.0036-0.0059, under `AdaptiveVoiceGate.defaultAbsoluteFloor` (0.006) —
+    /// and `discard-2026-09-10.jsonl` 05:17:23, where a noisy room raised the
+    /// ratio threshold above a 4.5s clip's peak. Corpus gap: the longest genuine
+    /// silent tap was 1.3s, the shortest wrongly discarded speech was 2.7s;
+    /// this constant sits in that gap. Accepted risk: a long deliberately-silent
+    /// hold may now decode a confident Whisper hallucination ("Thank you.") —
+    /// visible and deletable, unlike speech lost silently before this change.
+    /// Layer 3 (`BoilerplateHallucination`, `NoSpeechDiscard`, `noResult`) is
+    /// the backstop for that case. See memory `project_whisper_adaptive_vad_fix`.
+    nonisolated static let gateBypassDurationSeconds: Float = 2.0
+
+    /// Phase 50 D-01: pure eligibility predicate for the Layer 2 guard. A clip
+    /// proceeds to WhisperKit if the adaptive gate detected voice OR the clip's
+    /// duration alone clears `gateBypassDurationSeconds` — the bypass only ever
+    /// widens what reaches WhisperKit, never narrows it.
+    nonisolated static func shouldProceedPastEnergyGate(voiceDetected: Bool, durationSeconds: Float) -> Bool {
+        voiceDetected || durationSeconds >= gateBypassDurationSeconds
+    }
+
     // MARK: - Private
 
     private let whisperKit: WhisperKit
@@ -277,13 +303,20 @@ class TranscriptionService: ObservableObject {
         // so an energy gate ahead of WhisperKit is the only mechanism that can.
         let gateFrameEnergies = Self.frameEnergies(of: resampledSamples, sampleRate: sampleRate)
         let gateDecision = AdaptiveVoiceGate.evaluate(frameEnergies: gateFrameEnergies)
+        // Phase 50 D-01: true exactly when this clip reaches WhisperKit only because
+        // of the duration bypass (gate found no voice, but duration >= the constant
+        // above). Used both by the guard below and by every post-gate discard-log
+        // record so a future audit can size the bypassed-clip class.
+        let gateBypassedByDuration = !gateDecision.voiceDetected && durationSeconds >= Self.gateBypassDurationSeconds
         #if DEBUG_RECORDER
         // Single-sourced frames-above-threshold count (quick task 260826-8ec) — bound once
         // here so non-recorder builds emit no unused binding, and reused at every discard-log
         // call site at or below this point in the function rather than recomputed per site.
         let gateFramesAboveThreshold = gateDecision.framesAboveThreshold(in: gateFrameEnergies)
         #endif
-        guard gateDecision.voiceDetected else {
+        // Phase 50 D-01: the energy gate alone no longer decides discard for long
+        // clips — see gateBypassDurationSeconds above.
+        guard Self.shouldProceedPastEnergyGate(voiceDetected: gateDecision.voiceDetected, durationSeconds: durationSeconds) else {
             #if DEBUG_RECORDER
             // Discard-path regression net only — the temporary pass-path probe used to
             // verify the quiet-speech margin during on-device UAT was removed 2026-07-05
@@ -372,7 +405,8 @@ class TranscriptionService: ObservableObject {
                     )
                 },
                 noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable,
-                energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate
+                energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
+                gateBypassedByDuration: gateBypassedByDuration
             )
             #endif
             _ = matchedPhrase
@@ -409,7 +443,8 @@ class TranscriptionService: ObservableObject {
                     )
                 },
                 noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable,
-                energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate
+                energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
+                gateBypassedByDuration: gateBypassedByDuration
             )
             #endif
             throw TranscriptionError.silenceOnly  // defer resets to .idle
@@ -459,7 +494,8 @@ class TranscriptionService: ObservableObject {
                 avgLogProbs: allSegments.map(\.avgLogprob)
             ),
             noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable,
-            energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate
+            energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
+            gateBypassedByDuration: gateBypassedByDuration
         )
         #endif
 
@@ -506,7 +542,8 @@ class TranscriptionService: ObservableObject {
                     )
                 },
                 noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable,
-                energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate
+                energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
+                gateBypassedByDuration: gateBypassedByDuration
             )
             #endif
             throw TranscriptionError.noResult  // defer resets to .idle
