@@ -2047,9 +2047,26 @@ public enum EditGuard {
         // Phase 49.6 gap plan 06 (D-15): boundary coupling — see the
         // "Boundary coupling" doc-comment paragraph above. A restored
         // single-character terminal mark ending a TRIGGERED raw sentence N
-        // takes the immediately following (adjacent) edit — raw sentence
-        // N+1's first-word `punctuationOrCasing` casing substitute — down
-        // with it, whether or not N+1 itself has any trigger of its own.
+        // takes raw sentence N+1's first-word `punctuationOrCasing` casing
+        // substitute down with it, whether or not N+1 itself has any
+        // trigger of its own.
+        //
+        // 49.6 code review WR-03: the adjacency check bridges FORWARD past
+        // any edit that RENDERS NOTHING in the output stream, rather than
+        // hard-coding `j = i + 1` — mirroring `materialize`'s own
+        // `emittedKindAt` rule for "what actually renders next": a
+        // `.delete` NEVER occupies a candidate slot regardless of its
+        // verdict (accepted or rejected, it has no `to` — see
+        // `emittedKindAt`'s `case .delete: break`), and a REJECTED
+        // `.insert`/`.move` occupies its slot but renders nothing there
+        // (accepted, they render; rejected, they are true drops). Bridging
+        // past these means an accepted filler deletion, or a rejected
+        // insert/move, sitting between the mark and the next sentence's
+        // first word can no longer defeat the coupling. An ACCEPTED insert
+        // is deliberately NOT bridged — the loop stops there and does not
+        // couple (see the doc comment's `. So what` example): it changes
+        // the casing context for real, so the LLM's lowercase next word is
+        // then correct.
         for i in edits.indices {
             guard edits[i].kind != .keep,
                   let markToken = edits[i].from,
@@ -2059,7 +2076,12 @@ public enum EditGuard {
                   triggered.contains(markToken.sentenceIndex)
             else { continue }
             let n = markToken.sentenceIndex
-            let j = i + 1
+            var j = i + 1
+            while j < edits.count {
+                if edits[j].kind == .delete { j += 1; continue }
+                if (edits[j].kind == .insert || edits[j].kind == .move), !verdicts[j].accepted { j += 1; continue }
+                break
+            }
             guard j < edits.count,
                   edits[j].kind == .substitute,
                   verdicts[j].accepted,
