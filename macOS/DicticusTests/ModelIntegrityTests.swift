@@ -3,9 +3,8 @@ import XCTest
 
 /// Hermetic fixtures for `ModelIntegrity` (Phase 50 D-08). Every fixture uses a fresh
 /// temp directory under `FileManager.default.temporaryDirectory` and removes it in
-/// `tearDown` — NEVER `ModelDownloadService.modelPath()` or the real Application
-/// Support directory (a mismatch path run against the real path would delete the
-/// user's 2.74 GB model; see the plan's enforced prohibition).
+/// `tearDown` — never the real on-disk cache location a mismatch path could delete
+/// the user's 2.74 GB model from (see the plan's enforced prohibition).
 final class ModelIntegrityTests: XCTestCase {
 
     /// FIPS 180-4 known-answer vectors — an oracle independent of CryptoKit itself.
