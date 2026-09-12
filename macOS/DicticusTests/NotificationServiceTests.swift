@@ -61,4 +61,18 @@ final class NotificationServiceTests: XCTestCase {
         service.post(.busy)
         XCTAssertEqual(service.unreadNotice?.message, DicticusNotification.busy.message)
     }
+
+    // MARK: - Phase 50-09 Task 3: caseName never carries payload (T-50-09-01)
+
+    func testCaseNameNeverCarriesPayload() {
+        let transcriptionFailed = DicticusNotification.transcriptionFailed(NSError(domain: "secret-domain", code: 7))
+        XCTAssertEqual(transcriptionFailed.caseName, "transcriptionFailed")
+        XCTAssertFalse(transcriptionFailed.caseName.contains("secret-domain"))
+
+        let recordingFailed = DicticusNotification.recordingFailed(NSError(domain: "x", code: 1))
+        XCTAssertEqual(recordingFailed.caseName, "recordingFailed")
+
+        XCTAssertEqual(DicticusNotification.pasteUndeliverable.caseName, "pasteUndeliverable")
+        XCTAssertEqual(DicticusNotification.cleanupSkippedTooLong.caseName, "cleanupSkippedTooLong")
+    }
 }
