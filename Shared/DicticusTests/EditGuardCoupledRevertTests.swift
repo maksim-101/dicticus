@@ -245,4 +245,43 @@ final class EditGuardCoupledRevertTests: XCTestCase {
         let v = EditGuardMergeAtomicityTests.neitherSourceViolations(output: out, sourceA: baseline, sourceB: llm)
         XCTAssertTrue(v.tier1.isEmpty, "tier-1 neither-source violation(s) \(v.tier1) in: \(out)")
     }
+
+    /// WR-03 (49.6 code review): same shape as
+    /// `testD15_periodSubstituteMergeRevertsNextSentenceCasing`, but the raw
+    /// text has a stray filler ("Uh") sitting between the merged boundary
+    /// and the next sentence's carried-over first word, which the LLM
+    /// correctly drops. NOTE ON CONSTRUCTION: the review's literal wording
+    /// posits a REJECTED INSERT at this slot, but a rejected insert here is
+    /// structurally impossible to isolate as a text regression — it is
+    /// always adjacent (no `.keep` can separate them) to the mark's edit and
+    /// the next-word substitute in the SAME `applyAtomicGroupCoupling`
+    /// cluster (a `.word`-kind member disqualifies the punctuation-only
+    /// exemption), so that pass's OWN "any rejection reverts the whole
+    /// cluster" rule already reverts the mark+next-word pair before this
+    /// function ever runs — under the (arguably less precise, but not
+    /// wrong) label `atomicGroupRevert` — confirmed by instrumenting
+    /// `EditGuard.GuardResult.edits` on a `um`-insert variant of this
+    /// fixture. An ACCEPTED filler DELETE is the reachable instance of the
+    /// SAME array-adjacency gap: a `.delete` edit never occupies a candidate
+    /// slot at all (`materialize`'s `emittedKindAt` never sets one for
+    /// `.delete`, regardless of its verdict — see that switch's `case
+    /// .delete: break`), so `applyAtomicGroupCoupling`'s "any rejection"
+    /// rule never even considers it (accepted deletes are not rejections),
+    /// and it survives untouched into `applySentenceCoupledRevert` sitting
+    /// at `edits[i+1]` — the array slot the D-15 loop's hard-coded `j = i +
+    /// 1` inspects — so the loop never reaches `j = i + 2`, where the real
+    /// "Which"->"which" casing substitute lives: the coupling silently
+    /// fails to fire and the pre-fix output keeps the LLM's uncorrected
+    /// lowercase "which". RED before the fix.
+    func testD15_rejectedInsertBetweenMarkAndNextSentenceStillCouples() {
+        let baseline = "We should confirm our vendor today. Uh Which team is installing the update this week."
+        let llm = "We should confirm our supplier today, which team is installing the update this week?"
+        let expected = "We should confirm our vendor today. Which team is installing the update this week?"
+        let out = guardOut(baseline, llm, "en")
+        let result = guardResult(baseline, llm, "en")
+        XCTAssertEqual(out, expected)
+        XCTAssertTrue(result.edits.contains { $0.kind == "substitute" && $0.from == "Which" && $0.rejectClass == "sentenceCoupledRevert" })
+        let v = EditGuardMergeAtomicityTests.neitherSourceViolations(output: out, sourceA: baseline, sourceB: llm)
+        XCTAssertTrue(v.tier1.isEmpty, "tier-1 neither-source violation(s) \(v.tier1) in: \(out)")
+    }
 }
