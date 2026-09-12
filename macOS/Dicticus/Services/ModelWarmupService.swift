@@ -48,6 +48,53 @@ extension ModelWarmupService {
     /// stays disabled for the rest of this session (`isLlmReady` false, `cleanupService`
     /// nil) rather than looping retries indefinitely against a possibly-corrupted URL.
     static let verificationFailedStatus = "Model failed verification \u{2014} Retry download."
+
+    // MARK: - Phase 50 D-10/D-11: idle unload of the cleanup LLM
+
+    /// `UserDefaults` key backing the Settings knob (`AiCleanupPane.IdleUnloadFormRow`).
+    /// Stores an `Int` number of minutes; `0` means "Never".
+    /// `nonisolated`: read from `idleUnloadThreshold(from:)`, which runs off-MainActor
+    /// (called from the idle-unload `Task` loop).
+    nonisolated static let idleUnloadDefaultsKey = "llmIdleUnloadMinutes"
+
+    /// Default idle period before the cleanup LLM is unloaded, in minutes — used both
+    /// as the Settings row's default selection and as the fallback when the key is
+    /// absent or holds a value outside the picker's range.
+    nonisolated static let idleUnloadDefaultMinutes = 10
+
+    /// The picker's fixed options, in minutes (excluding "Never", which is `0` and
+    /// rendered separately in `IdleUnloadFormRow`).
+    nonisolated static let idleUnloadOptionsMinutes = [5, 10, 30]
+
+    /// How often the idle-unload loop wakes to check whether the threshold has been
+    /// crossed. An unload therefore lands within `[threshold, threshold + 60s)` of the
+    /// last activity, never exactly at the threshold instant.
+    nonisolated static let idleCheckIntervalSeconds: UInt64 = 60
+
+    /// Read the configured idle-unload threshold, in seconds, from `defaults`.
+    ///
+    /// - Absent key, or a negative (garbage) value: falls back to
+    ///   `idleUnloadDefaultMinutes`.
+    /// - `0`: "Never" — returns `nil`, which `shouldUnload` always treats as false.
+    /// - Any other positive value: minutes × 60.
+    nonisolated static func idleUnloadThreshold(from defaults: UserDefaults) -> TimeInterval? {
+        guard let stored = defaults.object(forKey: idleUnloadDefaultsKey) as? Int, stored >= 0 else {
+            return TimeInterval(idleUnloadDefaultMinutes * 60)
+        }
+        guard stored > 0 else { return nil }
+        return TimeInterval(stored * 60)
+    }
+
+    /// Pure predicate mirroring `CleanupService.shouldWarmUp`'s shape: should the idle
+    /// tick unload the model given when it was last used?
+    ///
+    /// `nil` threshold ("Never") always returns false, independent of elapsed time.
+    /// Otherwise, inclusive at the boundary (`>=`) — elapsed time exactly equal to the
+    /// threshold counts as idle, matching `shouldWarmUp`'s documented convention.
+    nonisolated static func shouldUnload(lastActivityAt: Date, now: Date, idleThreshold: TimeInterval?) -> Bool {
+        guard let idleThreshold else { return false }
+        return now.timeIntervalSince(lastActivityAt) >= idleThreshold
+    }
 }
 
 @MainActor
