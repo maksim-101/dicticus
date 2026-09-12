@@ -121,6 +121,36 @@ final class HotkeyManagerTests: XCTestCase {
         XCTAssertNotEqual(mode, .plain, "AI cleanup must be a distinct mode from plain")
     }
 
+    // MARK: - Phase 50 D-11: widened key-down table (idle-unloaded LLM starts recording)
+
+    func testAiCleanupKeyDownAction_table() {
+        XCTAssertEqual(
+            HotkeyManager.aiCleanupKeyDownAction(cleanupServicePresent: false, isLoaded: false, idleUnloaded: false),
+            .abortLlmLoading,
+            "no CleanupService instance at all must abort (matches testAICleanupKeyDownBeforeLLMReady)"
+        )
+        XCTAssertEqual(
+            HotkeyManager.aiCleanupKeyDownAction(cleanupServicePresent: true, isLoaded: true, idleUnloaded: false),
+            .proceed,
+            "loaded and not idle-unloaded — normal path"
+        )
+        XCTAssertEqual(
+            HotkeyManager.aiCleanupKeyDownAction(cleanupServicePresent: true, isLoaded: false, idleUnloaded: true),
+            .reloadAndProceed,
+            "idle-unloaded — start recording and kick the reload (D-11)"
+        )
+        XCTAssertEqual(
+            HotkeyManager.aiCleanupKeyDownAction(cleanupServicePresent: true, isLoaded: false, idleUnloaded: false),
+            .abortLlmLoading,
+            "not loaded and not idle-unloaded — the initial launch load is still in flight, abort as before"
+        )
+        XCTAssertEqual(
+            HotkeyManager.aiCleanupKeyDownAction(cleanupServicePresent: true, isLoaded: true, idleUnloaded: true),
+            .proceed,
+            "loaded wins even if a stale idleUnloaded flag is somehow still true"
+        )
+    }
+
     // MARK: - Integration test (requires WhisperKit model)
 
     func testFullPushToTalkCycle() async throws {
