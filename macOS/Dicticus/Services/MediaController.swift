@@ -289,6 +289,41 @@ final class MediaController {
     /// threshold calibration from real `tier2b_rms` log evidence.
     nonisolated private static let silenceThreshold = 1e-4
 
+    /// Press-side "is anything really playing" bar (Phase 50 D-13, 10x
+    /// `silenceThreshold`). Raised after `mediapause-2026-09-10.jsonl` 04:07:17
+    /// showed a 1.0022e-4 press RMS (just above `silenceThreshold`) firing a
+    /// PAUSE into an ownerless Now Playing session, whose 04:07:34 release PLAY
+    /// launched Apple Music (quick task 260830-pm5 closed the press-side TOGGLE
+    /// vector only — the ambiguous command, not the fire margin). Every live
+    /// noise fire ever recorded sits at or below this gap: 1.0022e-4
+    /// (2026-09-10), 1.1321e-4 (2026-09-06 05:51), 2.2013e-4 (2026-09-01 19:27),
+    /// 4.9979e-4 (2026-08-31 17:34); every real-playback fire is >= 9.2e-3.
+    /// `silenceThreshold` is untouched and keeps its verify-side role in
+    /// `tier2bVerdict` (D-14) — a MediaRemote Now Playing owner check was
+    /// considered and deferred (restricted API, needs a signed-app spike).
+    nonisolated internal static let tier2bFireThreshold = 1e-3
+
+    /// Pure press-side fire decision (D-13). `internal`, not `private`, so
+    /// `MediaControllerTests` can assert it directly as a boundary table —
+    /// mirrors `Tier2bVerdict`'s visibility note above. `nil` (tap
+    /// unavailable/denied/failed/timeout) never fires.
+    nonisolated static func tier2bShouldFire(measuredRMS: Double?) -> Bool {
+        (measuredRMS ?? 0) > tier2bFireThreshold
+    }
+
+    /// Pure log-clamp (D-15): the press-side `tier2b_rms` field written by
+    /// `logPause` reports the raw value only when the gate actually fires,
+    /// exactly `0.0` otherwise — one comparison shared with `tier2bShouldFire`
+    /// so a logged `0.0` unambiguously means "did not fire". `nil` stays
+    /// `nil` (no sample was ever taken). The 149 tiny live readings
+    /// (2.25e-44 ... 2.03e-34, `50-GATE-DIFF.md` §B) are normal Doubles, not
+    /// subnormals (Double's smallest normal is 2.2250738585072014e-308) — this
+    /// is a threshold clamp, not an `isNormal` check.
+    nonisolated static func tier2bReportedRMS(_ measuredRMS: Double?) -> Double? {
+        guard let measuredRMS else { return nil }
+        return tier2bShouldFire(measuredRMS: measuredRMS) ? measuredRMS : 0.0
+    }
+
     /// Sample the system output level via the RMS test seam (if installed) or the
     /// real `OutputLevelSampler` process tap. Replaces the dead
     /// `kAudioDevicePropertyDeviceIsRunningSomewhere` running-guard, which stays
@@ -559,19 +594,20 @@ final class MediaController {
 
         // Tier 2b / Tier 2 gate: measured system-output RMS (260725-og7), NOT the
         // dead kAudioDevicePropertyDeviceIsRunningSomewhere running-check (spike 003
-        // step 3: stays true through confirmed silence). RMS <= threshold, or a nil
-        // sample (tap unavailable/denied/failed/timeout), means BOTH the tier-2b
-        // toggle AND the tier-2 mute stay OFF for this press — never toggle or mute
-        // on silence (fixes paused-YouTube-resumes-on-PTT).
+        // step 3: stays true through confirmed silence). RMS <= tier2bFireThreshold
+        // (Phase 50 D-13), or a nil sample (tap unavailable/denied/failed/timeout),
+        // means BOTH the tier-2b toggle AND the tier-2 mute stay OFF for this press
+        // — never toggle or mute on silence (fixes paused-YouTube-resumes-on-PTT)
+        // or on the live noise-fire band below the raised margin.
         let (measuredRMS, tapStatus) = sampleOutputLevel()
-        let isPlaying = (measuredRMS ?? 0) > Self.silenceThreshold
+        let isPlaying = Self.tier2bShouldFire(measuredRMS: measuredRMS)
 
         guard isPlaying else {
             #if DEBUG_RECORDER
             logPause(playerOutcomes: playerOutcomes, tier2Reached: false,
                       isOutputMutedResult: nil, muteAttempted: false, setOutputMutedResult: nil,
                       tier2bGuardResult: false, tier2bToggleAttempted: false, tier2bToggleSent: false,
-                      tier2bDlsymDegrade: nil, tier2bRMS: measuredRMS, tier2bTapStatus: tapStatus)
+                      tier2bDlsymDegrade: nil, tier2bRMS: Self.tier2bReportedRMS(measuredRMS), tier2bTapStatus: tapStatus)
             #endif
             return
         }
@@ -587,7 +623,7 @@ final class MediaController {
             logPause(playerOutcomes: playerOutcomes, tier2Reached: false,
                       isOutputMutedResult: nil, muteAttempted: false, setOutputMutedResult: nil,
                       tier2bGuardResult: true, tier2bToggleAttempted: true, tier2bToggleSent: true,
-                      tier2bDlsymDegrade: false, tier2bRMS: measuredRMS, tier2bTapStatus: tapStatus)
+                      tier2bDlsymDegrade: false, tier2bRMS: Self.tier2bReportedRMS(measuredRMS), tier2bTapStatus: tapStatus)
             #endif
             // Post-toggle verify-and-fallback (260805-suy): measuredRMS is guaranteed
             // non-nil here — `isPlaying` above required it to exceed silenceThreshold.

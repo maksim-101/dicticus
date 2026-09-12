@@ -32,6 +32,18 @@ final class OutputLevelSampler {
     /// (invoked on a CoreAudio realtime thread), lock-protected since the
     /// sampling window is short (~100ms) and this is not a sustained
     /// real-time audio path.
+    ///
+    /// Phase 50 D-15: `sumOfSquares`/`frameCount` are zero-initialised at
+    /// declaration below, and `sample()` constructs a fresh `RMSAccumulator`
+    /// (hence a fresh zeroed pair) on every call — no explicit reset is
+    /// needed, and a short/partial callback can never leave stale bytes
+    /// behind. The `"timeout"` path (`:165-169`) already returns `nil`, never
+    /// a value, when the window never fills. The live tiny readings this
+    /// closed (`tier2b-denormal-rms-value.md`, 2.25e-44 ... 2.03e-34) are
+    /// real, normal Doubles produced by a genuine RMS computation over
+    /// near-silent input — the fix is the reporting-boundary clamp at
+    /// `MediaController.tier2bReportedRMS`, not a change here; this sampler
+    /// stays a raw, unclamped measurement.
     private final class RMSAccumulator: @unchecked Sendable {
         private let lock = NSLock()
         private var sumOfSquares: Double = 0
