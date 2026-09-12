@@ -4,7 +4,7 @@
 # Usage:
 #   op run --env-file=.env -- ./scripts/build-dmg.sh
 #
-# Output: Dicticus.dmg in the project root
+# Output: Dicticus.dmg + Dicticus.dmg.sha256 (D-07 sidecar, shasum -c format) in the project root
 #
 # Requirements:
 #   - Xcode, xcodegen, create-dmg (brew install create-dmg)
@@ -105,6 +105,18 @@ xcrun notarytool submit "$OUTPUT_DIR/$DMG_NAME" \
 echo "=== Step 7: Staple Notarization Ticket ==="
 xcrun stapler staple "$OUTPUT_DIR/$DMG_NAME"
 
+echo "=== Step 7b: Generate DMG SHA-256 sidecar ==="
+# D-07: user-trust convention (Gatekeeper + Sparkle EdDSA already cover tampering).
+# Run from $OUTPUT_DIR so the check-file carries the bare "Dicticus.dmg" name and
+# `shasum -c` works unmodified from the release directory. Under `set -euo pipefail`
+# a failed self-check aborts the script — fail-closed for the release artifact too.
+cd "$OUTPUT_DIR"
+shasum -a 256 "$DMG_NAME" > "$DMG_NAME.sha256"
+shasum -c "$DMG_NAME.sha256"
+cd "$SCRIPT_DIR"
+echo "  Wrote $DMG_NAME.sha256:"
+cat "$OUTPUT_DIR/$DMG_NAME.sha256"
+
 echo "=== Step 8: Generate Sparkle Appcast Metadata ==="
 SIGN_UPDATE_TOOL="$PROJECT_DIR/build/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update"
 if [ ! -f "$SIGN_UPDATE_TOOL" ]; then
@@ -125,5 +137,6 @@ echo "  2. Drag Dicticus.app to Applications"
 echo "  3. Open Dicticus from Applications (no Gatekeeper override needed)"
 echo ""
 echo "Next Steps for Update Distribution:"
-echo "  1. Upload $DMG_NAME to a GitHub Release."
-echo "  2. Update the appcast.xml on GitHub Pages using the metadata printed above."
+echo "  1. Upload $DMG_NAME AND $DMG_NAME.sha256 to the GitHub Release (gh release create <tag> --latest --notes-file … $DMG_NAME $DMG_NAME.sha256)."
+echo "  2. Paste the sha256 line above into the release notes (\"SHA-256: <hash>  $DMG_NAME\"; verify with: shasum -c $DMG_NAME.sha256)."
+echo "  3. Update the appcast.xml on GitHub Pages using the Sparkle metadata printed above."
