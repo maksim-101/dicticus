@@ -222,8 +222,14 @@ public enum FunctionWords {
     /// fix (locked by
     /// `ClosedListTests.testSubstitutableSetsAreUnchangedByTheDualRoleSplit`).
     ///
-    /// Negation is included so that `nicht`->`kein` reads as a function
-    /// substitution — this does NOT authorize DELETING a negation; D-05 owns
+    /// Negation is included so `der`-style article-agreement-shaped repairs
+    /// among negation determiners can reach step 6 at all; as of Phase 49.6
+    /// D-09, `EditGuard.classifySubstitute`'s coordinator/negator lock rejects
+    /// any substitute where either side is a negation token (except the
+    /// pre-existing `negationChange` polarity-flip carve-out), so `nicht`->`kein`
+    /// itself is now a documented lost repair (REVERT-TO-RAW), not an accepted
+    /// substitution — see `EditGuardClassifierRuleTests.testD09_substituteKeinToNicht_RED`.
+    /// This does NOT authorize DELETING a negation either way; D-05 owns
     /// deletions and permits only acoustic fillers and verbatim repetitions,
     /// never negation.
     public static let germanSubstitutable: Set<String> =
