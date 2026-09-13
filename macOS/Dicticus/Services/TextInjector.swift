@@ -53,9 +53,13 @@ class TextInjector {
         /// The pre-check failed before any paste was attempted; the transcript is left on the
         /// general pasteboard as a real user copy (no trailing space, no restore — D-02).
         case fallbackToClipboard(DeliveryBlocker)
-        /// Accessibility was untrusted, or the clipboard write itself failed; unchanged from the
-        /// pre-Phase-50 behaviour (AX already notifies; a failed write restores the clipboard
-        /// silently, so a `.pasteUndeliverable` notification there would be a lie).
+        /// Accessibility was untrusted, the clipboard write itself failed, or the call was
+        /// cancelled while waiting out a prior call's busy window (WR-07, 50-REVIEW.md) —
+        /// unchanged from the pre-Phase-50 behaviour for the first two (AX already notifies; a
+        /// failed write restores the clipboard silently), and by design for the third: a
+        /// cancelled waiter resuming early would capture the prior call's not-yet-restored
+        /// transcript as "the previous clipboard", so all three make a `.pasteUndeliverable`
+        /// notification there a lie.
         case blocked
     }
 
@@ -101,7 +105,11 @@ class TextInjector {
     /// waiter could run its save before the prior call's restore decision. Both timers resume
     /// on the main actor in fire order, so 50ms is ample margin. The wait is bounded by
     /// construction: a waiter never waits past `pasteInstant + clipboardRestoreDelayMilliseconds
-    /// + pasteboardBusySlackMilliseconds`, even if the prior call never cleared the window.
+    /// + pasteboardBusySlackMilliseconds`, even if the prior call never cleared the window. If
+    /// the waiter's own enclosing `Task` is cancelled before that deadline, it does not fall
+    /// through early to save the clipboard (WR-07, 50-REVIEW.md) — it bails out and returns
+    /// `.blocked` instead, so cancellation can only shorten the wait to `.blocked`, never to a
+    /// premature `saveClipboard()`.
     static let pasteboardBusySlackMilliseconds: UInt64 = 50
 
     /// Test seams (Phase 50 D-02/D-05) — `var` properties, not initializer parameters, because
@@ -160,7 +168,14 @@ class TextInjector {
         // wait, the busy deadline below, and the restoreDelayMs measurement.
         let clock = ContinuousClock()
         let entryInstant = clock.now
-        while !Task.isCancelled, let busyUntil = pasteboardBusyUntil, clock.now < busyUntil {
+        while let busyUntil = pasteboardBusyUntil, clock.now < busyUntil {
+            // WR-07 (50-REVIEW.md): cancellation must not let this call fall through to
+            // saveClipboard() while a prior call's window is still open — a waiter that
+            // resumes early would capture the prior call's not-yet-restored transcript as
+            // the previous clipboard, reintroducing the CR-01 race. Bail out here instead
+            // of falling through; no PasteProbe record on this path — the `exit:` vocabulary
+            // is pinned by 50-GATE-DIFF.md §C and this exit is unreachable in production.
+            if Task.isCancelled { return .blocked }
             try? await Task.sleep(until: busyUntil, clock: clock)
         }
         let waitedForPriorMs = Int((clock.now - entryInstant) / .milliseconds(1))
