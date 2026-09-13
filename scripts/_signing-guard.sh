@@ -5,8 +5,9 @@
 #
 # Env vars (set in the untracked .env.build, then `source .env.build` or
 # invoke via `op run --env-file=.env.build -- <script>` before running):
-#   OP_DEVID_P12_REF - 1Password item ID/reference (TrueNAS vault) for the
-#                       Developer ID Application "Certificates.p12" file.
+#   OP_DEVID_P12_REF - 1Password item ID/reference (AI vault, since 2026-09-13
+#                       migration off TrueNAS) for the Developer ID Application
+#                       "Certificates.p12" file.
 
 _SIGNING_HASH="B9CA1FF8209D9B1BD4940F2D39C327EF836FD3C0"
 _KEYCHAIN="$HOME/Library/Keychains/Apple Development.keychain-db"
@@ -42,7 +43,7 @@ _ensure_signing_key() {
     # Trap ensures .p12 is removed even if an error occurs mid-restore (T-36.2-01)
     trap 'rm -f "$_TMP_P12"' EXIT
 
-    op read "op://TrueNAS/$OP_DEVID_P12_REF/Certificates.p12" --out-file "$_TMP_P12"
+    op read "op://AI/$OP_DEVID_P12_REF/Certificates.p12" --out-file "$_TMP_P12"
     # Password captured into a function-local variable only; never echoed or written to disk (T-36.2-02)
     local _PW
     _PW="$(op item get "$OP_DEVID_P12_REF" --fields password --reveal)"
