@@ -264,4 +264,35 @@ final class TextInjectorTests: XCTestCase {
         XCTAssertEqual(pasteCount, 2)
         XCTAssertEqual(pasteboard.string(forType: .string), "user-original")
     }
+
+    func testInjectText_cancelledDuringBusyWindow_isBlockedWithoutSavingOrPasting() async {
+        let pasteboard = NSPasteboard.general
+        let originalSaved = injector.saveClipboard(pasteboard)
+        defer { injector.restoreClipboard(pasteboard, saved: originalSaved) }
+
+        pasteboard.clearContents()
+        pasteboard.setString("user-original", forType: .string)
+
+        var pasteCount = 0
+        injector.axTrustedProbe = { true }
+        injector.secureInputProbe = { false }
+        injector.frontmostBundleIDProvider = { "com.example.target" }
+        injector.pasteSynthesizer = { pasteCount += 1 }
+
+        let first = Task { await injector.injectText("alpha", expectedFrontmostBundleID: "com.example.target") }
+        try? await Task.sleep(for: .milliseconds(150))
+        // Both the test and TextInjector are @MainActor, so `second`'s body cannot start until
+        // this test suspends on `await second.value` below — cancellation is already observed
+        // when the body reaches the wait loop. No sleep, no polling, no timing race.
+        let second = Task { await injector.injectText("bravo", expectedFrontmostBundleID: "com.example.target") }
+        second.cancel()
+
+        let secondOutcome = await second.value
+        XCTAssertEqual(secondOutcome, .blocked)
+
+        let firstOutcome = await first.value
+        XCTAssertEqual(firstOutcome, .delivered)
+        XCTAssertEqual(pasteCount, 1)
+        XCTAssertEqual(pasteboard.string(forType: .string), "user-original")
+    }
 }
