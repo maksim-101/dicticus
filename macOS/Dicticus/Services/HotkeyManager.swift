@@ -295,6 +295,24 @@ class HotkeyManager: ObservableObject {
         return .abortLlmLoading
     }
 
+    /// What `handleKeyUp` should tell the user, given a paste `Outcome` (Phase 50 D-02, WR-03).
+    /// Only `.fallbackToClipboard` (either `DeliveryBlocker`) is worth a notification — the
+    /// transcript is sitting on the clipboard as a real user copy and the user should know to
+    /// paste it manually. `.delivered` needs nothing. `.blocked` is silent for all three of its
+    /// causes: accessibility already posted its own notification, a failed clipboard write
+    /// restored the original silently, and a call cancelled mid-wait (WR-07) never touched the
+    /// clipboard at all — a `.pasteUndeliverable` notice for any of these would be a lie. `static`
+    /// so it is testable without constructing a `HotkeyManager`; left MainActor-isolated with the
+    /// enclosing class since `TextInjector.Outcome` is nested in a `@MainActor` type.
+    static func notification(for outcome: TextInjector.Outcome) -> DicticusNotification? {
+        switch outcome {
+        case .fallbackToClipboard:
+            return .pasteUndeliverable
+        case .delivered, .blocked:
+            return nil
+        }
+    }
+
     /// Handle hotkey key-down event — start recording if conditions met.
     ///
     /// Per D-03: Suppresses key repeat via isKeyDown guard.
@@ -507,8 +525,7 @@ class HotkeyManager: ObservableObject {
                 // Phase 50 D-02: Inject final processed text into the active app; consume the
                 // outcome instead of discarding it (was: Bool result thrown away, HotkeyManager:438).
                 let outcome = await self.textInjector.injectText(finalOutput, expectedFrontmostBundleID: releaseFrontmostBundleID)
-                if case .fallbackToClipboard = outcome {
-                    let notification = DicticusNotification.pasteUndeliverable
+                if let notification = Self.notification(for: outcome) {
                     self.lastPostedNotification = notification
                     NotificationService.shared.post(notification)
                 }
