@@ -6,6 +6,17 @@
         <description>Most recent changes with links to updates.</description>
         <language>en</language>
         <item>
+            <title>Version 1.2.1</title>
+            <sparkle:releaseNotesLink>https://github.com/maksim-101/dicticus/releases/tag/macos-v1.2.1</sparkle:releaseNotesLink>
+            <pubDate>Sun, 20 Sep 2026 06:10:00 +0000</pubDate>
+            <enclosure url="https://github.com/maksim-101/dicticus/releases/download/macos-v1.2.1/Dicticus.dmg"
+                       sparkle:version="12"
+                       sparkle:shortVersionString="1.2.1"
+                       sparkle:edSignature="9fgVSzdO1tGFp3FtJgsCIvtML/47jr3IbTh9FC102eWronNfCueR7X7WxZ5vyDg0TIOKo/coj43lvBFOTnVdAA=="
+                       length="14891854"
+                       type="application/octet-stream" />
+        </item>
+        <item>
             <title>Version 1.2.0</title>
             <sparkle:releaseNotesLink>https://github.com/maksim-101/dicticus/releases/tag/macos-v1.2.0</sparkle:releaseNotesLink>
             <pubDate>Sun, 13 Sep 2026 07:30:00 +0000</pubDate>
