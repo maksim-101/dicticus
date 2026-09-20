@@ -6,7 +6,7 @@ Dicticus is a fully local, on-device dictation app (ASR via WhisperKit/Whisper l
 
 ---
 
-## Unreleased
+## 1.2.1 — Paste Delivery Fixes — 2026-09-20
 
 - **Fixed: dictation is no longer refused as "Couldn't paste" while some app holds secure keyboard input** — the pre-check that blocked on macOS's secure-input flag was measured (2026-09-20) to refuse pastes that deliver fine — 8 of 8 dictations on one day were refused while a background media app held the flag; the flag is now only recorded in debug builds. macOS.
 - **Fixed: your previous clipboard comes back after a dictation again** — the restore was skipped whenever a clipboard manager (e.g. Pure Paste) rewrote the transcript as plain text, which on this setup was every paste; Dicticus now restores when the clipboard still holds the transcript it wrote (ignoring trailing whitespace) and leaves anything else you copied in the meantime alone. macOS.
