@@ -6,6 +6,12 @@ Dicticus is a fully local, on-device dictation app (ASR via WhisperKit/Whisper l
 
 ---
 
+## 1.2.2 — Clean Quit — 2026-09-20
+
+- **Fixed: quitting Dicticus no longer produces a crash report** — with the AI-cleanup model loaded (always, when "Unload AI model after idle" is set to Never), every quit aborted inside the model runtime's Metal teardown because the model was still resident when the process exited; Dicticus now unloads it as part of quitting. macOS.
+
+---
+
 ## 1.2.1 — Paste Delivery Fixes — 2026-09-20
 
 - **Fixed: dictation is no longer refused as "Couldn't paste" while some app holds secure keyboard input** — the pre-check that blocked on macOS's secure-input flag was measured (2026-09-20) to refuse pastes that deliver fine — 8 of 8 dictations on one day were refused while a background media app held the flag; the flag is now only recorded in debug builds. macOS.

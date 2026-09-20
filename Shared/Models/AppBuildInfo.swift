@@ -26,6 +26,7 @@ enum AppBuildInfo {
     }
 
     static let recentChanges: [String] = [
+        "Fixed: quitting Dicticus no longer produces a crash report (the AI-cleanup model is now unloaded on quit)",
         "Fixed: dictation was refused as \"Couldn't paste\" whenever any app held secure keyboard input, even in the background",
         "Fixed: your previous clipboard (screenshot, link) is restored after a dictation again, also with a clipboard manager running",
         "Added: Settings → General → \"Copy transcript to clipboard when it can't be pasted\" — switch it off to keep your clipboard untouched",
