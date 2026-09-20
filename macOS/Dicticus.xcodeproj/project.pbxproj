@@ -98,6 +98,7 @@
 		651F32E3BC46F1B9053994C4 /* NotificationServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 143CC8A466EB55916F9E58E4 /* NotificationServiceTests.swift */; };
 		658008B00640021102215859 /* EditGuardTokenizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9B65C32CBE35451FCB1E073 /* EditGuardTokenizer.swift */; };
 		66747BE6CCCD4518CD89F033 /* GroundingLite.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6AA5D15371651A4B389110D /* GroundingLite.swift */; };
+		66CB3CAE45F2E91027A74C7A /* ClipboardFallbackToggleRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37C91180A9472EB455C1EDD0 /* ClipboardFallbackToggleRow.swift */; };
 		67FA1FADC5F248B873FC0D05 /* TranscriptionResultTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E8C78954BFBC85D227860FD /* TranscriptionResultTests.swift */; };
 		698CDD27BAFCFBC9D3E53EB9 /* HistoryServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F53F54165D5AFE6D0BC7F33 /* HistoryServiceTests.swift */; };
 		6A56E4E84BD5D0AB9EDCD43E /* SentenceAlignerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62AF0266CDE5DC54F0B85E57 /* SentenceAlignerTests.swift */; };
@@ -279,6 +280,7 @@
 		2F53F54165D5AFE6D0BC7F33 /* HistoryServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HistoryServiceTests.swift; sourceTree = "<group>"; };
 		32CF080F624D37BE8538A089 /* EditGuardClassifierRuleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditGuardClassifierRuleTests.swift; sourceTree = "<group>"; };
 		35226BB8E87542197B41B7D4 /* DebugRecorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DebugRecorder.swift; sourceTree = "<group>"; };
+		37C91180A9472EB455C1EDD0 /* ClipboardFallbackToggleRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClipboardFallbackToggleRow.swift; sourceTree = "<group>"; };
 		3931C660399C4F5714646B17 /* EditGuardFixtureCoverageTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditGuardFixtureCoverageTests.swift; sourceTree = "<group>"; };
 		3AC7066568B3D2A42647433E /* MemoryProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MemoryProbe.swift; sourceTree = "<group>"; };
 		3C663B6748FAF52FDB35F72A /* DictionaryImportPreviewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryImportPreviewTests.swift; sourceTree = "<group>"; };
@@ -675,6 +677,7 @@
 				41F13903D57CF4BA4E734A3C /* AiCleanupInfoView.swift */,
 				FBC4C4363B1672EAB82E3084 /* AiCleanupPane.swift */,
 				6A122EFDB00326E2C4702EAF /* CleanupSpikeView.swift */,
+				37C91180A9472EB455C1EDD0 /* ClipboardFallbackToggleRow.swift */,
 				7C1455FF0092A7E4358D3C48 /* CustomTabBar.swift */,
 				0FF813C5993DCEF6F3C8181E /* DictionaryPane.swift */,
 				2D6EAC45934BA02E00EE3D4E /* DictionaryView.swift */,
@@ -1002,6 +1005,7 @@
 				8AEBBFCCD69BB9A401CEFCB9 /* CleanupProvider.swift in Sources */,
 				19275F32EEE16136B152773A /* CleanupService.swift in Sources */,
 				0528BC851625382CEEC52741 /* CleanupSpikeView.swift in Sources */,
+				66CB3CAE45F2E91027A74C7A /* ClipboardFallbackToggleRow.swift in Sources */,
 				F3C810826FAF2668A9075778 /* ColognePhonetic.swift in Sources */,
 				2537248859F82F1C92603E16 /* ContextResolver.swift in Sources */,
 				E6B06B07E666852ADC5A61AA /* CurrencyAntiFlip.swift in Sources */,
