@@ -154,9 +154,6 @@ final class HotkeyManagerTests: XCTestCase {
     // MARK: - Phase 50 WR-03: paste-outcome to notification mapping
 
     func testNotificationForOutcome_onlyFallbackToClipboardNotifies() {
-        guard case .pasteUndeliverable? = HotkeyManager.notification(for: .fallbackToClipboard(.secureInput)) else {
-            return XCTFail("secureInput fallback must map to .pasteUndeliverable")
-        }
         guard case .pasteUndeliverable? = HotkeyManager.notification(for: .fallbackToClipboard(.frontmostChanged)) else {
             return XCTFail("frontmostChanged fallback must map to .pasteUndeliverable")
         }

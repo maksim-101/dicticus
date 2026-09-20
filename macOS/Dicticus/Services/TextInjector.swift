@@ -10,8 +10,9 @@ import Carbon.HIToolbox
 ///
 /// Per D-06: Clipboard + Cmd+V paste strategy.
 /// Per D-07: original clipboard contents are restored after
-/// `clipboardRestoreDelayMilliseconds`, and only if the pasteboard is unchanged
-/// since the transcript was written (Phase 50 plan 11).
+/// `clipboardRestoreDelayMilliseconds`, and only if the pasteboard still holds the transcript
+/// that was written, compared trimmed of whitespace (Phase 50 plan 11; content-compare since
+/// quick 260920-9m8 D-2).
 /// Per Phase 50 plan 12 (CR-01): a call that arrives while a prior call's restore window is
 /// still open waits for it before reading the pre-check signals or saving the clipboard.
 /// Per D-08: Single Cmd+V code path for all apps including terminal emulators.
@@ -34,11 +35,9 @@ class TextInjector {
     /// Phase 50 D-02: which deterministic signal blocked delivery of the synthesized paste.
     /// Raw values are the exact `failure_signal` vocabulary logged by `PasteProbe` (D-05) — see
     /// `50-GATE-DIFF.md` §C. Backlog: `macos-paste-at-cursor-intermittent-failure.md` (text lands
-    /// in history but never at the cursor) is the symptom this signal set diagnoses.
+    /// in history but never at the cursor) is the symptom this signal set diagnosed; quick
+    /// 260920-9m8 superseded the `secureInput` half of that diagnosis (see below).
     enum DeliveryBlocker: String, Equatable {
-        /// `IsSecureEventInputEnabled()` is true — macOS silently drops synthesized keystrokes
-        /// while a password field / secure terminal input has focus.
-        case secureInput = "secure_input"
         /// The frontmost app at paste time differs from the frontmost app at hotkey RELEASE
         /// (captured at key-up, not key-down, so a deliberate app switch during the hold is
         /// honoured and only a switch during the ASR/LLM wait is caught).
@@ -63,14 +62,12 @@ class TextInjector {
         case blocked
     }
 
-    /// Phase 50 D-02: pure eligibility predicate for the delivery pre-check. Secure input outranks
-    /// a frontmost-app change when both hold (an even more certain OS-level drop). An unknown
-    /// bundle id on either side is never evidence of a switch — `revertToRaw` passes `nil` for
-    /// `expectedBundleID` and gets only the secure-input check.
-    nonisolated static func deliveryBlocker(secureInputEnabled: Bool, expectedBundleID: String?, currentBundleID: String?) -> DeliveryBlocker? {
-        if secureInputEnabled {
-            return .secureInput
-        }
+    /// Phase 50 D-02: pure eligibility predicate for the delivery pre-check. An unknown bundle id
+    /// on either side is never evidence of a switch — `revertToRaw` passes `nil` for
+    /// `expectedBundleID` and so gets no pre-check at all. Quick 260920-9m8 (D-1): this used to
+    /// also block on `IsSecureEventInputEnabled()`, ranked above a frontmost-app change. Dropped —
+    /// measured 2026-09-20 to not block a CGEvent-posted Cmd+V.
+    nonisolated static func deliveryBlocker(expectedBundleID: String?, currentBundleID: String?) -> DeliveryBlocker? {
         if let expectedBundleID, let currentBundleID, expectedBundleID != currentBundleID {
             return .frontmostChanged
         }
@@ -90,10 +87,17 @@ class TextInjector {
     /// occurrence attributable.
     static let clipboardRestoreDelayMilliseconds: UInt64 = 750
 
-    /// Phase 50 plan 11: the restore re-installs the saved clipboard only when nobody else has
-    /// written since our `setString`; a user's Cmd+C, a clipboard manager re-declaring types, or
-    /// the target app writing on paste each move `NSPasteboard.changeCount` and must win.
-    nonisolated static func shouldRestoreClipboard(changeCountAfterWrite: Int, changeCountAtRestore: Int) -> Bool { changeCountAfterWrite == changeCountAtRestore }
+    /// Quick 260920-9m8 (D-2): replaces the Phase 50 plan 11 changeCount-equality guard, which
+    /// never fired in production — `restore_performed: false` on 281/281 successful pastes
+    /// Sep 13-19, because Pure Paste.app re-declares the pasteboard as plain text after every
+    /// write (changeCount +1, trailing space trimmed). Restores iff the pasteboard's current
+    /// string, trimmed of whitespace/newlines, equals the written transcript trimmed the same
+    /// way — a rewrite of the same content restores through; a user's Cmd+C of different content
+    /// (the realistic case) still wins.
+    nonisolated static func shouldRestoreClipboard(currentString: String?, writtenText: String) -> Bool {
+        guard let currentString else { return false }
+        return currentString.trimmingCharacters(in: .whitespacesAndNewlines) == writtenText.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
 
     /// Phase 50 plan 12 (CR-01, 50-REVIEW.md 2026-09-12): a second `injectText`/`revertToRaw`
     /// call landing inside a prior call's restore window used to save that prior call's
@@ -131,18 +135,18 @@ class TextInjector {
 
     /// Inject text at the current cursor position.
     ///
-    /// Pipeline (Phase 50 D-02/D-05):
+    /// Pipeline (Phase 50 D-02/D-05; D-1/D-2 revised by quick 260920-9m8):
     ///   1. Guard: verify Accessibility permission (CGEvent.post fails silently without it) — exit `ax_untrusted`
-    ///   2. Delivery pre-check: secure input / frontmost-app change — exit `delivery_precheck_failed`,
+    ///   2. Delivery pre-check: frontmost-app change only — exit `delivery_precheck_failed`,
     ///      leaves the transcript on the clipboard as a real user copy (no save/restore, no trailing space)
     ///   3. Save current clipboard contents (all types per item) — after waiting for a prior
     ///      call's restore window to close (Phase 50 plan 12, CR-01)
     ///   4. Clear clipboard and write transcription text as plain string — exit `clipboard_write_failed`
     ///   5. Synthesize Cmd+V keystroke via CGEvent
     ///   6. Wait `clipboardRestoreDelayMilliseconds` (Phase 50 plan 11), then restore the
-    ///      original clipboard only if `NSPasteboard.changeCount` is unchanged — exit `success`,
-    ///      recording `restore_delay_ms`, `changecount_after_write`, `changecount_at_restore`,
-    ///      `restore_performed`
+    ///      original clipboard only if the pasteboard still holds the transcript we wrote,
+    ///      content-compared after trimming (D-2) — exit `success`, recording `restore_delay_ms`,
+    ///      `changecount_after_write`, `changecount_at_restore`, `restore_performed`
     ///
     /// - Parameters:
     ///   - text: The transcription text to inject.
@@ -182,11 +186,16 @@ class TextInjector {
 
         let pasteboard = NSPasteboard.general
 
-        // Delivery pre-check (D-02): read the signals once, reuse below.
+        // secureInput is read for the PasteProbe `secure_input_enabled` diagnostic field only —
+        // it is not a delivery blocker. Measured 2026-09-20 (`secure-input-paste-test.swift`, the
+        // same CGEvent path as `synthesizePaste()`): a synthesized Cmd+V was delivered both with
+        // a BACKGROUND secure-input holder (Infuse.app; `paste-2026-09-20.jsonl` refused 8/8
+        // dictations on this premise) and with the FRONTMOST app (iTerm2) holding it. Phase 50
+        // RESEARCH.md:198's premise was never observed in either case (quick 260920-9m8, D-1).
         let secureInput = secureInputProbe()
+        // Delivery pre-check (D-02): read the signal once, reuse below.
         let currentBundleID = frontmostBundleIDProvider()
         if let blocker = Self.deliveryBlocker(
-            secureInputEnabled: secureInput,
             expectedBundleID: expectedFrontmostBundleID,
             currentBundleID: currentBundleID
         ) {
@@ -215,7 +224,8 @@ class TextInjector {
         // Append space after injected text so consecutive dictation segments
         // don't merge into one word. A trailing space is standard for dictation
         // (cursor sits after the space, ready for the next word or segment).
-        let wrote = pasteboard.setString(text + " ", forType: .string)
+        let writtenText = text + " "
+        let wrote = pasteboard.setString(writtenText, forType: .string)
         if !wrote {
             restoreClipboard(pasteboard, saved: saved)
             #if DEBUG_RECORDER
@@ -240,11 +250,12 @@ class TextInjector {
         pasteboardBusyUntil = pasteInstant.advanced(by: .milliseconds(Self.clipboardRestoreDelayMilliseconds + Self.pasteboardBusySlackMilliseconds))
         try? await Task.sleep(nanoseconds: Self.clipboardRestoreDelayMilliseconds * 1_000_000)
 
-        // Step 5: Restore original clipboard, but only if nobody else wrote to it meanwhile.
+        // Step 5: Restore original clipboard, but only if it still holds the transcript we wrote
+        // (D-2) — a user's Cmd+C of different content in the meantime wins instead.
         let changeCountAtRestore = pasteboard.changeCount
         let restorePerformed = Self.shouldRestoreClipboard(
-            changeCountAfterWrite: changeCountAfterWrite,
-            changeCountAtRestore: changeCountAtRestore
+            currentString: pasteboard.string(forType: .string),
+            writtenText: writtenText
         )
         if restorePerformed {
             restoreClipboard(pasteboard, saved: saved)
