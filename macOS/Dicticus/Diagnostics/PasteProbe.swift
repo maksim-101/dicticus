@@ -19,8 +19,10 @@
 // so "zero paste failures in the logs" was never evidence). `exit` names
 // which of the four branches fired: `ax_untrusted`, `clipboard_write_failed`,
 // `delivery_precheck_failed`, `success`. `failure_signal` is populated only
-// on `delivery_precheck_failed`, naming which D-02 signal blocked delivery:
-// `secure_input` or `frontmost_changed`.
+// on `delivery_precheck_failed`, and since quick 260920-9m8 (D-1) names only
+// the one D-02 signal left, `frontmost_changed` — `secure_input_enabled` is
+// recorded on every exit as a diagnostic only, since the 2026-09-20
+// measurement showed it does not block delivery.
 //
 // Phase 50 plan 11: the restore-before-read race. A live record (2026-09-12,
 // `paste-2026-09-12.jsonl` line 122, `exit: success`) shows the first
@@ -30,10 +32,13 @@
 // `success` record now carries `restore_delay_ms` (measured wait before the
 // restore decision), `changecount_after_write` and `changecount_at_restore`
 // (`NSPasteboard.changeCount` before/after the wait), and `restore_performed`
-// (whether the saved clipboard was actually re-installed). Reading rule for
-// the next audit: a wrong-text report with `restore_performed: true` and
-// `restore_delay_ms` at or above `TextInjector.clipboardRestoreDelayMilliseconds`
-// falsifies the delay hypothesis and points at AX insertion instead.
+// (whether the saved clipboard was actually re-installed). Since quick 260920-9m8 (D-2),
+// the decision is a trimmed content-compare of the pasteboard string against the written
+// transcript, not a changeCount equality — the two changecount fields remain for
+// attribution. Reading rule for the next audit: a wrong-text report with
+// `restore_performed: true` and `restore_delay_ms` at or above
+// `TextInjector.clipboardRestoreDelayMilliseconds` falsifies the delay hypothesis and
+// points at AX insertion instead.
 //
 // Phase 50 plan 12 — the same-app race (CR-01, 50-REVIEW.md 2026-09-12): a second paste or
 // Revert to Raw inside a prior paste's 750 ms window used to save that paste's transcript as
@@ -91,14 +96,15 @@ public actor PasteProbe {
     ///   - exit: which of `injectText`'s four branches fired — `ax_untrusted`,
     ///     `clipboard_write_failed`, `delivery_precheck_failed`, `success`.
     ///   - failureSignal: on `delivery_precheck_failed` only, which D-02 signal
-    ///     blocked delivery — `secure_input` or `frontmost_changed`.
+    ///     blocked delivery — `frontmost_changed`.
     ///   - restoreDelayMs: on `success` only (Phase 50 plan 11), the measured wait between
     ///     the Cmd+V post and the restore decision.
     ///   - changeCountAfterWrite: on `success` only, `NSPasteboard.changeCount` read directly
     ///     after our `setString`.
     ///   - changeCountAtRestore: on `success` only, `NSPasteboard.changeCount` read after the wait.
-    ///   - restorePerformed: on `success` only; `false` means a third party wrote to the
-    ///     pasteboard during the wait and the saved clipboard was deliberately not re-installed.
+    ///   - restorePerformed: on `success` only; `false` means the pasteboard no longer held the
+    ///     written transcript (a user copy of different content wins) and the saved clipboard was
+    ///     deliberately not re-installed.
     ///   - waitedForPriorMs: on every exit after the AX guard (Phase 50 plan 12, CR-01), the
     ///     measured milliseconds this call spent waiting for a prior call's restore window to
     ///     close (`0` when it did not wait).

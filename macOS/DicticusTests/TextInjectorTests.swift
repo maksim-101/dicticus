@@ -81,63 +81,30 @@ final class TextInjectorTests: XCTestCase {
 
     // MARK: - Phase 50 D-02: deliveryBlocker pure predicate
 
-    func testDeliveryBlocker_secureInputWins() {
-        XCTAssertEqual(
-            TextInjector.deliveryBlocker(secureInputEnabled: true, expectedBundleID: "com.a", currentBundleID: "com.a"),
-            .secureInput
-        )
-        XCTAssertEqual(
-            TextInjector.deliveryBlocker(secureInputEnabled: true, expectedBundleID: nil, currentBundleID: nil),
-            .secureInput
-        )
-        XCTAssertEqual(
-            TextInjector.deliveryBlocker(secureInputEnabled: true, expectedBundleID: "com.a", currentBundleID: "com.b"),
-            .secureInput
-        )
-    }
-
     func testDeliveryBlocker_frontmostChanged() {
         XCTAssertEqual(
-            TextInjector.deliveryBlocker(secureInputEnabled: false, expectedBundleID: "com.a", currentBundleID: "com.b"),
+            TextInjector.deliveryBlocker(expectedBundleID: "com.a", currentBundleID: "com.b"),
             .frontmostChanged
         )
         XCTAssertNil(
-            TextInjector.deliveryBlocker(secureInputEnabled: false, expectedBundleID: "com.a", currentBundleID: "com.a")
+            TextInjector.deliveryBlocker(expectedBundleID: "com.a", currentBundleID: "com.a")
         )
         XCTAssertNil(
-            TextInjector.deliveryBlocker(secureInputEnabled: false, expectedBundleID: nil, currentBundleID: "com.b")
+            TextInjector.deliveryBlocker(expectedBundleID: nil, currentBundleID: "com.b")
         )
         XCTAssertNil(
-            TextInjector.deliveryBlocker(secureInputEnabled: false, expectedBundleID: "com.a", currentBundleID: nil)
+            TextInjector.deliveryBlocker(expectedBundleID: "com.a", currentBundleID: nil)
         )
         XCTAssertNil(
-            TextInjector.deliveryBlocker(secureInputEnabled: false, expectedBundleID: nil, currentBundleID: nil)
+            TextInjector.deliveryBlocker(expectedBundleID: nil, currentBundleID: nil)
         )
     }
 
     func testDeliveryBlockerRawValues_matchProbeVocabulary() {
-        XCTAssertEqual(TextInjector.DeliveryBlocker.secureInput.rawValue, "secure_input")
         XCTAssertEqual(TextInjector.DeliveryBlocker.frontmostChanged.rawValue, "frontmost_changed")
     }
 
     // MARK: - Phase 50 D-02: injectText four-exit seam-driven fixtures
-
-    func testInjectText_secureInput_fallsBackToClipboardWithoutPaste() async {
-        let pasteboard = NSPasteboard.general
-        let originalSaved = injector.saveClipboard(pasteboard)
-        defer { injector.restoreClipboard(pasteboard, saved: originalSaved) }
-
-        var pasteCount = 0
-        injector.axTrustedProbe = { true }
-        injector.secureInputProbe = { true }
-        injector.pasteSynthesizer = { pasteCount += 1 }
-
-        let outcome = await injector.injectText("alpha beta", expectedFrontmostBundleID: nil)
-
-        XCTAssertEqual(outcome, .fallbackToClipboard(.secureInput))
-        XCTAssertEqual(pasteboard.string(forType: .string), "alpha beta")
-        XCTAssertEqual(pasteCount, 0)
-    }
 
     func testInjectText_frontmostChanged_fallsBackToClipboardWithoutPaste() async {
         let pasteboard = NSPasteboard.general
@@ -197,19 +164,20 @@ final class TextInjectorTests: XCTestCase {
         XCTAssertEqual(pasteboard.string(forType: .string), "before")
     }
 
-    // MARK: - Phase 50 plan 11: changeCount-guarded restore + delay floor
+    // MARK: - Phase 50 plan 11 / quick 260920-9m8 D-2: content-compare restore + delay floor
 
-    func testShouldRestoreClipboard_onlyWhenChangeCountUnchanged() {
-        XCTAssertTrue(TextInjector.shouldRestoreClipboard(changeCountAfterWrite: 41, changeCountAtRestore: 41))
-        XCTAssertFalse(TextInjector.shouldRestoreClipboard(changeCountAfterWrite: 41, changeCountAtRestore: 42))
-        XCTAssertFalse(TextInjector.shouldRestoreClipboard(changeCountAfterWrite: 41, changeCountAtRestore: 40))
+    func testShouldRestoreClipboard_contentCompareTrimmed() {
+        XCTAssertTrue(TextInjector.shouldRestoreClipboard(currentString: "alpha beta", writtenText: "alpha beta "))
+        XCTAssertTrue(TextInjector.shouldRestoreClipboard(currentString: "alpha beta \n", writtenText: "alpha beta "))
+        XCTAssertFalse(TextInjector.shouldRestoreClipboard(currentString: "copied-meanwhile", writtenText: "alpha beta "))
+        XCTAssertFalse(TextInjector.shouldRestoreClipboard(currentString: nil, writtenText: "alpha beta "))
     }
 
     func testClipboardRestoreDelay_floorPinnedAgainstReLowering() {
         XCTAssertGreaterThanOrEqual(TextInjector.clipboardRestoreDelayMilliseconds, 400)
     }
 
-    func testInjectText_delivered_skipsRestoreWhenPasteboardChangedDuringWindow() async {
+    func testInjectText_delivered_skipsRestoreWhenDifferentContentWrittenDuringWindow() async {
         let pasteboard = NSPasteboard.general
         let originalSaved = injector.saveClipboard(pasteboard)
         defer { injector.restoreClipboard(pasteboard, saved: originalSaved) }
@@ -236,6 +204,57 @@ final class TextInjectorTests: XCTestCase {
         XCTAssertEqual(outcome, .delivered)
         XCTAssertEqual(pasteCount, 1)
         XCTAssertEqual(pasteboard.string(forType: .string), "copied-meanwhile")
+    }
+
+    // MARK: - Quick 260920-9m8: secure input delivers; content-compare restore
+
+    func testInjectText_secureInput_stillDeliversAndRestoresClipboard() async {
+        let pasteboard = NSPasteboard.general
+        let originalSaved = injector.saveClipboard(pasteboard)
+        defer { injector.restoreClipboard(pasteboard, saved: originalSaved) }
+
+        pasteboard.clearContents()
+        pasteboard.setString("before", forType: .string)
+
+        var pasteCount = 0
+        injector.axTrustedProbe = { true }
+        injector.secureInputProbe = { true }
+        injector.frontmostBundleIDProvider = { "com.example.target" }
+        injector.pasteSynthesizer = { pasteCount += 1 }
+
+        let outcome = await injector.injectText("alpha beta", expectedFrontmostBundleID: "com.example.target")
+
+        XCTAssertEqual(outcome, .delivered)
+        XCTAssertEqual(pasteCount, 1)
+        XCTAssertEqual(pasteboard.string(forType: .string), "before")
+    }
+
+    func testInjectText_delivered_restoresWhenSameContentRewrittenDuringWindow() async {
+        let pasteboard = NSPasteboard.general
+        let originalSaved = injector.saveClipboard(pasteboard)
+        defer { injector.restoreClipboard(pasteboard, saved: originalSaved) }
+
+        pasteboard.clearContents()
+        pasteboard.setString("before", forType: .string)
+
+        var pasteCount = 0
+        injector.axTrustedProbe = { true }
+        injector.secureInputProbe = { false }
+        injector.frontmostBundleIDProvider = { "com.example.target" }
+        injector.pasteSynthesizer = {
+            pasteCount += 1
+            // Pure Paste.app simulation: rewrites the pasteboard as plain text after every
+            // write — bumps changeCount but leaves the same content minus the trailing space.
+            let thirdParty = NSPasteboard.general
+            thirdParty.clearContents()
+            thirdParty.setString("alpha beta", forType: .string)
+        }
+
+        let outcome = await injector.injectText("alpha beta", expectedFrontmostBundleID: "com.example.target")
+
+        XCTAssertEqual(outcome, .delivered)
+        XCTAssertEqual(pasteCount, 1)
+        XCTAssertEqual(pasteboard.string(forType: .string), "before")
     }
 
     // MARK: - Phase 50 plan 12: overlapping calls (CR-01)
