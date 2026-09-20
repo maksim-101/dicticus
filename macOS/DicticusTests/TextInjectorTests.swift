@@ -257,6 +257,29 @@ final class TextInjectorTests: XCTestCase {
         XCTAssertEqual(pasteboard.string(forType: .string), "before")
     }
 
+    // MARK: - Quick 260920-9m8 D-3: clipboard-fallback setting
+
+    func testInjectText_fallbackDisabled_leavesPasteboardUntouchedWithDistinctOutcome() async {
+        let pasteboard = NSPasteboard.general
+        let originalSaved = injector.saveClipboard(pasteboard)
+        defer { injector.restoreClipboard(pasteboard, saved: originalSaved) }
+
+        pasteboard.clearContents()
+        pasteboard.setString("before", forType: .string)
+
+        var pasteCount = 0
+        injector.axTrustedProbe = { true }
+        injector.frontmostBundleIDProvider = { "com.example.other" }
+        injector.clipboardFallbackEnabled = { false }
+        injector.pasteSynthesizer = { pasteCount += 1 }
+
+        let outcome = await injector.injectText("alpha beta", expectedFrontmostBundleID: "com.example.target")
+
+        XCTAssertEqual(outcome, .undeliverableClipboardUntouched(.frontmostChanged))
+        XCTAssertEqual(pasteCount, 0)
+        XCTAssertEqual(pasteboard.string(forType: .string), "before")
+    }
+
     // MARK: - Phase 50 plan 12: overlapping calls (CR-01)
 
     func testInjectText_overlappingCalls_restoresUserOriginalClipboard() async {

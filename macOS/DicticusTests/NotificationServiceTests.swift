@@ -33,7 +33,8 @@ final class NotificationServiceTests: XCTestCase {
             .modelLoading,
             .transcriptionFailed(NSError(domain: "test", code: 1)),
             .recordingFailed(NSError(domain: "test", code: 2)),
-            .pasteUndeliverable
+            .pasteUndeliverable,
+            .pasteUndeliverableClipboardUntouched
         ]
         for notification in cases {
             XCTAssertEqual(notification.title, "Dicticus", "Title mismatch for \(notification)")
@@ -45,6 +46,14 @@ final class NotificationServiceTests: XCTestCase {
     func testPasteUndeliverableMessage() {
         let notification = DicticusNotification.pasteUndeliverable
         XCTAssertEqual(notification.message, "Couldn't paste \u{2014} text is on your clipboard, \u{2318}V to paste.")
+        XCTAssertEqual(notification.title, "Dicticus")
+    }
+
+    // MARK: - Quick 260920-9m8 D-3: clipboard-fallback-disabled notification
+
+    func testPasteUndeliverableClipboardUntouchedMessage() {
+        let notification = DicticusNotification.pasteUndeliverableClipboardUntouched
+        XCTAssertEqual(notification.message, "Couldn't paste \u{2014} open Dicticus to copy the transcript.")
         XCTAssertEqual(notification.title, "Dicticus")
     }
 
@@ -73,6 +82,7 @@ final class NotificationServiceTests: XCTestCase {
         XCTAssertEqual(recordingFailed.caseName, "recordingFailed")
 
         XCTAssertEqual(DicticusNotification.pasteUndeliverable.caseName, "pasteUndeliverable")
+        XCTAssertEqual(DicticusNotification.pasteUndeliverableClipboardUntouched.caseName, "pasteUndeliverableClipboardUntouched")
         XCTAssertEqual(DicticusNotification.cleanupSkippedTooLong.caseName, "cleanupSkippedTooLong")
     }
 }

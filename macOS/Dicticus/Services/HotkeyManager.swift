@@ -295,19 +295,23 @@ class HotkeyManager: ObservableObject {
         return .abortLlmLoading
     }
 
-    /// What `handleKeyUp` should tell the user, given a paste `Outcome` (Phase 50 D-02, WR-03).
-    /// Only `.fallbackToClipboard` (either `DeliveryBlocker`) is worth a notification — the
-    /// transcript is sitting on the clipboard as a real user copy and the user should know to
-    /// paste it manually. `.delivered` needs nothing. `.blocked` is silent for all three of its
-    /// causes: accessibility already posted its own notification, a failed clipboard write
-    /// restored the original silently, and a call cancelled mid-wait (WR-07) never touched the
-    /// clipboard at all — a `.pasteUndeliverable` notice for any of these would be a lie. `static`
-    /// so it is testable without constructing a `HotkeyManager`; left MainActor-isolated with the
-    /// enclosing class since `TextInjector.Outcome` is nested in a `@MainActor` type.
+    /// What `handleKeyUp` should tell the user, given a paste `Outcome` (Phase 50 D-02, WR-03;
+    /// D-3 revised by quick 260920-9m8). Both undeliverable outcomes are worth a notification,
+    /// each with the wording that is true for its clipboard state: `.fallbackToClipboard` means
+    /// the transcript is sitting on the clipboard as a real user copy; `.undeliverableClipboardUntouched`
+    /// means the fallback setting is off and the pasteboard was never touched. `.delivered` needs
+    /// nothing. `.blocked` is silent for all three of its causes: accessibility already posted its
+    /// own notification, a failed clipboard write restored the original silently, and a call
+    /// cancelled mid-wait (WR-07) never touched the clipboard at all — a paste-undeliverable
+    /// notice for any of these would be a lie. `static` so it is testable without constructing a
+    /// `HotkeyManager`; left MainActor-isolated with the enclosing class since `TextInjector.Outcome`
+    /// is nested in a `@MainActor` type.
     static func notification(for outcome: TextInjector.Outcome) -> DicticusNotification? {
         switch outcome {
         case .fallbackToClipboard:
             return .pasteUndeliverable
+        case .undeliverableClipboardUntouched:
+            return .pasteUndeliverableClipboardUntouched
         case .delivered, .blocked:
             return nil
         }

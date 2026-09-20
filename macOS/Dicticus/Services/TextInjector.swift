@@ -50,8 +50,13 @@ class TextInjector {
         /// unless something else wrote to the pasteboard during the wait (Phase 50 plan 11).
         case delivered
         /// The pre-check failed before any paste was attempted; the transcript is left on the
-        /// general pasteboard as a real user copy (no trailing space, no restore — D-02).
+        /// general pasteboard as a real user copy (no trailing space, no restore — D-02;
+        /// setting on, the default).
         case fallbackToClipboard(DeliveryBlocker)
+        /// Quick 260920-9m8 D-3: the pre-check failed and `clipboardFallbackEnabled()` was
+        /// false — nothing was written to the pasteboard; distinct from `.blocked` because the
+        /// user should still be told.
+        case undeliverableClipboardUntouched(DeliveryBlocker)
         /// Accessibility was untrusted, the clipboard write itself failed, or the call was
         /// cancelled while waiting out a prior call's busy window (WR-07, 50-REVIEW.md) —
         /// unchanged from the pre-Phase-50 behaviour for the first two (AX already notifies; a
@@ -124,6 +129,14 @@ class TextInjector {
     var axTrustedProbe: () -> Bool = { AXIsProcessTrusted() }
     var secureInputProbe: () -> Bool = { IsSecureEventInputEnabled() }
     var frontmostBundleIDProvider: () -> String? = { NSWorkspace.shared.frontmostApplication?.bundleIdentifier }
+    /// Quick 260920-9m8 D-3: same default-ON-when-absent idiom as `MediaPauseToggleRow` /
+    /// `pauseMediaDuringDictation` — evaluated per `injectText` call so a toggle flip in
+    /// `ClipboardFallbackToggleRow` takes effect on the next dictation without restart.
+    var clipboardFallbackEnabled: () -> Bool = {
+        UserDefaults.standard.object(forKey: "leaveTranscriptOnClipboardWhenUndeliverable") == nil
+            ? true
+            : UserDefaults.standard.bool(forKey: "leaveTranscriptOnClipboardWhenUndeliverable")
+    }
     var pasteSynthesizer: (() -> Void)?
 
     /// Phase 50 plan 12 (CR-01): set right after a delivered paste's synthesized Cmd+V, to
@@ -135,10 +148,12 @@ class TextInjector {
 
     /// Inject text at the current cursor position.
     ///
-    /// Pipeline (Phase 50 D-02/D-05; D-1/D-2 revised by quick 260920-9m8):
+    /// Pipeline (Phase 50 D-02/D-05; D-1/D-2/D-3 revised by quick 260920-9m8):
     ///   1. Guard: verify Accessibility permission (CGEvent.post fails silently without it) — exit `ax_untrusted`
-    ///   2. Delivery pre-check: frontmost-app change only — exit `delivery_precheck_failed`,
-    ///      leaves the transcript on the clipboard as a real user copy (no save/restore, no trailing space)
+    ///   2. Delivery pre-check: frontmost-app change only — exit `delivery_precheck_failed`. If
+    ///      `clipboardFallbackEnabled()` (D-3, default ON), leaves the transcript on the clipboard
+    ///      as a real user copy (no save/restore, no trailing space); if OFF, touches the
+    ///      pasteboard not at all.
     ///   3. Save current clipboard contents (all types per item) — after waiting for a prior
     ///      call's restore window to close (Phase 50 plan 12, CR-01)
     ///   4. Clear clipboard and write transcription text as plain string — exit `clipboard_write_failed`
@@ -152,7 +167,7 @@ class TextInjector {
     ///   - text: The transcription text to inject.
     ///   - expectedFrontmostBundleID: The frontmost app's bundle id captured at hotkey RELEASE
     ///     (nil for callers with no release instant, e.g. `revertToRaw` — an unknown id never blocks).
-    /// - Returns: `.delivered`, `.fallbackToClipboard(blocker)`, or `.blocked`.
+    /// - Returns: `.delivered`, `.fallbackToClipboard(blocker)`, `.undeliverableClipboardUntouched(blocker)`, or `.blocked`.
     @discardableResult
     func injectText(_ text: String, expectedFrontmostBundleID: String? = nil) async -> Outcome {
         // Guard: Accessibility must be granted or CGEvent.post silently fails
@@ -199,21 +214,37 @@ class TextInjector {
             expectedBundleID: expectedFrontmostBundleID,
             currentBundleID: currentBundleID
         ) {
-            // The fallback IS the user's copy (D-02) — deliberately no save/restore of the
-            // prior clipboard and no trailing space; `backlog/pasteboard-transient-marker.md`'s
-            // transient marker is scoped to the normal path only, not this one.
-            pasteboard.clearContents()
-            _ = pasteboard.setString(text, forType: .string)
-            #if DEBUG_RECORDER
-            await PasteProbe.shared.record(
-                secureInputEnabled: secureInput,
-                injectionSucceeded: false,
-                exit: "delivery_precheck_failed",
-                failureSignal: blocker.rawValue,
-                waitedForPriorMs: waitedForPriorMs
-            )
-            #endif
-            return .fallbackToClipboard(blocker)
+            if clipboardFallbackEnabled() {
+                // The fallback IS the user's copy (D-02) — deliberately no save/restore of the
+                // prior clipboard and no trailing space; `backlog/pasteboard-transient-marker.md`'s
+                // transient marker is scoped to the normal path only, not this one.
+                pasteboard.clearContents()
+                _ = pasteboard.setString(text, forType: .string)
+                #if DEBUG_RECORDER
+                await PasteProbe.shared.record(
+                    secureInputEnabled: secureInput,
+                    injectionSucceeded: false,
+                    exit: "delivery_precheck_failed",
+                    failureSignal: blocker.rawValue,
+                    waitedForPriorMs: waitedForPriorMs
+                )
+                #endif
+                return .fallbackToClipboard(blocker)
+            } else {
+                // Quick 260920-9m8 D-3: the fallback setting is off — no pasteboard call of any
+                // kind. The ON/OFF distinction is already visible in the notification log's
+                // `post case=` line; no new PasteProbe fields.
+                #if DEBUG_RECORDER
+                await PasteProbe.shared.record(
+                    secureInputEnabled: secureInput,
+                    injectionSucceeded: false,
+                    exit: "delivery_precheck_failed",
+                    failureSignal: blocker.rawValue,
+                    waitedForPriorMs: waitedForPriorMs
+                )
+                #endif
+                return .undeliverableClipboardUntouched(blocker)
+            }
         }
 
         // Step 1: Save original clipboard contents

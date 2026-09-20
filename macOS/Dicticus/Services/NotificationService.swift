@@ -32,6 +32,9 @@ enum DicticusNotification {
     /// Phase 50 D-02: paste delivery pre-check failed — the transcript is on the clipboard as a
     /// real copy.
     case pasteUndeliverable
+    /// Quick 260920-9m8 D-3: pre-check failed and the clipboard fallback setting is off — the
+    /// pasteboard was not touched; the transcript is in history and the popover's last transcript.
+    case pasteUndeliverableClipboardUntouched
 
     /// Notification title — always "Dicticus" per UI-SPEC copywriting contract.
     var title: String { "Dicticus" }
@@ -65,6 +68,8 @@ enum DicticusNotification {
             return "AI model still loading, please wait a moment."
         case .pasteUndeliverable:
             return "Couldn't paste \u{2014} text is on your clipboard, \u{2318}V to paste."
+        case .pasteUndeliverableClipboardUntouched:
+            return "Couldn't paste \u{2014} open Dicticus to copy the transcript."
         }
     }
 
@@ -83,6 +88,7 @@ enum DicticusNotification {
         case .cleanupTimedOut: return "cleanupTimedOut"
         case .llmLoading: return "llmLoading"
         case .pasteUndeliverable: return "pasteUndeliverable"
+        case .pasteUndeliverableClipboardUntouched: return "pasteUndeliverableClipboardUntouched"
         }
     }
 }
