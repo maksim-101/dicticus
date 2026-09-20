@@ -3,7 +3,7 @@ import LaunchAtLogin
 
 /// Settings → General pane.
 ///
-/// Group "Startup & behavior": Launch at login + Media pause toggle.
+/// Group "Startup & behavior": Launch at login + Media pause toggle + Clipboard fallback toggle.
 /// Group "History": Copy-mode (Raw/Polished) picker with footer.
 /// Last row (Q-01 fallback): Quit Dicticus.
 ///
@@ -16,6 +16,8 @@ struct GeneralPane: View {
                 LaunchAtLogin.Toggle("Launch at login")
 
                 MediaPauseToggleRow()
+
+                ClipboardFallbackToggleRow()
             }
 
             Section {
