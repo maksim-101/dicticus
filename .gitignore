@@ -8,6 +8,9 @@ iOS/build/
 # GitHub Releases, not via git.
 Dicticus.dmg
 *.dmg
+release-archive/
+# Crash reports dropped into the repo root for a debugging session — never tracked.
+/*.rtf
 
 # GSD planning artifacts — research notes, plan docs, UAT transcripts (which
 # include actual user dictation samples). Local-only working files; not for

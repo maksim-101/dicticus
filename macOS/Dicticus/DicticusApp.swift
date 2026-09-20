@@ -133,6 +133,14 @@ struct DicticusApp: App {
                         hotkeyManager.cleanupService = cleanup
                     }
                 }
+                // NSApplication.terminate ends in exit(), so no Swift deinit ever frees a
+                // loaded LLM; llama.cpp's Metal teardown then aborts in ggml_metal_rsets_free
+                // ("haven't deallocated all Metal resources before exiting") — a crash report
+                // on every quit with the model loaded (crash report 2026-09-16, llama.swift
+                // 2.8833). Free it here, before exit runs the static destructors.
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+                    warmupService.cleanupServiceInstance?.unload()
+                }
                 // Stage Manager fix: listen for auxiliary-window open/close notifications
                 // posted by DictionaryView, HistoryView, and SettingsRoot (Finding 5).
                 .onReceive(NotificationCenter.default.publisher(for: .dicticusAuxWindowOpened)) { _ in
