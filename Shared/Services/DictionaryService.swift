@@ -105,6 +105,13 @@ class DictionaryService: ObservableObject {
     /// Loaded once at init from `Shared/Resources/allowlist-{en,de}.txt`.
     private let commonWords: Set<String>
 
+    /// Quick 260926-bcc: the comprehensive 518k-word EN+DE lexicon Guard A
+    /// also consults (BrandMatcher.combinedLexicon). Assigned once at init
+    /// from `BrandMatcher.shared` — assigning a `Set` shares its backing
+    /// storage, so this is not a second in-memory copy. DictionaryService
+    /// must never read the lexicon `.txt` files itself.
+    private let lexiconWords: Set<String>
+
     /// Test-only accessor for the loaded allowlist. Used by
     /// `DictionaryServiceHallucinationGuardTests.testAllowlistLoadedFromBundle`.
     internal var commonWordsForTests: Set<String> { commonWords }
@@ -119,6 +126,7 @@ class DictionaryService: ObservableObject {
     private init() {
         self.isCaseSensitive = Self.defaults.bool(forKey: Self.caseSensitiveKey)
         self.commonWords = Self.loadCommonWords()
+        self.lexiconWords = BrandMatcher.shared.combinedLexicon
         // DATA-LOSS GUARD (2026-07-19). loadGuarded returns suppressSeed == true
         // when a persisted dictionary blob is PRESENT but reads empty (a transient
         // UserDefaults/cfprefsd read/decode failure on relaunch) — in which case
@@ -702,8 +710,9 @@ class DictionaryService: ObservableObject {
     /// ≥ 6 (single-token only) where `abs(token.count - key.count) <= 2`.
     ///
     /// Phase 27 D-01 defense-in-depth: each candidate must pass BOTH (a) the
-    /// common-word allowlist veto (D-01a) and (b) the Levenshtein ratio cap
-    /// (D-01b, D-03) before a replacement fires.
+    /// real-word veto — allowlist + bundled lexicon, extended 260926-bcc —
+    /// and (b) the Levenshtein ratio cap (D-01b, D-03) before a replacement
+    /// fires.
     ///
     /// Length-prefilter ≥ 6 is mandatory: distance-2 matches against short tokens
     /// (e.g. `the`/`she`) catastrophically false-positive. Multi-word keys are
@@ -835,9 +844,21 @@ class DictionaryService: ObservableObject {
         // inputs Guard A is built to protect.
         let lowered = token.lowercased().precomposedStringWithCanonicalMapping
 
-        // Guard A (D-01a, D-04): allowlist veto. Common English/German words
-        // never become fuzzy candidates regardless of distance.
-        if commonWords.contains(lowered) {
+        // Guard A (D-01a, D-04; extended 260926-bcc): real-word veto. A token
+        // is never a fuzzy candidate if it is a correctly spelled word — first
+        // checked against the small allowlist, then against the bundled
+        // 518k-word EN+DE lexicon (the same lexicon BrandMatcher uses, so the
+        // process holds one copy). Exact NFC-lowercased membership only, no
+        // inflection backoff: the plan-time probe (quick 260926-bcc) found
+        // that backoff changes 0 of 35 real mishearing keys in this user's
+        // dictionary. A lexicon miss only preserves prior behaviour (no
+        // regression) — see quick 260926-bcc for why a platform spell
+        // checker (SpellLexicon's case for the opposite failure direction)
+        // is not used here. Traced case: "this safeguard" -> "this
+        // Cellguard" via key "SalGuard" (ratio 0.222, under the 0.25 cap).
+        // This veto never emits a BlockedMatch — `dictionary_blocked` means
+        // "ratio cap blocked", a distinct telemetry signal.
+        if commonWords.contains(lowered) || lexiconWords.contains(lowered) {
             return (token, nil, nil)
         }
 
