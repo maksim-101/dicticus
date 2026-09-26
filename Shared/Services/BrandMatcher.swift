@@ -129,7 +129,10 @@ final class BrandMatcher {
     // MARK: - State (immutable after init)
 
     private let baseCanonicals: [String]
-    private let combinedLexicon: Set<String>
+    /// Quick 260926-bcc: internal (not private) so `DictionaryService`'s fuzzy
+    /// pass can read the same Set as its real-word veto — one 518k-word
+    /// lexicon resident per process, not two copies.
+    let combinedLexicon: Set<String>
 
     /// Runtime union source for the canonical list: the user's LOCAL
     /// `DictionaryService` replacement targets. Injected as a closure so this
