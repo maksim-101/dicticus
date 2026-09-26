@@ -2123,11 +2123,17 @@ public enum EditGuard {
     /// very`, `really really`, `no no`, `like like`) is not excluded — the
     /// LLM kept every corpus occurrence, so there is no measured defect to
     /// fix, and collapsing one would only drop emphasis, not propositional
-    /// content, if the LLM ever did delete one. A German finite verb doubled
-    /// after a fronted clause ("hat hat") is not excluded beyond `ist`/
-    /// `war`. Word-to-punctuation substitute drops that
-    /// `disfluencyAcceptedIndices` also counts are out of scope — clause (a)
-    /// requires an actual `.delete`.
+    /// content, if the LLM ever did delete one. Particle-plus-preposition
+    /// doubles ("log in in the app") are not excluded either: both corpus
+    /// `in in` occurrences are genuine stutters and are two of the measured
+    /// fixes. A triple ("for for for") collapses by one copy only, because
+    /// only the delete whose baseline neighbour is a `.keep` qualifies — the
+    /// other delete's neighbour is itself a deleted token, so clause (b)
+    /// never fires for it. A German finite verb doubled after a fronted
+    /// clause ("hat hat") is not excluded beyond `ist`/`war`.
+    /// Word-to-punctuation substitute drops that `disfluencyAcceptedIndices`
+    /// also counts are out of scope — clause (a) requires an actual
+    /// `.delete`.
     private static func isExactAdjacentStutterDelete(at i: Int, edits: [Edit], language: String) -> Bool {
         // (a) a `.delete` of a baseline word token.
         guard edits[i].kind == .delete,
