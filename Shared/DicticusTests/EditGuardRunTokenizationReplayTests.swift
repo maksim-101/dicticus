@@ -94,6 +94,17 @@ import XCTest
 /// `testKnownDefectStringsNeverReturn_49_6_gaps` below pins plan 06's two
 /// D-15 synthetic defect substrings independently, per the same discipline
 /// as the blocks above. Full evidence: `49.6-GATE-DIFF-2.md` §1c.
+///
+/// Quick task 260926-bbz (2026-09-26): re-baselined a THIRD time, on top of
+/// `EditGuard.isUtteranceFinalTerminalMarkInsert` (the utterance-final
+/// terminal mark exemption). Exactly one committed golden entry changed:
+/// - `record-260723-rif-offorheartrate` — FINAL-MARK-RESTORED: the LLM's
+///   trailing `.` (inserted after "up", the last raw token) now survives
+///   the sentence's coupled revert instead of being dropped with it; AFTER
+///   = the 49.6-lock value plus one trailing `.`. Full evidence, including
+///   the 216-record live-corpus replay bar and the three other committed
+///   test-file changes this task made: `260926-bbz-GATE-DIFF.md` §6.
+/// No other golden entry's value changed this run.
 @MainActor
 final class EditGuardRunTokenizationReplayTests: XCTestCase {
 
@@ -122,8 +133,12 @@ final class EditGuardRunTokenizationReplayTests: XCTestCase {
             "No, the corporate style-guide convention is not about writing something like \"situation\" or \"assessment\" in capital letters. It's about geographic names and also entities, I believe. But fact check that.",
         "record-260724-j96-havingseeking":
             "The title at the top meaning when was this report generated or what time period is this referring to can be a little bit more prominent. So as not to having to seek what time period this report is about.",
+        // Quick task 260926-bbz: re-baselined a THIRD time — see the dated
+        // paragraph below. The LLM's utterance-final "." (inserted after
+        // "up", the last raw token) is now exempt from the sentence's
+        // coupled revert.
         "record-260723-rif-offorheartrate":
-            "She wants to be able to click in a dial and move the finger around to see individual data points. Like what was the value at any given time of heartrate for instance and then also along the way lost the info about the workouts so when I click on the workouts a small pop-up should show up",
+            "She wants to be able to click in a dial and move the finger around to see individual data points. Like what was the value at any given time of heartrate for instance and then also along the way lost the info about the workouts so when I click on the workouts a small pop-up should show up.",
         "record-260723-rif-itsis":
             "Also in the current layout it's unclear to what time period this report is referring to.",
         "record-260723-rif-wannato":

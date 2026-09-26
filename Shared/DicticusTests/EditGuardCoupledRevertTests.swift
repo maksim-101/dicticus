@@ -40,10 +40,14 @@ final class EditGuardCoupledRevertTests: XCTestCase {
     /// sentence, separated by one `.keep` so `applyAtomicGroupCoupling` does
     /// not already cluster them together. Invented topic: a status report
     /// sent to a fictional agency.
+    // Quick task 260926-bbz: the LLM's utterance-final `.` (inserted after
+    // "AG", the last raw token, with nothing baseline-anchored after it) is
+    // now exempt from this sentence's coupled revert — re-baselined from
+    // `baseline` to `baseline + "."`. Every other assertion is unchanged.
     func testShapeA_functionSubstituteAcceptedContentSubstituteRejected() {
         let baseline = "Der Bericht denke ich morgen an die Firnwald Logistik AG"
         let llm = "Den Bericht schicke ich morgen an die Firnwald Logistik AG."
-        let expected = baseline
+        let expected = baseline + "."
         let out = guardOut(baseline, llm)
         let result = guardResult(baseline, llm)
         XCTAssertEqual(out, expected)
@@ -159,10 +163,13 @@ final class EditGuardCoupledRevertTests: XCTestCase {
     /// correct move. The replay (plan 04) must count this as REVERT-TO-RAW,
     /// never REGRESSION (D-01, D-07) — this is the accepted cost the user
     /// signed off on, not a defect.
+    // Quick task 260926-bbz: the LLM's utterance-final `.` (inserted after
+    // "war", the last raw token) is now exempt — re-baselined from
+    // `baseline` to `baseline + "."`. Every other assertion is unchanged.
     func testShapeG_farVerbSecondRepairRevertsToRaw_acceptedCost() {
         let baseline = "Gestern ich habe den Bericht an die Agentur Haldenwerk geschickt weil der Termin knapp war"
         let llm = "Gestern habe ich den Bericht an die Agentur Haldenwerk gesendet, weil der Termin knapp war."
-        let expected = baseline
+        let expected = baseline + "."
         let out = guardOut(baseline, llm)
         let result = guardResult(baseline, llm)
         XCTAssertEqual(out, expected)
