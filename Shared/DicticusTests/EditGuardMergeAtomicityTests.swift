@@ -145,7 +145,10 @@ final class EditGuardMergeAtomicityTests: XCTestCase {
         // rejections, so the whole-sentence coupled revert now takes the
         // once-independent comma inserts and "So" capitalization down with
         // it too (D-05: no run-on cap) — full revert to baseline.
-        let expected = baseline
+        // Quick task 260926-bbz: the LLM's utterance-final `.` (inserted
+        // after "up", the last raw token) is now exempt from that revert —
+        // re-baselined to `baseline + "."`.
+        let expected = baseline + "."
         let out = guardOut(baseline, llm)
         XCTAssertEqual(out, expected)
         assertNeitherSourceClean(out, baseline, llm)

@@ -1728,6 +1728,10 @@ public enum EditGuard {
     /// pairing was never crossed. `EditDiff.pairAdjacentSubstitutes` itself
     /// remains byte-untouched — the fix is purely in how `materialize`
     /// renders an already-rejected substitute pair.
+    ///
+    /// Quick task 260926-bbz: the final flip loop below additionally
+    /// exempts the utterance-final terminal mark — see
+    /// `isUtteranceFinalTerminalMarkInsert`'s doc comment.
     private static func applyAtomicGroupCoupling(edits: [Edit], verdicts: inout [ClassifiedEdit]) {
         guard !edits.isEmpty else { return }
 
@@ -1843,7 +1847,12 @@ public enum EditGuard {
                   // The tier-1 neither-source checker strips punctuation
                   // before building word bigrams, so this partial acceptance
                   // is tier-1-clean by construction, not by measurement.
-                  verdicts[i].acceptClass != AcceptClass.pauseSplitMerge.rawValue
+                  verdicts[i].acceptClass != AcceptClass.pauseSplitMerge.rawValue,
+                  // Quick task 260926-bbz: the utterance-final terminal
+                  // mark is exempt from this flip too — see
+                  // `isUtteranceFinalTerminalMarkInsert`'s doc comment for
+                  // why both flip loops in this file consult it.
+                  !isUtteranceFinalTerminalMarkInsert(at: i, edits: edits, verdicts: verdicts)
             else { continue }
             verdicts[i] = ClassifiedEdit(
                 kind: verdicts[i].kind, from: verdicts[i].from, to: verdicts[i].to,
@@ -1933,6 +1942,98 @@ public enum EditGuard {
         AcceptClass.inflectionFix.rawValue,
     ]
 
+    /// Quick task 260926-bbz: is the edit at `edits[i]` the LLM's
+    /// utterance-final terminal mark — an insert this guard must never let
+    /// a coupled revert sweep away, however it exempts one from both flip
+    /// loops below.
+    ///
+    /// **D-02's criterion:** 49.6 D-02 lists the SELF-CONTAINED survive
+    /// classes as the edits whose correctness can be judged from the edit's
+    /// OWN token alone, with no dependency on sentence context. A `.`/`?`/
+    /// `!` inserted directly after the LAST raw (baseline) token, with
+    /// nothing baseline-anchored after it, is exactly that: nothing further
+    /// in the raw utterance exists for the mark to be wrong ABOUT. **Why
+    /// D-15's shape cannot occur here:** D-15's boundary-coupling loop
+    /// exists because a restored mid-utterance mark can be followed by a
+    /// raw sentence N+1 whose first word needs its casing coupled back down
+    /// — that requires a sentence N+1 to exist. An utterance-final mark has
+    /// no sentence N+1; the shape D-15 guards against is structurally
+    /// absent.
+    ///
+    /// **Why both flip loops consult this (pass order, re-invocation):**
+    /// `applyAtomicGroupCoupling` runs before `applySentenceCoupledRevert`
+    /// at every `rebuild` call site. When the last raw word is itself a
+    /// rejected substitute, the final mark shares its keep-bounded cluster
+    /// and would be swept by atomic coupling before SCR ever sees it (the
+    /// audit measured 2/120 of the missing-mark defects this way) — an
+    /// SCR-only exemption would miss these. Symmetrically, on a mood-lock
+    /// re-invocation (`rebuild`'s second and third call sites), atomic
+    /// coupling treats SCR's own earlier flips as rejections; if SCR had
+    /// reverted an accepted last-word substitute (a casing fix or an
+    /// `inflectionFix`) on an earlier call, a later atomic-coupling pass
+    /// would then sweep the mark unless it independently knows to leave it
+    /// alone. One predicate, consulted by both loops, is immune to which
+    /// pass runs first or how many times either re-runs.
+    ///
+    /// **Why it is structural:** every clause below is derived from `edits`
+    /// alone, apart from clause (d)'s mood carve-out — so the predicate's
+    /// answer is idempotent across all three `rebuild` call sites and
+    /// immune to flip order inside a loop. The mood carve-out can only
+    /// WITHDRAW an already-granted exemption, never grant one: mood-lock
+    /// rejections only accumulate across the bounded 2-attempt loop, so the
+    /// accept-to-reject monotonicity every other coupling pass in this file
+    /// holds is preserved here too.
+    ///
+    /// **Accepted costs (measured against the live-corpus replay, quick
+    /// task 260926-bbz):** a mark that lands after an LLM-INSERTED word (the
+    /// existing 49.6 Shapes C/D — the LLM added a whole clause the raw
+    /// speech never anchors) is NOT exempt, because clause (c) requires the
+    /// edit immediately before the mark to be a `.keep`/`.substitute` of the
+    /// baseline's own last word, not an accepted insert. A multi-character
+    /// run (`...`, `?!`, or a mark glued to a following quote) is NEVER
+    /// exempt: `sentenceTerminalMarks` holds only the three single-character
+    /// forms, so a run token's `text` never matches clause (a). A mark
+    /// following a dangling FUNCTION word the raw utterance trails off on is
+    /// exempt (measured: 1/74 of the replay's restored marks) — this
+    /// predicate judges the edit, not the word's part of speech. A `?`'s
+    /// mood rests entirely on whether the LLM's own reading of the raw
+    /// clause triggered `moodLockSentenceInitialVerb` elsewhere in this
+    /// `rebuild` call — clause (d) is the only place this predicate looks
+    /// outside the mark's own edit.
+    private static func isUtteranceFinalTerminalMarkInsert(
+        at i: Int, edits: [Edit], verdicts: [ClassifiedEdit]
+    ) -> Bool {
+        // (a) a single-character sentence-terminal mark, inserted.
+        guard edits[i].kind == .insert,
+              let to = edits[i].to,
+              to.kind == .punctuation,
+              sentenceTerminalMarks.contains(to.text)
+        else { return false }
+        // (b) the last edit in the array — nothing baseline-anchored, and
+        // no other insert or move, follows it.
+        guard i == edits.count - 1 else { return false }
+        // (c) directly preceded by a keep/substitute of the last raw
+        // (baseline) token — never a delete, insert, or move, which also
+        // excludes a moved last word (the move's own `from.index` would be
+        // the maximum, but its `kind` is `.move`, not `.keep`/`.substitute`).
+        guard i > 0 else { return false }
+        let prev = edits[i - 1]
+        guard prev.kind == .keep || prev.kind == .substitute,
+              let prevFrom = prev.from,
+              prevFrom.kind != .punctuation
+        else { return false }
+        let maxFromIndex = edits.compactMap { $0.from?.index }.max()
+        guard prevFrom.index == maxFromIndex else { return false }
+        // (d) mood carve-out: a `?`/`!` insert is withdrawn if this
+        // `rebuild` call's mood lock fired anywhere in the utterance — a
+        // mood-locked question would otherwise ship "Er kommt morgen?".
+        if moodMarks.contains(to.text),
+           verdicts.contains(where: { $0.rejectClass == RejectionClass.moodLockSentenceInitialVerb.rawValue }) {
+            return false
+        }
+        return true
+    }
+
     /// Phase 49.6 (EDITGUARD-03, D-01..D-06): the sixth coupling pass —
     /// the raw-SENTENCE coupled revert. Audit finding 3
     /// (`.planning/research/v2.6-log-audit-2026-09-10.md`): six live
@@ -2015,6 +2116,10 @@ public enum EditGuard {
     /// edit that sits in the same keep-bounded run as an edit this pass
     /// flipped on an earlier call — an accepted consequence: the direction
     /// is always toward raw, and the replay reports it.
+    ///
+    /// Quick task 260926-bbz: the main flip loop below additionally exempts
+    /// the utterance-final terminal mark — see
+    /// `isUtteranceFinalTerminalMarkInsert`'s doc comment.
     private static func applySentenceCoupledRevert(edits: [Edit], verdicts: inout [ClassifiedEdit]) {
         guard !edits.isEmpty else { return }
 
@@ -2035,7 +2140,11 @@ public enum EditGuard {
                   let acceptClass = verdicts[i].acceptClass,
                   sentenceRevertContextDependentClasses.contains(acceptClass),
                   let sentenceIndex = baselineSentenceIndex(ofEditAt: i, in: edits),
-                  triggered.contains(sentenceIndex)
+                  triggered.contains(sentenceIndex),
+                  // Quick task 260926-bbz: the utterance-final terminal
+                  // mark survives this pass too — see
+                  // `isUtteranceFinalTerminalMarkInsert`'s doc comment.
+                  !isUtteranceFinalTerminalMarkInsert(at: i, edits: edits, verdicts: verdicts)
             else { continue }
             verdicts[i] = ClassifiedEdit(
                 kind: verdicts[i].kind, from: verdicts[i].from, to: verdicts[i].to,

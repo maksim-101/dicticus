@@ -9,6 +9,7 @@ Dicticus is a fully local, on-device dictation app (ASR via WhisperKit/Whisper l
 ## Unreleased
 
 - **Fixed: correctly spelled words are no longer swapped for a similar-looking dictionary entry** — the dictionary's near-match correction could turn a real word such as "safeguard" into an unrelated entry two letters away; words in Dicticus's bundled English and German word lists are now never near-match-corrected, while misspellings such as "Tailscele" still correct to Tailscale. macOS + iOS.
+- **Fixed: the closing period or question mark could disappear after AI cleanup** — whenever EditGuard reverted a sentence around a rejected content edit, the mark the AI had added at the very end of your dictation was reverted along with it, even though nothing else in the sentence depended on it. Replayed against two weeks of real dictations, the share of AI-cleaned dictations missing a closing mark dropped from 12.9% to 4.5%; the rest of that sentence still reverts as before. macOS + iOS.
 
 ---
 
