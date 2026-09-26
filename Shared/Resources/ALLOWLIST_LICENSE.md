@@ -10,7 +10,7 @@ Methodology: top 1000 lemmas per language, lowercased, filtered to entries match
 
 ## Brand-matcher lexicon (`lexicon-en.txt`, `lexicon-de.txt`)
 
-The files `lexicon-en.txt` and `lexicon-de.txt` are the comprehensive common-word guard for the Phase 36.5 brand-name matcher (BMATCH-02). They are SEPARATE from the small `allowlist-{en,de}.txt` above (which powers the tuned `DictionaryService` fuzzy pass and is left unperturbed). The matcher only fires on tokens ABSENT from these lexicons; a curated stoplist provably failed (spike-009 `could → Claude ×56`), so a comprehensive list is required.
+The files `lexicon-en.txt` and `lexicon-de.txt` are the comprehensive common-word guard for the Phase 36.5 brand-name matcher (BMATCH-02). The matcher only fires on tokens ABSENT from these lexicons; a curated stoplist provably failed (spike-009 `could → Claude ×56`), so a comprehensive list is required. Since quick 260926-bcc, the same lexicon also backs `DictionaryService`'s fuzzy-pass real-word veto (Guard A), and the small `allowlist-{en,de}.txt` above is retained as a subset.
 
 Source: hermitdave/FrequencyWords (https://github.com/hermitdave/FrequencyWords, commit `master`), files `content/2018/en/en_full.txt` and `content/2018/de/de_full.txt` — OpenSubtitles 2018 per-language surface-form frequency lists (inflected forms included naturally).
 
