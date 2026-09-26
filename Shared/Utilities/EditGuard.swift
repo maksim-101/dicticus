@@ -1732,7 +1732,12 @@ public enum EditGuard {
     /// Quick task 260926-bbz: the final flip loop below additionally
     /// exempts the utterance-final terminal mark — see
     /// `isUtteranceFinalTerminalMarkInsert`'s doc comment.
-    private static func applyAtomicGroupCoupling(edits: [Edit], verdicts: inout [ClassifiedEdit]) {
+    ///
+    /// Quick task 260926-dbi: the final flip loop below also exempts an
+    /// exact-adjacent-stutter delete — see
+    /// `isExactAdjacentStutterDelete`'s doc comment for why this pass must
+    /// consult it too, not just `applySentenceCoupledRevert`.
+    private static func applyAtomicGroupCoupling(edits: [Edit], verdicts: inout [ClassifiedEdit], language: String) {
         guard !edits.isEmpty else { return }
 
         // Step 1: assign a cluster id to each maximal run of consecutive
@@ -1852,7 +1857,11 @@ public enum EditGuard {
                   // mark is exempt from this flip too — see
                   // `isUtteranceFinalTerminalMarkInsert`'s doc comment for
                   // why both flip loops in this file consult it.
-                  !isUtteranceFinalTerminalMarkInsert(at: i, edits: edits, verdicts: verdicts)
+                  !isUtteranceFinalTerminalMarkInsert(at: i, edits: edits, verdicts: verdicts),
+                  // Quick task 260926-dbi: an exact-adjacent-stutter delete
+                  // is exempt from this flip too — see
+                  // `isExactAdjacentStutterDelete`'s doc comment.
+                  !isExactAdjacentStutterDelete(at: i, edits: edits, language: language)
             else { continue }
             verdicts[i] = ClassifiedEdit(
                 kind: verdicts[i].kind, from: verdicts[i].from, to: verdicts[i].to,
@@ -2034,6 +2043,118 @@ public enum EditGuard {
         return true
     }
 
+    /// Quick task 260926-dbi: per-language closed sets of words whose
+    /// adjacent exact double can be productive grammar filling two distinct
+    /// slots, rather than a stutter — a relative pronoun/complementizer
+    /// followed by an article or demonstrative ("eine Lösung die die Kosten
+    /// senkt", "said that that answer"), a pronoun whose object and
+    /// subject/possessive forms coincide ("told you you were", "ob sie sie
+    /// kennt", "understand it it offers"), past perfect / pseudo-cleft
+    /// copula ("had had", "what it is is a"), and a stranded preposition or
+    /// adverb followed by a new phrase ("referring to to", "do so so").
+    /// Consulted by `isExactAdjacentStutterDelete` clause (c). Selection is
+    /// `language == "de"` for the German set, anything else the English
+    /// set — the same convention `EditGuardTokenizer.numericValue` uses.
+    private static let legitimateAdjacentDoubleForms: [String: Set<String>] = [
+        "en": ["that", "had", "is", "was", "you", "it", "her", "to", "so"],
+        "de": ["der", "die", "das", "den", "dem", "des", "denen", "deren", "dessen", "sie", "es", "ihr", "ist", "war"]
+    ]
+
+    /// Quick task 260926-dbi: is the `.delete` at `edits[i]` an exact
+    /// adjacent-duplicate stutter/restart the candidate correctly resolved
+    /// down to one copy — one this guard must never let a coupled revert
+    /// put back, however it exempts one from both flip loops below.
+    ///
+    /// **49.6 D-02's criterion, applied to the exact-duplicate subset:** D-02
+    /// lists the SELF-CONTAINED survive classes as the edits whose
+    /// correctness can be judged from the edit's OWN token alone, with no
+    /// dependency on sentence context, and placed `disfluencyCollapse` in
+    /// the CONTEXT-DEPENDENT revert set because that class also covers
+    /// near-duplicates (`furtherly`/`further`), inflection pairs, and
+    /// pronoun pairs, whose correctness depends on which variant the
+    /// sentence needs. An EXACT duplicate next to a KEPT identical copy is
+    /// judgeable from the deleted token plus that neighbour alone: the word
+    /// itself is certain to survive in the output, because a `.keep` is
+    /// never flipped by either coupling pass and always renders — so
+    /// deleting its exact duplicate neighbour can never erase the word from
+    /// the sentence, only the stutter.
+    ///
+    /// **Why both flip loops consult this (pass order, re-invocation):**
+    /// `applyAtomicGroupCoupling` runs before `applySentenceCoupledRevert`
+    /// at every `rebuild` call site (mirrors
+    /// `isUtteranceFinalTerminalMarkInsert`'s reasoning) — at
+    /// `2026-08-15T14:37:11.911Z` the stutter delete sat in one
+    /// keep-bounded cluster with rejected `contentWordDeletion`s and was
+    /// flipped to `atomicGroupRevert` before `applySentenceCoupledRevert`
+    /// ever saw it; an SCR-only exemption would miss that shape. Symmetrically,
+    /// on a mood-lock re-invocation (`rebuild`'s second and third call
+    /// sites), atomic coupling treats SCR's own earlier flips as
+    /// rejections, so a delete this predicate spared on an earlier call
+    /// could still be swept later unless both passes independently know to
+    /// leave it alone.
+    ///
+    /// **Rejected §6.4 alternatives (one sentence each):** reclassifying
+    /// exact duplicates as `repetitionDeletion` would fix
+    /// `applySentenceCoupledRevert` only, because `applyAtomicGroupCoupling`
+    /// flips every accepted class except two named exemptions, and it would
+    /// also move the pronoun-stutter path behind the D-04 lock and change
+    /// per-class counts; removing `disfluencyCollapse` from
+    /// `sentenceRevertContextDependentClasses` entirely would release
+    /// near-duplicates, inflection pairs, and pronoun pairs too, which D-02
+    /// correctly treats as context-dependent. Neither is done — the accept
+    /// class stays `disfluencyCollapse`, no new class is added.
+    ///
+    /// **No verdict dependence at all:** every clause below reads `edits`
+    /// and `language` only — never `verdicts` — which makes the predicate
+    /// idempotent across the three `rebuild` call sites and independent of
+    /// flip order.
+    ///
+    /// **The legitimate-double exclusion (clause (c)):** a doubled form is
+    /// NOT exempt when it is in `legitimateAdjacentDoubleForms` for the
+    /// language, or is a number word (`EditGuardTokenizer.numericValue`
+    /// non-nil) — a planning-time scan of the staged 2168-record corpus
+    /// found the LLM wrongly collapsed a legitimate double (`that`, `is`)
+    /// in 2 of 13 exact-duplicate deletes, so the LLM's own deletion does
+    /// not by itself certify a stutter for these forms; see
+    /// `260926-dbi-PLAN.md`'s `<objective>` for the full evidence table and
+    /// family list.
+    ///
+    /// **Accepted costs:** intensifier/interjection reduplication (`very
+    /// very`, `really really`, `no no`, `like like`) is not excluded — the
+    /// LLM kept every corpus occurrence, so there is no measured defect to
+    /// fix, and collapsing one would only drop emphasis, not propositional
+    /// content, if the LLM ever did delete one. A German finite verb doubled
+    /// after a fronted clause ("hat hat") is not excluded beyond `ist`/
+    /// `war`. Word-to-punctuation substitute drops that
+    /// `disfluencyAcceptedIndices` also counts are out of scope — clause (a)
+    /// requires an actual `.delete`.
+    private static func isExactAdjacentStutterDelete(at i: Int, edits: [Edit], language: String) -> Bool {
+        // (a) a `.delete` of a baseline word token.
+        guard edits[i].kind == .delete,
+              let deleted = edits[i].from,
+              deleted.kind == .word
+        else { return false }
+        // (b) some `.keep` edit anchors a baseline word immediately adjacent
+        // (Token.index +/- 1 — baseline adjacency, never edits-array
+        // adjacency, because an accepted insert can sit between) with equal
+        // `normalized` text.
+        let hasKeptDuplicateNeighbor = edits.contains { candidate in
+            guard candidate.kind == .keep,
+                  let kept = candidate.from,
+                  kept.kind == .word,
+                  abs(kept.index - deleted.index) == 1
+            else { return false }
+            return kept.normalized == deleted.normalized
+        }
+        guard hasKeptDuplicateNeighbor else { return false }
+        // (c) the doubled form is not a legitimate double for this
+        // language, and is not a number word.
+        let exclusionSet = legitimateAdjacentDoubleForms[language == "de" ? "de" : "en"] ?? []
+        guard !exclusionSet.contains(deleted.normalized) else { return false }
+        guard EditGuardTokenizer.numericValue(deleted, language: language) == nil else { return false }
+        return true
+    }
+
     /// Phase 49.6 (EDITGUARD-03, D-01..D-06): the sixth coupling pass —
     /// the raw-SENTENCE coupled revert. Audit finding 3
     /// (`.planning/research/v2.6-log-audit-2026-09-10.md`): six live
@@ -2120,7 +2241,11 @@ public enum EditGuard {
     /// Quick task 260926-bbz: the main flip loop below additionally exempts
     /// the utterance-final terminal mark — see
     /// `isUtteranceFinalTerminalMarkInsert`'s doc comment.
-    private static func applySentenceCoupledRevert(edits: [Edit], verdicts: inout [ClassifiedEdit]) {
+    ///
+    /// Quick task 260926-dbi: the main flip loop below also exempts an
+    /// exact-adjacent-stutter delete — see
+    /// `isExactAdjacentStutterDelete`'s doc comment.
+    private static func applySentenceCoupledRevert(edits: [Edit], verdicts: inout [ClassifiedEdit], language: String) {
         guard !edits.isEmpty else { return }
 
         var triggered = Set<Int>()
@@ -2144,7 +2269,11 @@ public enum EditGuard {
                   // Quick task 260926-bbz: the utterance-final terminal
                   // mark survives this pass too — see
                   // `isUtteranceFinalTerminalMarkInsert`'s doc comment.
-                  !isUtteranceFinalTerminalMarkInsert(at: i, edits: edits, verdicts: verdicts)
+                  !isUtteranceFinalTerminalMarkInsert(at: i, edits: edits, verdicts: verdicts),
+                  // Quick task 260926-dbi: an exact-adjacent-stutter delete
+                  // survives this pass too — see
+                  // `isExactAdjacentStutterDelete`'s doc comment.
+                  !isExactAdjacentStutterDelete(at: i, edits: edits, language: language)
             else { continue }
             verdicts[i] = ClassifiedEdit(
                 kind: verdicts[i].kind, from: verdicts[i].from, to: verdicts[i].to,
@@ -2894,8 +3023,8 @@ public enum EditGuard {
         applyMoveRunCoupling(edits: edits, verdicts: &verdicts)
         applyArticleAgreementCoupling(edits: edits, verdicts: &verdicts, language: language)
         applyAdjacentDeletionSubstituteCoupling(edits: edits, verdicts: &verdicts)
-        applyAtomicGroupCoupling(edits: edits, verdicts: &verdicts)
-        applySentenceCoupledRevert(edits: edits, verdicts: &verdicts)
+        applyAtomicGroupCoupling(edits: edits, verdicts: &verdicts, language: language)
+        applySentenceCoupledRevert(edits: edits, verdicts: &verdicts, language: language)
 
         var tokens = materialize(baseline: baseline, candidate: candidate, edits: edits, verdicts: verdicts)
 
@@ -2933,8 +3062,8 @@ public enum EditGuard {
                         rejectClass: RejectionClass.moodLockSentenceInitialVerb.rawValue
                     )
                 }
-                applyAtomicGroupCoupling(edits: edits, verdicts: &verdicts)
-                applySentenceCoupledRevert(edits: edits, verdicts: &verdicts)
+                applyAtomicGroupCoupling(edits: edits, verdicts: &verdicts, language: language)
+                applySentenceCoupledRevert(edits: edits, verdicts: &verdicts, language: language)
                 tokens = materialize(baseline: baseline, candidate: candidate, edits: edits, verdicts: verdicts)
             }
 
@@ -2969,8 +3098,8 @@ public enum EditGuard {
                     punctuationReverted = true
                 }
                 if punctuationReverted {
-                    applyAtomicGroupCoupling(edits: edits, verdicts: &verdicts)
-                    applySentenceCoupledRevert(edits: edits, verdicts: &verdicts)
+                    applyAtomicGroupCoupling(edits: edits, verdicts: &verdicts, language: language)
+                    applySentenceCoupledRevert(edits: edits, verdicts: &verdicts, language: language)
                     tokens = materialize(baseline: baseline, candidate: candidate, edits: edits, verdicts: verdicts)
                 }
             }
