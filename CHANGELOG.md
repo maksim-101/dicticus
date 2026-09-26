@@ -6,6 +6,12 @@ Dicticus is a fully local, on-device dictation app (ASR via WhisperKit/Whisper l
 
 ---
 
+## Unreleased
+
+- **Fixed: correctly spelled words are no longer swapped for a similar-looking dictionary entry** — the dictionary's near-match correction could turn a real word such as "safeguard" into an unrelated entry two letters away; words in Dicticus's bundled English and German word lists are now never near-match-corrected, while misspellings such as "Tailscele" still correct to Tailscale. macOS + iOS.
+
+---
+
 ## 1.2.2 — Clean Quit — 2026-09-20
 
 - **Fixed: quitting Dicticus no longer produces a crash report** — with the AI-cleanup model loaded (always, when "Unload AI model after idle" is set to Never), every quit aborted inside the model runtime's Metal teardown because the model was still resident when the process exited; Dicticus now unloads it as part of quitting. macOS.
