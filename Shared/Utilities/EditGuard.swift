@@ -583,8 +583,17 @@ public enum EditGuard {
     /// owned upstream, at the token level where provenance is still known, by
     /// `collapseMixedProvenancePunctuationRuns` (see its doc comment) — this pass keeps owning
     /// exactly the spaced same-source case it always has.
+    ///
+    /// A mark directly followed by a letter or digit starts a token (a dotted name such as `.NET`,
+    /// `.env`, `.claude`, or `.5`), so it is not dangling: the second mark needs whitespace, the end
+    /// of the string, or a closing quote/bracket after it. The lookahead mirrors `stripPreamble`'s
+    /// Pitfall-5 lookahead. This pass runs on the rebuilt STRING after `multisetInvariantHolds` and
+    /// `renderingInvariantHolds`, so no fail-closed net sees its output;
+    /// `EditGuardMaterializeInvariantTests` P7 is the property that guards it. Quick task
+    /// 260930-s1a (audit record ts 2026-09-28T04:01:36.829Z: `things: .NET` was pasted as
+    /// `things.NET`).
     static func collapseDanglingPunctuation(_ text: String) -> String {
-        guard let regex = try? NSRegularExpression(pattern: " *([.,;:!?]) +([.,;:!?])") else { return text }
+        guard let regex = try? NSRegularExpression(pattern: " *([.,;:!?]) +([.,;:!?])(?=\\s|$|[\"')\\]])") else { return text }
         let terminals: Set<Character> = [".", "!", "?"]
         var current = text
         // Loop so a run of 3+ (e.g. ` , . ;`) fully collapses.

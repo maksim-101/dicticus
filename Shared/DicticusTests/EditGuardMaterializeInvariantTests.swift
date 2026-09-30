@@ -3,8 +3,8 @@ import XCTest
 
 /// Quick task 260901-8m3: post-`materialize` invariant property suite.
 ///
-/// Six separate quick tasks (260723-rif, 260724-j96, 260801-9n7, 260830-dc4,
-/// 260831-ad8, 260831-gd9) each closed ONE instance of the same recurring
+/// Seven separate quick tasks (260723-rif, 260724-j96, 260801-9n7, 260830-dc4,
+/// 260831-ad8, 260831-gd9, 260930-s1a) each closed ONE instance of the same recurring
 /// defect class — `EditGuard.apply(...)`'s output containing text that
 /// appears in NEITHER the rules baseline NOR the LLM candidate — after a user
 /// hit it live. This file turns the axes that class can occupy into
@@ -24,6 +24,7 @@ import XCTest
 /// | Punctuation RUNS of length >= 2 (character-level interleaving of both sources) | `EditGuardDanglingPunctuationTests.testPunctuationRunsAreSingleSourced_acrossFixtureCorpus` | `EditGuardDanglingPunctuationTests.swift` | 260830-dc4 |
 /// | Full-token adjacency including punctuation ("tier 2") | `testFullTokenAdjacencyProvenance_P5` below — promotes the tier-2 result `EditGuardMergeAtomicityTests.neitherSourceViolations` already computed and discarded at every prior call site | this file | 260830-dc4 / 260831-ad8 (promoted here) |
 /// | WHITESPACE / separator provenance (a restored/rebuilt adjacency's spacing must match SOME input occurrence of that adjacency) | `testAdjacencySpacingFidelity_P4` below — the hole nothing owned before this quick task | this file | 260801-9n7 (dropped-space direction) / 260831-gd9 (fabricated-space direction) |
+/// | ACCEPTED-substitute survival through the string-level post-passes | `testAcceptedSubstituteTargetSurvives_P7` below | this file | 260930-s1a |
 ///
 /// The order and multiset axes are DELIBERATELY NOT re-implemented here:
 /// `testAggregate_allGoldenFixturesNeitherSourceClean` and
@@ -386,6 +387,73 @@ final class EditGuardMaterializeInvariantTests: XCTestCase {
             "sentence-terminal mark count DROPPED below min(baseline, candidate) outside the " +
             "exemption ledger — a mark was silently deleted, the exact 260901-qyi defect shape: " +
             "\(unledgered)"
+        )
+    }
+
+    // MARK: - P7: accepted-substitute survival (quick task 260930-s1a)
+
+    /// Every ACCEPTED `substitute` edit's target token must occur in the
+    /// guard's final text at least as often as accepted substitutes produce
+    /// it. `multisetInvariantHolds` excludes punctuation and runs before the
+    /// string-level `collapseDanglingPunctuation`, so a pass over the rebuilt
+    /// string could delete an accepted target (audit ts
+    /// 2026-09-28T04:01:36.829Z: the accepted `,` -> `:` was eaten, the output
+    /// glued `things.NET`) with P3-extension, P4, P5 and P6 all passing.
+    ///
+    /// Only substitutes are covered: the collapse legitimately arbitrates an
+    /// accepted inserted mark against a restored rejected-move mark (live ts
+    /// 2026-08-23T09:53:07.461Z), and extending P7 there needs a separate
+    /// policy decision.
+    ///
+    /// Known limit: P7 is a lower bound. `found` counts every output token, so
+    /// an eaten substitute target still passes when the same token survives
+    /// elsewhere in the output; tightening `required` to every accepted edit
+    /// producing that token would false-positive on the documented LCS ` , .`
+    /// collapse.
+    ///
+    /// Non-vacuity on the passing run: see the printed `[P7 non-vacuity]` line
+    /// (counts recorded in the quick task SUMMARY).
+    func testAcceptedSubstituteTargetSurvives_P7() {
+        var targetsChecked = 0
+        var casesExercising = 0
+        var violations: [String] = []
+
+        for c in corpus {
+            let result = EditGuard.apply(rulesCleaned: c.baseline, llmOutput: c.candidate,
+                                         language: c.language, lexicon: TestSpellLexicon.allKnown)
+            var required: [String: Int] = [:]
+            for e in result.edits where e.accepted && e.kind == "substitute" {
+                guard let to = e.to else { continue }
+                required[to.lowercased(), default: 0] += 1
+            }
+            guard !required.isEmpty else { continue }
+            casesExercising += 1
+            targetsChecked += required.values.reduce(0, +)
+
+            var found: [String: Int] = [:]
+            for t in EditGuardTokenizer.tokenize(result.text) {
+                found[t.normalized, default: 0] += 1
+            }
+            for (key, need) in required where found[key, default: 0] < need {
+                violations.append("\(c.id)|\(key)|required=\(need)|found=\(found[key, default: 0])|out=\(result.text)")
+            }
+        }
+
+        print("[P7 non-vacuity] substituteTargetsChecked=\(targetsChecked) casesExercising=\(casesExercising) " +
+              "(of \(corpus.count) total cases)")
+        XCTAssertGreaterThan(
+            targetsChecked, 0,
+            "P7 checked ZERO accepted-substitute targets across the whole corpus — the property " +
+            "never fired and is VACUOUS (memory feedback_gate_blind_to_firing_path)."
+        )
+        XCTAssertGreaterThan(
+            casesExercising, 0,
+            "P7 exercised ZERO cases — see substituteTargetsChecked's failure message."
+        )
+        XCTAssertTrue(
+            violations.isEmpty,
+            "an accepted substitute's target is missing from the final text — a string-level " +
+            "post-pass ate it: \(violations)"
         )
     }
 }
