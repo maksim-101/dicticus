@@ -1699,6 +1699,13 @@ enum EditGuardFixtures {
     }
 
     static let productionRecords: [ProductionRecord] = [
+        // Anonymized shape-preserving copy of the audit record (dotted name `.Vornet` stands in for the dictated one), added by 260930-s1a.
+        ProductionRecord(
+            id: "record-2026-09-28T04-01-36-829Z",
+            language: "en",
+            baseline: "Fine, the sync daemon is up on the test box. Now set up the remaining two packages,.Vornet and Kelda CLI.",
+            candidate: "Fine, the sync daemon is up on the test box. Now set up the remaining two packages: .Vornet and Kelda CLI."
+        ),
         ProductionRecord(
             id: "record-2026-08-30T04-54-30-157Z",
             language: "de",

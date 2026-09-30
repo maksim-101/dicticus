@@ -105,6 +105,11 @@ import XCTest
 ///   the 216-record live-corpus replay bar and the three other committed
 ///   test-file changes this task made: `260926-bbz-GATE-DIFF.md` §6.
 /// No other golden entry's value changed this run.
+///
+/// Quick task 260930-s1a (2026-09-30): added one production record,
+/// `record-2026-09-28T04-01-36-829Z` (punctuation before a dotted name), whose
+/// golden is post-fix by construction. No existing golden entry's value
+/// changed (verified by the scoped run); see `testKnownDefectStringsNeverReturn_260930_s1a`.
 @MainActor
 final class EditGuardRunTokenizationReplayTests: XCTestCase {
 
@@ -121,6 +126,9 @@ final class EditGuardRunTokenizationReplayTests: XCTestCase {
     /// `EditGuardFixtures.productionRecords` — no live dictation text is
     /// committed.
     private static let preChangeGolden: [String: String] = [
+        // introduced by 260930-s1a, therefore post-fix by construction (no pre-fix value exists)
+        "record-2026-09-28T04-01-36-829Z":
+            "Fine, the sync daemon is up on the test box. Now set up the remaining two packages: .Vornet and Kelda CLI.",
         "record-2026-08-30T04-54-30-157Z":
             "Also ich möchte, dass du noch einmal genau recherchierst und mir einen Nahrungsergänzungsmittel sowie beispielhaften Trainingsplan zusammenstellst. Wie viel Resistancetraining braucht es wirklich? Ich bin zum Beispiel auch kein Fitnessstudio-Gänger. Ich finde das zu langweilig und, wenn nicht unbedingt notwendig dann möchte ich auch nicht einfach nur 30 minuten resistance training machen normalerweise mache ich so fünf minuten pro tag mit dem eigenen körpergewicht oder mit dem Tension Strap. Ich bin aber offen für Veränderung.",
         "record-2026-08-24T04-00-00-733Z":
@@ -385,6 +393,17 @@ final class EditGuardRunTokenizationReplayTests: XCTestCase {
                        "a deleted period's merge must couple the next sentence's casing substitute")
         XCTAssertTrue(outB.contains("begin. Because"),
                       "the correctly-coupled casing must ship")
+    }
+
+    /// Quick task 260930-s1a: the dotted-name record must keep the colon in
+    /// front of the name, independently of `preChangeGolden`.
+    func testKnownDefectStringsNeverReturn_260930_s1a() {
+        guard let r = EditGuardFixtures.productionRecords.first(where: { $0.id == "record-2026-09-28T04-01-36-829Z" }) else {
+            return XCTFail("missing production record")
+        }
+        let out = guardOut(r.baseline, r.candidate, r.language)
+        XCTAssertFalse(out.contains("packages.Vornet"), "the mark before a dotted name must not be eaten")
+        XCTAssertTrue(out.contains("packages: .Vornet"), "the colon before the dotted name must ship")
     }
 
     // MARK: - D-04: per-sentence divergence gate window
