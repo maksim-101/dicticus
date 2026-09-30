@@ -685,9 +685,9 @@ class DictionaryService: ObservableObject {
     }
 
     /// Phase 27 D-08: canonical traced dictionary application. Returns the
-    /// processed text plus per-replacement and per-blocked-fuzzy-candidate
-    /// trace arrays. Both arrays are empty when nothing happened (D-07 default-
-    /// empty contract for downstream JSONL stability).
+    /// processed text plus per-replacement, per-blocked-fuzzy-candidate and (quick
+    /// 260930-s1e) per-real-word-vetoed-near-match trace arrays. All are empty when
+    /// nothing happened (D-07 default-empty contract for downstream JSONL stability).
     public func applyWithTrace(to text: String) -> (text: String, replacements: [Replacement], blocked: [BlockedMatch], vetoed: [BlockedMatch]) {
         let exact = Self.applyExactPass(to: text, entries: dictionary, caseSensitive: isCaseSensitive)
         var result = exact.text
@@ -836,10 +836,10 @@ class DictionaryService: ObservableObject {
     }
 
     /// Phase 27 D-01 fuzzy-pass guard. Returns the (possibly replaced) token
-    /// plus an optional `Replacement` (when a candidate fires) or an optional
-    /// `BlockedMatch` (when a candidate would have hit pre-guard but is now
-    /// rejected by either Guard A or Guard B). At most one of the optionals is
-    /// non-nil per call.
+    /// plus at most ONE non-nil optional: a `Replacement` (a candidate fires), a
+    /// `BlockedMatch` (a candidate would have hit pre-guard but the ratio cap
+    /// rejects it), or a veto `BlockedMatch` (Guard A suppressed a near-match;
+    /// quick 260930-s1e). The token is returned unchanged for the last two.
     private func fuzzyReplaceTokenWithTrace(_ token: String, candidates: [String], protected: Set<String>) -> (String, Replacement?, BlockedMatch?, BlockedMatch?) {
         guard token.count >= 6 else { return (token, nil, nil, nil) }
         // Phase 27 WR-03: NFC-normalize before allowlist lookup. The allowlist
@@ -861,10 +861,16 @@ class DictionaryService: ObservableObject {
         // checker (SpellLexicon's case for the opposite failure direction)
         // is not used here. Traced case: "this safeguard" -> "this
         // Cellguard" via key "SalGuard" (ratio 0.222, under the 0.25 cap).
-        // This veto never emits a BlockedMatch — `dictionary_blocked` means
-        // "ratio cap blocked", a distinct telemetry signal.
+        // A suppressed near-match is reported in `vetoed` (JSONL
+        // `lexicon_vetoed`, quick 260930-s1e); `dictionary_blocked` still
+        // means "ratio cap blocked" only.
         if commonWords.contains(lowered) || lexiconWords.contains(lowered) {
-            return (token, nil, nil, nil)
+            guard let hit = Self.firstActedOnCandidate(lowered: lowered, tokenCount: token.count, candidates: candidates) else {
+                return (token, nil, nil, nil)
+            }
+            let to = dictionary[hit.key]?.replacement ?? token
+            if hit.fires && to == token { return (token, nil, nil, nil) }
+            return (token, nil, nil, BlockedMatch(key: hit.key, from: token, to: to, ratio: hit.ratio))
         }
 
         // Defect D (260809-g7h): canonical-collision veto. `token` only ever
@@ -874,28 +880,40 @@ class DictionaryService: ObservableObject {
             return (token, nil, nil, nil)
         }
 
+        guard let hit = Self.firstActedOnCandidate(lowered: lowered, tokenCount: token.count, candidates: candidates) else {
+            return (token, nil, nil, nil)
+        }
+        let to = dictionary[hit.key]?.replacement ?? token
+        if hit.fires {
+            // Guard B passes — fire the replacement. Skip trace emission when the
+            // replacement produces no visible change (the exact-match pass
+            // already produced the final form).
+            if to == token { return (token, nil, nil, nil) }
+            return (to, Replacement(key: hit.key, from: token, to: to), nil, nil)
+        }
+        // Would have hit pre-guard; record as blocked for telemetry.
+        return (token, nil, BlockedMatch(key: hit.key, from: token, to: to, ratio: hit.ratio), nil)
+    }
+
+    /// The candidate scan shared by the live fuzzy path and the Guard A veto
+    /// trace (quick 260930-s1e), so a veto entry names exactly the key the live
+    /// path would have acted on. Walks the sorted candidates and stops at the
+    /// first key that is identical to the token (nil), within the ratio cap
+    /// (`fires`), or over the cap but within distance 2 (`!fires`).
+    private static func firstActedOnCandidate(lowered: String, tokenCount: Int, candidates: [String]) -> (key: String, ratio: Double, fires: Bool)? {
         for key in candidates {
-            guard abs(token.count - key.count) <= 2 else { continue }
+            guard abs(tokenCount - key.count) <= 2 else { continue }
             let keyLowered = key.lowercased()
             // Skip identity — already handled by exact-match pass.
-            if lowered == keyLowered { return (token, nil, nil, nil) }
+            if lowered == keyLowered { return nil }
 
             let ratio = LevenshteinDistance.normalizedDistance(lowered, keyLowered)
-            if ratio <= Self.fuzzyRatioCap {
-                // Guard B passes — fire the replacement.
-                let to = dictionary[key]?.replacement ?? token
-                // Skip trace emission when the replacement produces no visible
-                // change (the exact-match pass already produced the final form).
-                if to == token {
-                    return (token, nil, nil, nil)
-                }
-                return (to, Replacement(key: key, from: token, to: to), nil, nil)
+            if ratio <= fuzzyRatioCap {
+                return (key, ratio, true)
             } else if LevenshteinDistance.distance(lowered, keyLowered) <= 2 {
-                // Would have hit pre-guard; record as blocked for telemetry.
-                let to = dictionary[key]?.replacement ?? token
-                return (token, nil, BlockedMatch(key: key, from: token, to: to, ratio: ratio), nil)
+                return (key, ratio, false)
             }
         }
-        return (token, nil, nil, nil)
+        return nil
     }
 }

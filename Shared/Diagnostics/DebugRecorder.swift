@@ -52,6 +52,11 @@ public struct DebugCleanupRecord: Codable, Sendable {
     /// and must keep decoding without throwing, and every existing
     /// labeled-argument construction site must keep compiling unmodified.
     public let brand_rewrites: [BrandRewriteEntry]?
+    /// Quick task 260930-s1e: Guard A near-matches the real-word veto suppressed.
+    /// ratio <= 0.25 means the veto changed the output; above 0.25 the ratio cap
+    /// would have blocked it anyway. Same entry shape as dictionary_blocked.
+    /// Optional so JSONL written before 260930-s1e decodes to nil.
+    public let lexicon_vetoed: [DictionaryBlockedEntry]?
 
     // Phase 27 WR-02: custom decoder tolerates pre-Phase-27 JSONL where the
     // dictionary_replacements / dictionary_blocked keys are absent. Both
@@ -63,7 +68,7 @@ public struct DebugCleanupRecord: Codable, Sendable {
         case ts, session_id, lang, lang_used, mode, model, sampler, steps
         case dictionary_context_keys, dictionary_replacements, dictionary_blocked
         case anomaly, emission_counter, prompt_version
-        case detected_bundle_id, resolved_context, brand_rewrites
+        case detected_bundle_id, resolved_context, brand_rewrites, lexicon_vetoed
     }
 
     public init(
@@ -83,7 +88,8 @@ public struct DebugCleanupRecord: Codable, Sendable {
         prompt_version: String = "v19d",
         detected_bundle_id: String? = nil,
         resolved_context: String? = nil,
-        brand_rewrites: [BrandRewriteEntry]? = nil
+        brand_rewrites: [BrandRewriteEntry]? = nil,
+        lexicon_vetoed: [DictionaryBlockedEntry]? = nil
     ) {
         self.ts = ts
         self.session_id = session_id
@@ -102,6 +108,7 @@ public struct DebugCleanupRecord: Codable, Sendable {
         self.detected_bundle_id = detected_bundle_id
         self.resolved_context = resolved_context
         self.brand_rewrites = brand_rewrites
+        self.lexicon_vetoed = lexicon_vetoed
     }
 
     public init(from decoder: Decoder) throws {
@@ -127,6 +134,7 @@ public struct DebugCleanupRecord: Codable, Sendable {
         self.resolved_context = try c.decodeIfPresent(String.self, forKey: .resolved_context) ?? nil
         // Quick task 260805-qme: tolerant decode for pre-260805 JSONL — nil when absent.
         self.brand_rewrites = try c.decodeIfPresent([BrandRewriteEntry].self, forKey: .brand_rewrites) ?? nil
+        self.lexicon_vetoed = try c.decodeIfPresent([DictionaryBlockedEntry].self, forKey: .lexicon_vetoed) ?? nil
     }
 
     public struct ModelInfo: Codable, Sendable {
