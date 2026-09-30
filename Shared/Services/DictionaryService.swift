@@ -688,19 +688,21 @@ class DictionaryService: ObservableObject {
     /// processed text plus per-replacement and per-blocked-fuzzy-candidate
     /// trace arrays. Both arrays are empty when nothing happened (D-07 default-
     /// empty contract for downstream JSONL stability).
-    public func applyWithTrace(to text: String) -> (text: String, replacements: [Replacement], blocked: [BlockedMatch]) {
+    public func applyWithTrace(to text: String) -> (text: String, replacements: [Replacement], blocked: [BlockedMatch], vetoed: [BlockedMatch]) {
         let exact = Self.applyExactPass(to: text, entries: dictionary, caseSensitive: isCaseSensitive)
         var result = exact.text
         var replacements = exact.replacements
         var blocked: [BlockedMatch] = []
+        var vetoed: [BlockedMatch] = []
 
         // Phase 25.1-03: fuzzy second pass after exact-match completes.
         let fuzzy = applyFuzzyPassWithTrace(result)
         result = fuzzy.text
         replacements.append(contentsOf: fuzzy.replacements)
         blocked.append(contentsOf: fuzzy.blocked)
+        vetoed.append(contentsOf: fuzzy.vetoed)
 
-        return (result, replacements, blocked)
+        return (result, replacements, blocked, vetoed)
     }
 
     /// Phase 25.1-03 — paper §2.2 fuzzy-match second pass.
@@ -717,7 +719,7 @@ class DictionaryService: ObservableObject {
     /// Length-prefilter ≥ 6 is mandatory: distance-2 matches against short tokens
     /// (e.g. `the`/`she`) catastrophically false-positive. Multi-word keys are
     /// skipped — the exact-match regex pass handles those.
-    private func applyFuzzyPassWithTrace(_ text: String) -> (text: String, replacements: [Replacement], blocked: [BlockedMatch]) {
+    private func applyFuzzyPassWithTrace(_ text: String) -> (text: String, replacements: [Replacement], blocked: [BlockedMatch], vetoed: [BlockedMatch]) {
         // Phase 27 WR-01: sort candidates lexicographically to make
         // fuzzy-match outcomes deterministic across launches. Dictionary key
         // iteration order is unspecified in Swift, so a token with two distinct
@@ -766,7 +768,7 @@ class DictionaryService: ObservableObject {
                 return normKey != normReplacement
             }
             .sorted()
-        if candidateKeys.isEmpty { return (text, [], []) }
+        if candidateKeys.isEmpty { return (text, [], [], []) }
 
         // Defect D (260809-g7h): canonical-collision veto. A token that IS
         // one of the user's own dictionary canonicals is by definition
@@ -791,6 +793,7 @@ class DictionaryService: ObservableObject {
 
         var replacements: [Replacement] = []
         var blocked: [BlockedMatch] = []
+        var vetoed: [BlockedMatch] = []
 
         // Walk character by character, collecting word tokens and preserving
         // all non-word characters (punctuation, whitespace) in their original
@@ -806,6 +809,7 @@ class DictionaryService: ObservableObject {
                     result.append(r.0)
                     if let rep = r.1 { replacements.append(rep) }
                     if let blk = r.2 { blocked.append(blk) }
+                    if let vet = r.3 { vetoed.append(vet) }
                     current = ""
                 }
                 result.append(ch)
@@ -816,8 +820,9 @@ class DictionaryService: ObservableObject {
             result.append(r.0)
             if let rep = r.1 { replacements.append(rep) }
             if let blk = r.2 { blocked.append(blk) }
+            if let vet = r.3 { vetoed.append(vet) }
         }
-        return (result, replacements, blocked)
+        return (result, replacements, blocked, vetoed)
     }
 
     /// Lowercased, NFC-normalized, and stripped of characters the fuzzy-pass
@@ -835,8 +840,8 @@ class DictionaryService: ObservableObject {
     /// `BlockedMatch` (when a candidate would have hit pre-guard but is now
     /// rejected by either Guard A or Guard B). At most one of the optionals is
     /// non-nil per call.
-    private func fuzzyReplaceTokenWithTrace(_ token: String, candidates: [String], protected: Set<String>) -> (String, Replacement?, BlockedMatch?) {
-        guard token.count >= 6 else { return (token, nil, nil) }
+    private func fuzzyReplaceTokenWithTrace(_ token: String, candidates: [String], protected: Set<String>) -> (String, Replacement?, BlockedMatch?, BlockedMatch?) {
+        guard token.count >= 6 else { return (token, nil, nil, nil) }
         // Phase 27 WR-03: NFC-normalize before allowlist lookup. The allowlist
         // is loaded NFC (loadCommonWords), and ASR may emit NFD-decomposed
         // German diacritics. Without symmetric normalization the Set<String>
@@ -859,21 +864,21 @@ class DictionaryService: ObservableObject {
         // This veto never emits a BlockedMatch — `dictionary_blocked` means
         // "ratio cap blocked", a distinct telemetry signal.
         if commonWords.contains(lowered) || lexiconWords.contains(lowered) {
-            return (token, nil, nil)
+            return (token, nil, nil, nil)
         }
 
         // Defect D (260809-g7h): canonical-collision veto. `token` only ever
         // contains letters/numbers (the tokenizer emits nothing else), so it
         // is already directly comparable to the sanitized protected set.
         if protected.contains(lowered) {
-            return (token, nil, nil)
+            return (token, nil, nil, nil)
         }
 
         for key in candidates {
             guard abs(token.count - key.count) <= 2 else { continue }
             let keyLowered = key.lowercased()
             // Skip identity — already handled by exact-match pass.
-            if lowered == keyLowered { return (token, nil, nil) }
+            if lowered == keyLowered { return (token, nil, nil, nil) }
 
             let ratio = LevenshteinDistance.normalizedDistance(lowered, keyLowered)
             if ratio <= Self.fuzzyRatioCap {
@@ -882,15 +887,15 @@ class DictionaryService: ObservableObject {
                 // Skip trace emission when the replacement produces no visible
                 // change (the exact-match pass already produced the final form).
                 if to == token {
-                    return (token, nil, nil)
+                    return (token, nil, nil, nil)
                 }
-                return (to, Replacement(key: key, from: token, to: to), nil)
+                return (to, Replacement(key: key, from: token, to: to), nil, nil)
             } else if LevenshteinDistance.distance(lowered, keyLowered) <= 2 {
                 // Would have hit pre-guard; record as blocked for telemetry.
                 let to = dictionary[key]?.replacement ?? token
-                return (token, nil, BlockedMatch(key: key, from: token, to: to, ratio: ratio))
+                return (token, nil, BlockedMatch(key: key, from: token, to: to, ratio: ratio), nil)
             }
         }
-        return (token, nil, nil)
+        return (token, nil, nil, nil)
     }
 }

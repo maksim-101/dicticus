@@ -210,6 +210,7 @@
 		E96FCDD523E8F5CAEDD1B303 /* AiCleanupPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBC4C4363B1672EAB82E3084 /* AiCleanupPane.swift */; };
 		E98DF26857206CBF0E7D21C7 /* DictionaryExactPassCaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85844C88385261660FE6757B /* DictionaryExactPassCaseTests.swift */; };
 		ECCC98D4D7A901320AB0DCF0 /* BrandMatcherShortAcronymGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E6914B9852E32683771AD7A /* BrandMatcherShortAcronymGuardTests.swift */; };
+		ED4AF727A2381FBEECFD285C /* LexiconVetoTraceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BA973F764EC1E7A1A749B80 /* LexiconVetoTraceTests.swift */; };
 		ED56393CBE6A29FCA1D06187 /* EditGuardExactStutterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E3C0945B499287BC2D6132 /* EditGuardExactStutterTests.swift */; };
 		ED8AAA311BAE60C64947B802 /* starter-pack-general.csv in Resources */ = {isa = PBXBuildFile; fileRef = 9F67747AC990B3EB48B970E0 /* starter-pack-general.csv */; };
 		EE01BCC7E61ED1CCF053C586 /* EditGuardCoupledRevertTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A1127E11BB8DCD53B9C486D /* EditGuardCoupledRevertTests.swift */; };
@@ -319,6 +320,7 @@
 		584E3897CB5C9AA463A32B6C /* ContextResolver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContextResolver.swift; sourceTree = "<group>"; };
 		5B031B25E1B2D2A52AEB6233 /* TranscriptionFailureRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionFailureRouterTests.swift; sourceTree = "<group>"; };
 		5B2645584469543592036142 /* AudioCaptureProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioCaptureProbe.swift; sourceTree = "<group>"; };
+		5BA973F764EC1E7A1A749B80 /* LexiconVetoTraceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LexiconVetoTraceTests.swift; sourceTree = "<group>"; };
 		5D9006B0A2BDDC990FAFD71C /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = wrapper.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		5E8C78954BFBC85D227860FD /* TranscriptionResultTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranscriptionResultTests.swift; sourceTree = "<group>"; };
 		606D5FDC1193F1A7D2D5302E /* DictionaryServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryServiceTests.swift; sourceTree = "<group>"; };
@@ -797,6 +799,7 @@
 				56D14A2CA0763BE92AFC0300 /* InflectionRulesTests.swift */,
 				2586E1752BAB530E1D162B18 /* InMemoryUserDefaults.swift */,
 				EDA28B123C1582D49D92D1B9 /* ITNRangeNounTests.swift */,
+				5BA973F764EC1E7A1A749B80 /* LexiconVetoTraceTests.swift */,
 				FD1E40CC69DC1A856E64C7D4 /* LowConfidenceShortTests.swift */,
 				1FB77CC93A12476198D2D3A0 /* NoSpeechDiscardTests.swift */,
 				CEC46F666F4D931F4C683636 /* PosTaggerProbeTests.swift */,
@@ -1184,6 +1187,7 @@
 				224D944F8C69C4D182295A23 /* ITNUtilityTests.swift in Sources */,
 				B740367ACE9F28A444DEAD7F /* InMemoryUserDefaults.swift in Sources */,
 				59AA266D4A606F1AE1673BD9 /* InflectionRulesTests.swift in Sources */,
+				ED4AF727A2381FBEECFD285C /* LexiconVetoTraceTests.swift in Sources */,
 				9D5A440895E06CC137824451 /* LowConfidenceShortTests.swift in Sources */,
 				A111E106D3ACF3DE58CC6C83 /* MediaControllerTests.swift in Sources */,
 				46B52C3C05E290F9EF02A653 /* ModelDownloadServiceTests.swift in Sources */,
