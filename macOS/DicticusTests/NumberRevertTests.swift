@@ -105,4 +105,59 @@ final class NumberRevertTests: XCTestCase {
         XCTAssertEqual(result, "no actually 8.",
             "Phase 36.1 CR-01: sentence-final word 'eight.' must revert to baseline digit '8.' with period preserved")
     }
+
+    // MARK: - German N. token (260930-s1b)
+
+    /// 260930-s1b, logged record ts 2026-09-29T17:30:15.605Z. A German baseline `3.` is
+    /// both a sentence-final cardinal and an ordinal key, so it lives in the ordinal
+    /// budget. The LLM's `drei.` must revert to that exact baseline token.
+    func testNumberRevert_de_sentenceFinalCardinalWord_revertsToBaselineDigitWithPeriod() {
+        let result = NumberRevert.apply(
+            baseline: "Der Faktor lautet hoch 3.",
+            output: "Der Faktor lautet hoch drei.",
+            language: "de"
+        ).text
+        XCTAssertEqual(result, "Der Faktor lautet hoch 3.")
+    }
+
+    /// 260930-s1b: a true ordinal re-spelled as an ordinal word reverts to the baseline `N.`.
+    func testNumberRevert_de_ordinalWord_revertsToBaselineOrdinalDigit() {
+        let result = NumberRevert.apply(
+            baseline: "Wir sehen uns am 3. Oktober im Büro.",
+            output: "Wir sehen uns am dritten Oktober im Büro.",
+            language: "de"
+        ).text
+        XCTAssertEqual(result, "Wir sehen uns am 3. Oktober im Büro.")
+    }
+
+    /// 260930-s1b: the cardinal `3` and the ordinal `3.` of the same value keep separate budgets.
+    func testNumberRevert_de_cardinalAndOrdinalOfSameValue_useSeparateBudgets() {
+        let result = NumberRevert.apply(
+            baseline: "Es kommen 3 Gäste am 3. Oktober zum Essen.",
+            output: "Es kommen drei Gäste am dritten Oktober zum Essen.",
+            language: "de"
+        ).text
+        XCTAssertEqual(result, "Es kommen 3 Gäste am 3. Oktober zum Essen.")
+    }
+
+    /// 260930-s1b: a bare cardinal word for a baseline ordinal is ambiguous (`3` would drop
+    /// the ordinal marker), so NumberRevert leaves it and FactPreservationGuard restores the baseline.
+    func testNumberRevert_de_bareCardinalWordForOrdinalDigit_isLeftForFactPreservationGuard() {
+        let result = NumberRevert.apply(
+            baseline: "Wir sehen uns am 3. Oktober im Büro.",
+            output: "Wir sehen uns am drei Oktober im Büro.",
+            language: "de"
+        ).text
+        XCTAssertEqual(result, "Wir sehen uns am drei Oktober im Büro.")
+    }
+
+    /// 260930-s1b: a re-spelling that lost its own period is left alone (emitting `3.` would print `3.,`).
+    func testNumberRevert_de_cardinalWordThatLostItsPeriod_isLeftForFactPreservationGuard() {
+        let result = NumberRevert.apply(
+            baseline: "Der Faktor lautet hoch 3.",
+            output: "Der Faktor lautet hoch drei, und mehr.",
+            language: "de"
+        ).text
+        XCTAssertEqual(result, "Der Faktor lautet hoch drei, und mehr.")
+    }
 }
