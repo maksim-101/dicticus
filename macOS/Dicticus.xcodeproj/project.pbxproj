@@ -120,6 +120,7 @@
 		77E629F73BA61CF10EF8CAC5 /* SwissNumberFormatterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49F508FA7F203223AB4D05A0 /* SwissNumberFormatterTests.swift */; };
 		7806CA0106275C118F2F688A /* FunctionWords.swift in Sources */ = {isa = PBXBuildFile; fileRef = F278D1B719DF075C135C4B07 /* FunctionWords.swift */; };
 		78088756194BC65DD9CBE4DE /* DebugRecorderFinalStageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 946B59F77219FD6D0F22BAF9 /* DebugRecorderFinalStageTests.swift */; };
+		781FD33238830F9613CE8CF2 /* BrandInteriorPunctuationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FFCB086F5B4AF3FF46584658 /* BrandInteriorPunctuationTests.swift */; };
 		78DB03EE60CA2A43DBFEFEE5 /* AsrReplayHarnessTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 924528FC6CB78FA7E6F697FF /* AsrReplayHarnessTests.swift */; };
 		7C2DE853EFA9D981F406B045 /* LastTranscriptionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC0CAF13337A0AF85CB46BC3 /* LastTranscriptionView.swift */; };
 		7C61B66CB6F5BB972C92FFFC /* TranscriptionServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4711E5E2A1A90B0A7DC48F3 /* TranscriptionServiceTests.swift */; };
@@ -467,6 +468,7 @@
 		FBC4C4363B1672EAB82E3084 /* AiCleanupPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AiCleanupPane.swift; sourceTree = "<group>"; };
 		FC2E498ED330281FF5112AA8 /* RevertToRawAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RevertToRawAction.swift; sourceTree = "<group>"; };
 		FD1E40CC69DC1A856E64C7D4 /* LowConfidenceShortTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LowConfidenceShortTests.swift; sourceTree = "<group>"; };
+		FFCB086F5B4AF3FF46584658 /* BrandInteriorPunctuationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandInteriorPunctuationTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -754,6 +756,7 @@
 				9583443B5090F875947F23B9 /* BrandContractionInflectionTests.swift */,
 				F7A08460CF96C4B5DAB5D2A0 /* BrandDigitParityTests.swift */,
 				9BC75A7D3932B4B7BF3B095A /* BrandFunctionWordWindowTests.swift */,
+				FFCB086F5B4AF3FF46584658 /* BrandInteriorPunctuationTests.swift */,
 				649BB50B71580F884F936B6F /* BrandLoggedRewriteReplayTests.swift */,
 				7B1585188DD9D4E01B161960 /* BrandRewriteTraceTests.swift */,
 				D772BFA3688DE28C9416B564 /* BrandSwallowGuardTests.swift */,
@@ -1120,6 +1123,7 @@
 				9FCDDE8A350F06BCA92EB097 /* BrandContractionInflectionTests.swift in Sources */,
 				F5408D6229A9758D9ABE3864 /* BrandDigitParityTests.swift in Sources */,
 				43B6A0CB6DDB10DD54BC068D /* BrandFunctionWordWindowTests.swift in Sources */,
+				781FD33238830F9613CE8CF2 /* BrandInteriorPunctuationTests.swift in Sources */,
 				4BC38F0DC900533E5A6E7E48 /* BrandLoggedRewriteReplayTests.swift in Sources */,
 				BD87CB32FB9F05A589E884AE /* BrandMatcherGermanPrecisionTests.swift in Sources */,
 				ECCC98D4D7A901320AB0DCF0 /* BrandMatcherShortAcronymGuardTests.swift in Sources */,
