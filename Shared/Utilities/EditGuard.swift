@@ -1700,6 +1700,15 @@ public enum EditGuard {
         /// provenance being implicit, so every construction site must
         /// declare it explicitly rather than silently inheriting a default.
         let source: TokenSource
+        /// Opening/closing role of a straight `"` token, taken from the source
+        /// token this one renders: the candidate stream's role for
+        /// candidate-sourced tokens, the baseline stream's role for restored
+        /// ones (`straightQuoteRoles`). `nil` for every other token and for
+        /// quotes in a stream with an odd quote count. Non-defaulted for the
+        /// same reason as `source`: `deriveSeamSpacing` keys its vote on it,
+        /// so every construction site must declare which stream the role came
+        /// from instead of silently inheriting one (261001-opz).
+        let quoteRole: QuoteRole?
         /// Set only when `text` was accepted via the casing-only substitute
         /// path (`AcceptClass.punctuationOrCasing`, `a.normalized ==
         /// b.normalized`) AND the candidate token was itself its sentence's
@@ -2750,6 +2759,8 @@ public enum EditGuard {
         // sentence-initial and must never be a spurious-capitalization
         // revert candidate — see `revertSpuriousSentenceInitialCapitalization`).
         var candidateFirstWordIndex: [Int: Int] = [:]
+        let candidateQuoteRoles = straightQuoteRoles(candidate)
+        let baselineQuoteRoles = straightQuoteRoles(baseline)
         for t in candidate where t.kind == .word {
             if candidateFirstWordIndex[t.sentenceIndex] == nil {
                 candidateFirstWordIndex[t.sentenceIndex] = t.index
@@ -2788,7 +2799,7 @@ public enum EditGuard {
         }.sorted { $0.bIdx < $1.bIdx }
 
         for (bIdx, a) in restorationTargets {
-            let restored = WorkToken(text: a.text, normalized: a.normalized, kind: a.kind, trailing: a.trailing, sentenceIndex: a.sentenceIndex, source: .restoredBaseline, baselineCasingAlternative: nil)
+            let restored = WorkToken(text: a.text, normalized: a.normalized, kind: a.kind, trailing: a.trailing, sentenceIndex: a.sentenceIndex, source: .restoredBaseline, quoteRole: baselineQuoteRoles[a.index], baselineCasingAlternative: nil)
 
             var anchor: Int?
             var scan = bIdx - 1
@@ -2865,7 +2876,7 @@ public enum EditGuard {
                 switch edit.kind {
                 case .keep:
                     if let b = edit.to {
-                        output.append(WorkToken(text: b.text, normalized: b.normalized, kind: b.kind, trailing: trailingFor(candidateIndex: i, ownTrailing: b.trailing), sentenceIndex: b.sentenceIndex, source: .candidate, baselineCasingAlternative: nil))
+                        output.append(WorkToken(text: b.text, normalized: b.normalized, kind: b.kind, trailing: trailingFor(candidateIndex: i, ownTrailing: b.trailing), sentenceIndex: b.sentenceIndex, source: .candidate, quoteRole: candidateQuoteRoles[b.index], baselineCasingAlternative: nil))
                     }
                 case .substitute:
                     if v.accepted, let a = edit.from, let b = edit.to {
@@ -2874,7 +2885,7 @@ public enum EditGuard {
                             && candidateFirstWordIndex[b.sentenceIndex] == b.index
                         output.append(WorkToken(
                             text: b.text, normalized: b.normalized, kind: b.kind, trailing: trailingFor(candidateIndex: i, ownTrailing: b.trailing), sentenceIndex: b.sentenceIndex,
-                            source: .candidate, baselineCasingAlternative: isCasingOnly ? a.text : nil
+                            source: .candidate, quoteRole: candidateQuoteRoles[b.index], baselineCasingAlternative: isCasingOnly ? a.text : nil
                         ))
                     } else if let a = edit.from, let b = edit.to {
                         // Gap-local remap (260724-j96): render the token
@@ -2922,17 +2933,17 @@ public enum EditGuard {
                         let restoredTrailing = renderToken.kind == .punctuation
                             ? renderToken.trailing
                             : trailingFor(candidateIndex: i, ownTrailing: b.trailing)
-                        output.append(WorkToken(text: renderToken.text, normalized: renderToken.normalized, kind: renderToken.kind, trailing: restoredTrailing, sentenceIndex: b.sentenceIndex, source: .restoredBaseline, baselineCasingAlternative: nil))
+                        output.append(WorkToken(text: renderToken.text, normalized: renderToken.normalized, kind: renderToken.kind, trailing: restoredTrailing, sentenceIndex: b.sentenceIndex, source: .restoredBaseline, quoteRole: baselineQuoteRoles[renderToken.index], baselineCasingAlternative: nil))
                     }
                 case .insert:
                     if v.accepted, let b = edit.to {
-                        output.append(WorkToken(text: b.text, normalized: b.normalized, kind: b.kind, trailing: trailingFor(candidateIndex: i, ownTrailing: b.trailing), sentenceIndex: b.sentenceIndex, source: .candidate, baselineCasingAlternative: nil))
+                        output.append(WorkToken(text: b.text, normalized: b.normalized, kind: b.kind, trailing: trailingFor(candidateIndex: i, ownTrailing: b.trailing), sentenceIndex: b.sentenceIndex, source: .candidate, quoteRole: candidateQuoteRoles[b.index], baselineCasingAlternative: nil))
                     }
                     // rejected insert -> omit entirely; `trailingFor` on
                     // the PRECEDING emitted token already bridges this gap.
                 case .move:
                     if v.accepted, let b = edit.to {
-                        output.append(WorkToken(text: b.text, normalized: b.normalized, kind: b.kind, trailing: trailingFor(candidateIndex: i, ownTrailing: b.trailing), sentenceIndex: b.sentenceIndex, source: .candidate, baselineCasingAlternative: nil))
+                        output.append(WorkToken(text: b.text, normalized: b.normalized, kind: b.kind, trailing: trailingFor(candidateIndex: i, ownTrailing: b.trailing), sentenceIndex: b.sentenceIndex, source: .candidate, quoteRole: candidateQuoteRoles[b.index], baselineCasingAlternative: nil))
                     }
                     // rejected move -> omit here; restored separately at
                     // its baseline anchor, and the gap this leaves is
@@ -2995,7 +3006,7 @@ public enum EditGuard {
             result[i] = WorkToken(
                 text: result[i].text, normalized: result[i].normalized, kind: result[i].kind,
                 trailing: " ", sentenceIndex: result[i].sentenceIndex,
-                source: result[i].source, baselineCasingAlternative: result[i].baselineCasingAlternative
+                source: result[i].source, quoteRole: result[i].quoteRole, baselineCasingAlternative: result[i].baselineCasingAlternative
             )
         }
         return result
@@ -3075,7 +3086,7 @@ public enum EditGuard {
                     survivors[survivors.count - 1] = WorkToken(
                         text: last.text, normalized: last.normalized, kind: last.kind,
                         trailing: originalLastTrailing, sentenceIndex: last.sentenceIndex,
-                        source: last.source, baselineCasingAlternative: last.baselineCasingAlternative
+                        source: last.source, quoteRole: last.quoteRole, baselineCasingAlternative: last.baselineCasingAlternative
                     )
                 }
                 result.append(contentsOf: survivors)
@@ -3085,14 +3096,56 @@ public enum EditGuard {
         return result
     }
 
+    /// Opening or closing role of a straight quotation mark (261001-opz).
+    enum QuoteRole { case opening, closing }
+
+    /// Roles for the straight `"` tokens of ONE stream, keyed by `Token.index`:
+    /// alternating opening, closing by occurrence order, and only when the
+    /// stream holds an even, non-zero number of them (an odd count means
+    /// parity carries no information, so every quote stays untagged and keeps
+    /// the untagged seam vote).
+    ///
+    /// Why only U+0022: of the six CLEAN-01 quote characters it is the only
+    /// one that opens and closes in the same text; curly and angle quotes
+    /// already differ by character, and the planning corpus held 0 cases of an
+    /// ambiguous one. Known limits, none observed in the corpus: a stray
+    /// inch mark (`5"`) or nested dictated straight quotes in an even-count
+    /// stream make parity assign the wrong roles; `'` used as a quotation mark
+    /// folds into the previous word in the tokenizer and is not covered; mixed
+    /// curly conventions in one dictation; and `applySegmented`'s per-sentence
+    /// windows, where a pair split across segments has an odd count per
+    /// window and stays untagged.
+    static func straightQuoteRoles(_ tokens: [Token]) -> [Int: QuoteRole] {
+        let quotes = tokens.filter { $0.kind == .punctuation && $0.text == "\"" }
+        guard !quotes.isEmpty, quotes.count % 2 == 0 else { return [:] }
+        var roles: [Int: QuoteRole] = [:]
+        for (ordinal, token) in quotes.enumerated() {
+            roles[token.index] = ordinal % 2 == 0 ? .opening : .closing
+        }
+        return roles
+    }
+
+    /// Seam-vote key component: the normalized text, plus the quote role when
+    /// there is one, so an opening and a closing straight quote vote apart.
+    private static func seamKey(_ normalized: String, _ role: QuoteRole?) -> String {
+        switch role {
+        case .opening: return normalized + "\u{1}o"
+        case .closing: return normalized + "\u{1}c"
+        case nil: return normalized
+        }
+    }
+
     /// EDITGUARD-01: for every adjacent token pair in ONE input stream, the set of
     /// SPACED-vs-GLUED observations for that pair (`true` == the left token carried a
-    /// separator). Keyed on `normalized` text so casing never forks an adjacency.
+    /// separator). Keyed on `normalized` text so casing never forks an adjacency, and
+    /// on the straight-quote role (`seamKey`) so an opening and a closing `"` never
+    /// share a key.
     private static func observedAdjacencySpacing(_ tokens: [Token]) -> [String: Set<Bool>] {
         guard tokens.count > 1 else { return [:] }
+        let roles = straightQuoteRoles(tokens)
         var result: [String: Set<Bool>] = [:]
         for i in 0..<(tokens.count - 1) {
-            let key = tokens[i].normalized + "\u{0}" + tokens[i + 1].normalized
+            let key = seamKey(tokens[i].normalized, roles[tokens[i].index]) + "\u{0}" + seamKey(tokens[i + 1].normalized, roles[tokens[i + 1].index])
             result[key, default: []].insert(!tokens[i].trailing.isEmpty)
         }
         return result
@@ -3107,13 +3160,37 @@ public enum EditGuard {
     /// input at all (P4 abstains on exactly those). Never writes a non-horizontal-
     /// whitespace separator, so a dictated line break is preserved and never
     /// fabricated or destroyed.
+    ///
+    /// Straight-quote roles (261001-opz). A straight `"` is one token whether it
+    /// opens or closes, so one untagged key covered two seams that need opposite
+    /// spacing, and a contested key fell through to the kind rule or to the
+    /// baseline's vote. Kind-rule direction: identical inputs rendered
+    /// `open"Quick Open"` and `" now"` (live records 2026-09-20T07:26:56.014Z and
+    /// 2026-08-26T04:10:22.307Z). Baseline-fallback direction: the LLM's `it,"`
+    /// against a baseline `,"` that occurs only before an opening quote gave
+    /// `it, " and` (2026-09-08T04:22:20.047Z, 2026-09-26T04:30:13.733Z). Both are
+    /// keyed here on `seamKey(normalized, quoteRole)`, with each output token's
+    /// role carried from the stream it was rendered from. P4 could not see this:
+    /// it keys untagged pairs, so a contested pair passes either way, and its
+    /// glue-before-punctuation allowance exempts a word glued to a following mark.
+    ///
+    /// P4 safety with roles: a found tagged key's observations are a subset of
+    /// the untagged pair's. When a tagged key is absent while its untagged pair
+    /// was observed, the kind rule applies as for any unobserved pair, so a
+    /// space before a word at such a seam falls outside P4's allowance
+    /// (`EditGuardMaterializeInvariantTests.testAdjacencySpacingFidelity_P4`) and
+    /// can contradict `EditGuardSeamSpacingTests
+    /// .testUnanimousAdjacencySpacingIsPreserved_acrossCorpus`, which keys
+    /// untagged pairs. Producing that seam needs one adjacent in no source, so no
+    /// fixture is expected to reach it. Out of scope: other contested seams (the
+    /// dotted-name `.`, `100|%`).
     private static func deriveSeamSpacing(_ tokens: [WorkToken], baseline: [Token], candidate: [Token]) -> [WorkToken] {
         guard tokens.count > 1 else { return tokens }
         let candidateSpacing = observedAdjacencySpacing(candidate)
         let baselineSpacing = observedAdjacencySpacing(baseline)
         var result = tokens
         for i in 0..<(tokens.count - 1) {
-            let key = tokens[i].normalized + "\u{0}" + tokens[i + 1].normalized
+            let key = seamKey(tokens[i].normalized, tokens[i].quoteRole) + "\u{0}" + seamKey(tokens[i + 1].normalized, tokens[i + 1].quoteRole)
             let spaced: Bool
             if let c = candidateSpacing[key], c.count == 1 {
                 spaced = c.first!
@@ -3137,7 +3214,7 @@ public enum EditGuard {
                 result[i] = WorkToken(
                     text: result[i].text, normalized: result[i].normalized, kind: result[i].kind,
                     trailing: newTrailing, sentenceIndex: result[i].sentenceIndex,
-                    source: result[i].source, baselineCasingAlternative: result[i].baselineCasingAlternative
+                    source: result[i].source, quoteRole: result[i].quoteRole, baselineCasingAlternative: result[i].baselineCasingAlternative
                 )
             }
         }
@@ -3212,7 +3289,7 @@ public enum EditGuard {
             let isGenuinelySentenceInitial = i == 0 ||
                 (tokens[i - 1].kind == .punctuation && sentenceTerminalMarks.contains(tokens[i - 1].text))
             guard !isGenuinelySentenceInitial else { return t }
-            return WorkToken(text: alt, normalized: t.normalized, kind: t.kind, trailing: t.trailing, sentenceIndex: t.sentenceIndex, source: t.source, baselineCasingAlternative: nil)
+            return WorkToken(text: alt, normalized: t.normalized, kind: t.kind, trailing: t.trailing, sentenceIndex: t.sentenceIndex, source: t.source, quoteRole: t.quoteRole, baselineCasingAlternative: nil)
         }
     }
 

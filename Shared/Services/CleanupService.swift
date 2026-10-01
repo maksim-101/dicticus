@@ -612,7 +612,7 @@ class CleanupService: ObservableObject, CleanupProvider {
                 return text
             }
 
-            var cleaned = Self.stripPreamble(reasoningStripped)
+            var cleaned = Self.stripPreamble(reasoningStripped, input: text)
             log.info("After strip (\(cleaned.count, privacy: .public) chars): \(cleaned.prefix(500), privacy: .public)")
 
             // Phase 36.6 Plan 04 (CLEANRD-03): grounding-lite deterministic backstops.
@@ -952,7 +952,7 @@ class CleanupService: ObservableObject, CleanupProvider {
     /// token-by-token detokenization (leading spaces per token → double spaces).
     ///
     /// Phase 25.1-02: envelope extraction runs first (paper §6.2 Class D mitigation).
-    static func stripPreamble(_ text: String) -> String {
+    static func stripPreamble(_ text: String, input: String? = nil) -> String {
         // Phase 25.1-02 — paper §6.2 XML envelope extraction (Class D mitigation).
         // When both <corrected_text> and </corrected_text> tags are present, extract
         // contents and apply <unk> stripping. Falls back to the original input when
@@ -1011,9 +1011,18 @@ class CleanupService: ObservableObject, CleanupProvider {
         result = punctSpaceRegex?.stringByReplacingMatches(
             in: result, options: [], range: punctRange, withTemplate: "$1") ?? result
 
-        // Step 2: Strip surrounding double quotation marks and non-standard quotes (CLEAN-01)
+        // Step 2: Strip double quotation marks and non-standard quotes the model adds (CLEAN-01),
+        // wrapping or inline. Quotation marks that exactly match the dictated input's
+        // per-character counts are the user's and pass through to EditGuard; unequal counts
+        // strip everything, because an added pair cannot be told apart from a dictated one.
+        // Quick task 260930-s1a: 14 of 18 AI-cleaned dictations with dictated quotes lost them.
         let doubleQuotes = CharacterSet(charactersIn: "\"“”„«»")
-        result = result.components(separatedBy: doubleQuotes).joined()
+        let dictatedQuotesMatch = input.map { input in
+            "\"“”„«»".allSatisfy { q in result.filter { $0 == q }.count == input.filter { $0 == q }.count }
+        } ?? false
+        if !dictatedQuotesMatch {
+            result = result.components(separatedBy: doubleQuotes).joined()
+        }
 
         // Strip surrounding single quotes if they wrap the whole result
         if (result.hasPrefix("'") && result.hasSuffix("'")) ||
