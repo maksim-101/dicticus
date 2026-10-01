@@ -233,7 +233,7 @@ final class EditGuardUtteranceFinalMarkTests: XCTestCase {
     // delete run and a final insert in one gap into a `substitute` (three
     // attempts, trailing filler / two words / three words, each paired the
     // first dropped word with the mark), so the shape only arises as the
-    // split's own output; mutation M2 covers clause (c').
+    // split's own output, and its exemption ships with the split.
 
     // Fallback scope (see the 260930-s1c SUMMARY): the carrier split that closes
     // P1, P2 and P4 was withheld because `EditGuardMaterializeInvariantTests`
