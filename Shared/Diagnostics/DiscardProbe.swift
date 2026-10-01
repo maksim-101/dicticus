@@ -97,6 +97,15 @@
 // matched phrase itself is not a separate field — it is already visible in the
 // record's `segments` text.
 //
+// Cycle 7 (quick task 260930-s1g, SHORT-STOCK-WORD REASON): adds a seventh discard-log
+// reason, `shortStockWordHallucination`, for `BoilerplateHallucination.matchShortStock`:
+// a whole decode of exactly "you", "and" or "-" from a clip under 1.5 s or from a clip in
+// which the Layer-2 gate found no voice. Both arms share the reason. The record shape is
+// the same as Cycle 6's, and the matched token is visible in `segments`. The arm is read
+// from the record's `gate_bypassed_by_duration` field: true for the no-voice arm (a clip
+// that reached Whisper only through the Phase 50 D-01 duration bypass), false for the
+// duration arm.
+//
 // Output: ~/Library/Application Support/Dicticus/DebugRecordings/discard-YYYY-MM-DD.jsonl
 // Retention: 14 days, purged once per launch.
 
