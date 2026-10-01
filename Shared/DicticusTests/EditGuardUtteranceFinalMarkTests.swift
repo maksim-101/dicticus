@@ -223,4 +223,152 @@ final class EditGuardUtteranceFinalMarkTests: XCTestCase {
         let v = EditGuardMergeAtomicityTests.neitherSourceViolations(output: out, sourceA: baseline, sourceB: llm)
         XCTAssertTrue(v.tier1.isEmpty, "tier-1 neither-source violation(s) \(v.tier1) in: \(out)")
     }
+
+    // MARK: - Quick task 260930-s1c: residual carrier shapes
+    //
+    // The four audit records still losing the closing mark after bbz are cited
+    // by ts only: 2026-09-26T15:19:02.662Z (P1), 2026-09-29T16:23:34.162Z (P2),
+    // 2026-09-30T03:41:25.798Z (P3), 2026-09-30T17:43:18.675Z (P4). A fifth
+    // positive for the native delete-run shape was dropped: `EditDiff` pairs a
+    // delete run and a final insert in one gap into a `substitute` (three
+    // attempts, trailing filler / two words / three words, each paired the
+    // first dropped word with the mark), so the shape only arises as the
+    // split's own output; mutation M2 covers clause (c').
+
+    private func assertFinalMarkInserted(_ result: EditGuard.GuardResult, mark: String, file: StaticString = #filePath, line: UInt = #line) {
+        guard let last = result.edits.last else { return XCTFail("no edits", file: file, line: line) }
+        XCTAssertEqual(last.kind, "insert", file: file, line: line)
+        XCTAssertEqual(last.to, mark, file: file, line: line)
+        XCTAssertTrue(last.accepted, file: file, line: line)
+        XCTAssertEqual(last.acceptClass, "punctuationOrCasing", file: file, line: line)
+    }
+
+    private func assertTier1Clean(_ out: String, _ baseline: String, _ llm: String, file: StaticString = #filePath, line: UInt = #line) {
+        let v = EditGuardMergeAtomicityTests.neitherSourceViolations(output: out, sourceA: baseline, sourceB: llm)
+        XCTAssertTrue(v.tier1.isEmpty, "tier-1 neither-source violation(s) \(v.tier1) in: \(out)", file: file, line: line)
+    }
+
+    /// P1: the LLM drops the last two raw words; the first pairs with the final
+    /// `.` as a rejected pronoun substitute, the second is a rejected delete.
+    func testS1c_P1_substituteCarrierWithTrailingDelete() {
+        let baseline = "the crew painted the fence after lunch I suppose"
+        let llm = "The crew painted the fence after lunch."
+        let expected = baseline + "."
+        let out = guardOut(baseline, llm)
+        let result = guardResult(baseline, llm)
+        XCTAssertEqual(out, expected, "edits: \(result.edits)")
+        XCTAssertTrue(result.edits.contains { $0.kind == "delete" && $0.from == "I" && !$0.accepted && $0.rejectClass == "pronounPersonChange" })
+        XCTAssertTrue(result.edits.contains { $0.kind == "delete" && $0.from == "suppose" && !$0.accepted && $0.rejectClass == "contentWordDeletion" })
+        XCTAssertFalse(result.edits.contains { $0.kind == "substitute" && $0.to == "." })
+        assertFinalMarkInserted(result, mark: ".")
+        assertTier1Clean(out, baseline, llm)
+    }
+
+    /// P2: the last raw word pairs with the final `.` as a rejected
+    /// `contentWordIdentityChange` substitute and is the last edit.
+    func testS1c_P2_substituteCarrierSingleLastWord() {
+        let baseline = "she watered the plants before the guests arrived and the balcony smelled lovely"
+        let llm = "She watered the plants before the guests arrived and the balcony smelled."
+        let expected = baseline + "."
+        let out = guardOut(baseline, llm)
+        let result = guardResult(baseline, llm)
+        XCTAssertEqual(out, expected, "edits: \(result.edits)")
+        XCTAssertTrue(result.edits.contains { $0.kind == "delete" && $0.from == "lovely" && !$0.accepted && $0.rejectClass == "contentWordIdentityChange" })
+        XCTAssertFalse(result.edits.contains { $0.kind == "substitute" && $0.to == "." })
+        assertFinalMarkInserted(result, mark: ".")
+        assertTier1Clean(out, baseline, llm)
+    }
+
+    /// P3: the raw ends in a kept `etc`; the LLM appends `.` then `?`; a
+    /// content trigger in the same raw sentence makes the coupled revert fire.
+    func testS1c_P3_abbreviationPeriodThenQuestionMark() {
+        let baseline = "we counted the jars and bottles and cans etc"
+        let llm = "We counted the jars and bottles and tins etc.?"
+        let expected = baseline + ".?"
+        let out = guardOut(baseline, llm)
+        let result = guardResult(baseline, llm)
+        XCTAssertEqual(out, expected, "edits: \(result.edits)")
+        XCTAssertTrue(result.edits.contains { $0.kind == "substitute" && $0.from == "cans" && $0.to == "tins" && !$0.accepted })
+        XCTAssertEqual(result.edits.suffix(2).map { "\($0.kind)|\($0.to ?? "-")|\($0.accepted)|\($0.acceptClass ?? "-")" },
+                       ["insert|.|true|punctuationOrCasing", "insert|?|true|punctuationOrCasing"])
+        assertTier1Clean(out, baseline, llm)
+    }
+
+    /// P4: the raw has one interior `.` and no final mark; the LLM merges
+    /// at that point and ends with `.`, so `EditDiff` pairs the raw interior
+    /// period with the final period as a rejected `move`.
+    func testS1c_P4_moveCarrierFromInteriorPeriod() {
+        let baseline = "the guests arrived late and the host rearranged the tables. like bring the wine which made it awkward and then also a few more evenings when the host waited"
+        let llm = "The guests arrived late and the host rearranged the tables, bringing the wine, which made it awkward, and a few more evenings when the host waited."
+        let preFixActual = "The guests arrived late and the host rearranged the tables. like bring the wine which made it awkward and then also a few more evenings when the host waited"
+        let out = guardOut(baseline, llm)
+        let result = guardResult(baseline, llm)
+        XCTAssertEqual(out, preFixActual + ".", "edits: \(result.edits)")
+        XCTAssertTrue(out.contains("tables. like"), "the raw interior period must stay: \(out)")
+        XCTAssertTrue(result.edits.contains { $0.kind == "delete" && $0.from == "." && !$0.accepted && $0.rejectClass == "unclassified" })
+        XCTAssertFalse(result.edits.contains { $0.kind == "move" && $0.from == "." })
+        assertFinalMarkInserted(result, mark: ".")
+        assertTier1Clean(out, baseline, llm)
+    }
+
+    // MARK: - s1c negatives: GREEN before and after
+
+    /// N1: a word-to-`.` substitute mid-utterance is not the candidate's last
+    /// token, so the split gate leaves it alone.
+    func testS1c_N1_interiorCarrierNotSplit() {
+        let baseline = "the crew painted the fence and then they went home after lunch"
+        let llm = "The crew painted the fence. They went home after lunch."
+        let out = guardOut(baseline, llm)
+        let result = guardResult(baseline, llm)
+        XCTAssertEqual(out, baseline + ".", "edits: \(result.edits)")
+        XCTAssertTrue(result.edits.contains { $0.kind == "substitute" && $0.from == "and" && $0.to == "." && !$0.accepted })
+        assertTier1Clean(out, baseline, llm)
+    }
+
+    /// N2: the raw already ends in `.`; no second mark, no split.
+    func testS1c_N2_baselineAlreadyTerminal() {
+        let baseline = "the movers carried the piano upstairs after lunch I suppose."
+        let llm = "The movers carried the piano upstairs after lunch."
+        let out = guardOut(baseline, llm)
+        let result = guardResult(baseline, llm)
+        XCTAssertEqual(out, baseline, "edits: \(result.edits)")
+        XCTAssertFalse(out.hasSuffix(".."))
+        XCTAssertFalse(result.edits.contains { $0.kind == "insert" && $0.to == "." })
+        assertTier1Clean(out, baseline, llm)
+    }
+
+    /// N3: a clause relocated together with its period stays a move run.
+    func testS1c_N3_moveRunWithItsPeriodNotSplit() {
+        let baseline = "the baker opened late. the shop was empty until noon because the oven failed"
+        let llm = "The shop was empty until noon because the oven failed. The baker opened late."
+        let out = guardOut(baseline, llm)
+        let result = guardResult(baseline, llm)
+        XCTAssertEqual(out, baseline, "edits: \(result.edits)")
+        XCTAssertTrue(result.edits.contains { $0.kind == "move" && $0.from == "." })
+        assertTier1Clean(out, baseline, llm)
+    }
+
+    /// N4: German `Er kommt morgen usw` to `Kommt er morgen usw.?`; the mood
+    /// lock withdraws the `?` and with it the `.` companion.
+    func testS1c_N4_companionWithdrawnByMoodLock() {
+        let baseline = "Er kommt morgen usw"
+        let llm = "Kommt er morgen usw.?"
+        let out = guardOut(baseline, llm, "de")
+        let result = guardResult(baseline, llm, "de")
+        XCTAssertEqual(out, baseline, "edits: \(result.edits)")
+        XCTAssertTrue(result.edits.contains { $0.rejectClass == "moodLockSentenceInitialVerb" })
+        assertTier1Clean(out, baseline, llm)
+    }
+
+    /// N5: an LLM-inserted word before the pair keeps Shapes C/D excluded.
+    func testS1c_N5_companionAfterInsertedWordStaysExcluded() {
+        let baseline = "we counted the jars and bottles and cans"
+        let llm = "We counted the jars and bottles and cans carefully.?"
+        let out = guardOut(baseline, llm)
+        let result = guardResult(baseline, llm)
+        XCTAssertEqual(out, baseline, "edits: \(result.edits)")
+        XCTAssertTrue(result.edits.contains { $0.kind == "insert" && $0.to == "carefully" && !$0.accepted })
+        XCTAssertFalse(result.edits.contains { $0.kind == "insert" && ($0.to == "." || $0.to == "?") && $0.accepted })
+        assertTier1Clean(out, baseline, llm)
+    }
 }
