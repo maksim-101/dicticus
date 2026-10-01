@@ -59,4 +59,12 @@ enum BoilerplateHallucination {
         guard !trimmed.isEmpty else { return nil }
         return shipList.contains(trimmed) ? trimmed : nil
     }
+
+    static let shortStockList: Set<String> = ["you", "and", "-"]
+
+    static let shortStockMaxDurationSeconds: Float = 1.5
+
+    static func matchShortStock(_ text: String, durationSeconds: Float, voiceDetected: Bool) -> String? {
+        return nil
+    }
 }
