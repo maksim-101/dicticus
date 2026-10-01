@@ -612,7 +612,7 @@ class CleanupService: ObservableObject, CleanupProvider {
                 return text
             }
 
-            var cleaned = Self.stripPreamble(reasoningStripped)
+            var cleaned = Self.stripPreamble(reasoningStripped, input: text)
             log.info("After strip (\(cleaned.count, privacy: .public) chars): \(cleaned.prefix(500), privacy: .public)")
 
             // Phase 36.6 Plan 04 (CLEANRD-03): grounding-lite deterministic backstops.
@@ -952,7 +952,7 @@ class CleanupService: ObservableObject, CleanupProvider {
     /// token-by-token detokenization (leading spaces per token → double spaces).
     ///
     /// Phase 25.1-02: envelope extraction runs first (paper §6.2 Class D mitigation).
-    static func stripPreamble(_ text: String) -> String {
+    static func stripPreamble(_ text: String, input: String? = nil) -> String {
         // Phase 25.1-02 — paper §6.2 XML envelope extraction (Class D mitigation).
         // When both <corrected_text> and </corrected_text> tags are present, extract
         // contents and apply <unk> stripping. Falls back to the original input when
