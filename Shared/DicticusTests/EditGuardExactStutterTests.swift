@@ -36,7 +36,8 @@ import XCTest
 /// delete `applyAtomicGroupCoupling` exempts is still `accepted
 /// disfluencyCollapse` when `applySentenceCoupledRevert` runs immediately
 /// after in the same `rebuild` call, and that pass's own flip loop would
-/// otherwise sweep it).
+/// otherwise sweep it). P6 (quick task 260930-s1f) is RED before `to` left
+/// the English legitimate-double set, with the same SCR shape as P1.
 @MainActor
 final class EditGuardExactStutterTests: XCTestCase {
 
@@ -170,6 +171,33 @@ final class EditGuardExactStutterTests: XCTestCase {
         XCTAssertTrue(stutter.accepted)
         XCTAssertEqual(stutter.acceptClass, "disfluencyCollapse")
         XCTAssertTrue(result.edits.contains { $0.kind == "substitute" && $0.from == "kunden" && $0.to == "käufer" && $0.rejectClass == "contentWordIdentityChange" })
+        let v = EditGuardMergeAtomicityTests.neitherSourceViolations(output: out, sourceA: baseline, sourceB: llm)
+        XCTAssertTrue(v.tier1.isEmpty, "tier-1 neither-source violation(s) \(v.tier1) in: \(out)")
+    }
+
+    // MARK: - P6: infinitive "to to" (quick task 260930-s1f)
+
+    /// SCR shape, mirroring P1, for the infinitive `to to` stutter. Until
+    /// quick task 260930-s1f the English legitimate-double set contained
+    /// `to`, so `isExactAdjacentStutterDelete` clause (c) refused the
+    /// delete and `applySentenceCoupledRevert` flipped it (live evidence
+    /// ts `2026-09-26T14:47:57.157Z`). The trigger (`architect`->`designer`,
+    /// rejected) sits several keeps before the stutter.
+    func testP6_scrShapeToToInfinitiveStutter() {
+        let baseline = "the team reviewed the drawings with the architect and they will continue to to build the shed next week"
+        let llm = "The team reviewed the drawings with the designer, and they will continue to build the shed next week."
+        let expected = "the team reviewed the drawings with the architect and they will continue to build the shed next week."
+        let out = guardOut(baseline, llm)
+        let result = guardResult(baseline, llm)
+        XCTAssertEqual(out, expected, "edits: \(result.edits)")
+        guard let stutter = result.edits.first(where: { $0.kind == "delete" && $0.from == "to" }) else {
+            return XCTFail("no delete edit for 'to'")
+        }
+        XCTAssertTrue(stutter.accepted)
+        XCTAssertEqual(stutter.acceptClass, "disfluencyCollapse")
+        XCTAssertTrue(result.edits.contains { $0.kind == "substitute" && $0.from == "the" && $0.to == "The" && $0.rejectClass == "sentenceCoupledRevert" })
+        XCTAssertTrue(result.edits.contains { $0.kind == "substitute" && $0.from == "architect" && $0.to == "designer" && $0.rejectClass == "contentWordIdentityChange" })
+        XCTAssertFalse(result.edits.contains { $0.kind == "insert" && $0.to == "," && $0.accepted })
         let v = EditGuardMergeAtomicityTests.neitherSourceViolations(output: out, sourceA: baseline, sourceB: llm)
         XCTAssertTrue(v.tier1.isEmpty, "tier-1 neither-source violation(s) \(v.tier1) in: \(out)")
     }
