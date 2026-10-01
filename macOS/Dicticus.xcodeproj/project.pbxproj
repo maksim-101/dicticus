@@ -178,6 +178,7 @@
 		BC46646AC6ACB62C88CE8114 /* DicticusDefaultsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81A5F07A50992847BD7F6EBB /* DicticusDefaultsTests.swift */; };
 		BC9086C08969A4C914C160BC /* SentenceAligner.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE16406238860D488CDF8B58 /* SentenceAligner.swift */; };
 		BCB52BFB7508FD3AF0B07679 /* AdaptiveVoiceGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C15C76E33EDAB96E77F16EC /* AdaptiveVoiceGate.swift */; };
+		BD1F1F71E78E5038689C938C /* EditGuardAcronymAfterDotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8694D0FD0CE254745DCA67C /* EditGuardAcronymAfterDotTests.swift */; };
 		BD87CB32FB9F05A589E884AE /* BrandMatcherGermanPrecisionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BD956E2E462A36191625195C /* BrandMatcherGermanPrecisionTests.swift */; };
 		BDC0C44074CD829203DDED3D /* EditGuardFixtureCoverageTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3931C660399C4F5714646B17 /* EditGuardFixtureCoverageTests.swift */; };
 		BEFDF81CFEF4CCB358B14CBC /* EditGuardRunTokenizationReplayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02507396F705EA789DBA4801 /* EditGuardRunTokenizationReplayTests.swift */; };
@@ -448,6 +449,7 @@
 		E6599AE23EF7ABF7DD28B116 /* BrandPhoneticsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandPhoneticsTests.swift; sourceTree = "<group>"; };
 		E6C74F55E49D9613F8A46172 /* DictionaryService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryService.swift; sourceTree = "<group>"; };
 		E7962986824EC956B31EA20C /* RulesCleanupServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RulesCleanupServiceTests.swift; sourceTree = "<group>"; };
+		E8694D0FD0CE254745DCA67C /* EditGuardAcronymAfterDotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditGuardAcronymAfterDotTests.swift; sourceTree = "<group>"; };
 		E8A0E6E52D5145B754E1607B /* KeyboardShortcuts+Names.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "KeyboardShortcuts+Names.swift"; sourceTree = "<group>"; };
 		EA2693EF50F5AB341997416B /* SwissDialectForms.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SwissDialectForms.swift; sourceTree = "<group>"; };
 		EB1D5DA4D0615455B329026B /* NoSpeechDiscard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NoSpeechDiscard.swift; sourceTree = "<group>"; };
@@ -774,6 +776,7 @@
 				3C663B6748FAF52FDB35F72A /* DictionaryImportPreviewTests.swift */,
 				06BADDBD4683350B5F9C2F0A /* DictionaryRealWordVetoTests.swift */,
 				28BD10DC1CB7282C442BA92C /* EditDiffTests.swift */,
+				E8694D0FD0CE254745DCA67C /* EditGuardAcronymAfterDotTests.swift */,
 				B859D997214D179829112730 /* EditGuardCalibrationTests.swift */,
 				32CF080F624D37BE8538A089 /* EditGuardClassifierRuleTests.swift */,
 				905810F2D9B76D4C4081A025 /* EditGuardClauseRelocationTests.swift */,
@@ -1155,6 +1158,7 @@
 				707548B3DD5BD5C30A385546 /* DictionaryServiceTests.swift in Sources */,
 				6C219D5E0E5141E410BF1A15 /* DoubleMetaphoneTests.swift in Sources */,
 				6EC398A3ECBD3CDC1F6DBE86 /* EditDiffTests.swift in Sources */,
+				BD1F1F71E78E5038689C938C /* EditGuardAcronymAfterDotTests.swift in Sources */,
 				7E664A31767008264DF7089F /* EditGuardCalibrationTests.swift in Sources */,
 				CE619AAF0826492BF849C4E1 /* EditGuardClassifierRuleTests.swift in Sources */,
 				773EF037C8FA5F3B55986531 /* EditGuardClauseRelocationTests.swift in Sources */,
