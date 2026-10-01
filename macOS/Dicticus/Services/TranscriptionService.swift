@@ -64,7 +64,7 @@ final class AudioSampleBuffer: @unchecked Sendable {
 /// after cycle 1's removal reopened D-09 silence-hallucination pastes):
 ///   1. Minimum duration guard: discard clips shorter than 0.3s (D-11 in 02.1-CONTEXT.md)
 ///   2. Adaptive voice-activity gate: discard if no frame's energy dwarfs the clip's own noise floor (AdaptiveVoiceGate)
-///   3. Boilerplate-hallucination discard: discard a whole-utterance closed-list match, e.g. "Thank you." (BoilerplateHallucination, quick task 260827-81z)
+///   3. Boilerplate-hallucination discard: discard a whole-utterance closed-list match, e.g. "Thank you." (BoilerplateHallucination, quick task 260827-81z); also a lone "you"/"and"/"-" when the clip is under 1.5 s or the gate found no voice (quick task 260930-s1g)
 ///   4. No-speech discard: discard if every segment's noSpeechProb exceeds threshold (NoSpeechDiscard, WHISP-03)
 ///
 /// Consumes ModelWarmupService.whisperKitInstance directly.
@@ -203,7 +203,7 @@ class TranscriptionService: ObservableObject {
     ///   3. Check minimum duration (D-11: reject clips shorter than 0.3s)
     ///   4. Adaptive voice-activity gate: reject if no frame dwarfs the clip's own noise floor
     ///   5. Transcribe via WhisperKit large-v3-turbo
-    ///   6. Boilerplate-hallucination discard: reject a whole-utterance closed-list match, e.g. "Thank you."
+    ///   6. Boilerplate-hallucination discard: reject a whole-utterance closed-list match, e.g. "Thank you.", or a lone "you"/"and"/"-" from a clip under 1.5 s or one with no voice found by the gate
     ///   7. No-speech discard: reject if every segment's noSpeechProb exceeds threshold
     ///   8. Detect language post-hoc with NLLanguageRecognizer (D-13)
     ///   9. Build DicticusTranscriptionResult
@@ -374,15 +374,25 @@ class TranscriptionService: ObservableObject {
         // small closed list of Whisper subtitle-boilerplate strings ("Thank you." etc.)
         // that Whisper sometimes hallucinates into a pause with high confidence —
         // NoSpeechDiscard below cannot catch these because a confident hallucination has
-        // a LOW noSpeechProb by construction. This guard is placed BEFORE the
+        // a LOW noSpeechProb by construction. Quick task 260930-s1g adds a second closed
+        // list, a lone "you"/"and"/"-", discarded when the clip is under 1.5 s or the
+        // Layer-2 gate found no voice (a clip that reached Whisper via the D-01 duration
+        // bypass); one reason is logged for both short-list arms. This guard is placed BEFORE the
         // `reason: "pass"` DiscardProbe block further down: a guard placed after it would
         // log the same utterance twice, once as "pass" (false — it was discarded) and once
         // as the discard.
-        if let matchedPhrase = BoilerplateHallucination.match(combinedText) {
+        let boilerplateReason: String? = BoilerplateHallucination.match(combinedText) != nil
+            ? "boilerplateHallucination"
+            : (BoilerplateHallucination.matchShortStock(
+                combinedText,
+                durationSeconds: durationSeconds,
+                voiceDetected: gateDecision.voiceDetected
+            ) != nil ? "shortStockWordHallucination" : nil)
+        if let discardReason = boilerplateReason {
             #if DEBUG_RECORDER
             let boilerplateEnergy = AudioProcessor.calculateEnergy(of: resampledSamples)
             await DiscardProbe.shared.record(
-                reason: "boilerplateHallucination",
+                reason: discardReason,
                 platform: "macOS",
                 rawSampleCount: samples.count,
                 resampledSampleCount: resampledSamples.count,
@@ -409,7 +419,7 @@ class TranscriptionService: ObservableObject {
                 gateBypassedByDuration: gateBypassedByDuration
             )
             #endif
-            _ = matchedPhrase
+            _ = discardReason
             throw TranscriptionError.silenceOnly  // defer resets to .idle
         }
 
