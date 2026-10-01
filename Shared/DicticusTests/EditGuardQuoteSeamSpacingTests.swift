@@ -103,4 +103,28 @@ final class EditGuardQuoteSeamSpacingTests: XCTestCase {
         let llm = "The lead said, Fine, that is it,\" and left the room."
         assertRenders(llm, guardResult(baseline, llm))
     }
+
+    // MARK: - Role units
+
+    private func straightRoles(_ text: String) -> [EditGuard.QuoteRole] {
+        let tokens = EditGuardTokenizer.tokenize(text)
+        let roles = EditGuard.straightQuoteRoles(tokens)
+        return tokens.filter { $0.text == "\"" }.compactMap { roles[$0.index] }
+    }
+
+    func testU1_balancedStraightQuotesAlternate() {
+        XCTAssertEqual(
+            straightRoles("He said \"go\" and \"stop\" twice."),
+            [.opening, .closing, .opening, .closing])
+    }
+
+    func testU2_oddStraightQuoteCountGetsNoRoles() {
+        let tokens = EditGuardTokenizer.tokenize("He said \"go and stop twice.")
+        XCTAssertTrue(EditGuard.straightQuoteRoles(tokens).isEmpty)
+    }
+
+    func testU3_curlyQuotesGetNoRoles() {
+        let tokens = EditGuardTokenizer.tokenize("Er sagte „los“ und ging.")
+        XCTAssertTrue(EditGuard.straightQuoteRoles(tokens).isEmpty)
+    }
 }
