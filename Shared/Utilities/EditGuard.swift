@@ -2259,8 +2259,8 @@ public enum EditGuard {
     /// tasks 260926-bbz and 260930-s1c):** a mark that lands after an
     /// LLM-INSERTED word (the existing 49.6 Shapes C/D — the LLM added a
     /// whole clause the raw speech never anchors) is NOT exempt, because
-    /// clause (c) requires the anchor before the mark (past any delete run)
-    /// to be a `.keep`/`.substitute` of the baseline's own last word, not an
+    /// clause (c) requires the edit directly before the mark (or its `.`
+    /// companion) to be a `.keep`/`.substitute` of the baseline's own last word, not an
     /// accepted insert. A mark after a moved last word, a mark followed by
     /// another edit and a multi-character run (`...`, `?!`, or a mark glued
     /// to a following quote) are NEVER exempt either: `sentenceTerminalMarks`
@@ -2274,27 +2274,17 @@ public enum EditGuard {
     /// clause (d) is the only place this predicate looks outside the mark's
     /// own edit.
     ///
-    /// **Quick task 260930-s1c — two extensions, both structural.** Three of
+    /// **Quick task 260930-s1c — one structural extension.** Three of
     /// the four residual audit shapes (a mark that is the `to` half of a
     /// rejected substitute or move, `2026-09-26T15:19:02.662Z`,
     /// `2026-09-29T16:23:34.162Z`, `2026-09-30T17:43:18.675Z`) are NOT closed
     /// here: rendering them needs an edit of the mark's own, and the split
     /// that provides one was withheld because
     /// `EditGuardMaterializeInvariantTests` P5 flags its restored-word-then-mark
-    /// seam (see the quick task SUMMARY).
-    /// Clause (c′): bbz required the edit before the mark to be the anchor
-    /// itself and excluded deletes. A run of word/numeric `.delete` edits
-    /// (any verdict) between the anchor and the mark is now allowed, because
-    /// the mark still renders last whatever the verdicts are: a rejected
-    /// delete restores at the anchor's candidate slot, which lies below the
-    /// mark's `to.index`, and an accepted delete renders nothing. Every
-    /// edit before the anchor must have `from == nil` or a `from.index`
-    /// below the anchor's, and every delete in the run must have one above
-    /// it, so a moved last word (whose `from.index` is the maximum) is still
-    /// excluded. `EditDiff` pairs a delete run and a final insert in one gap
-    /// into a `substitute`, so a native delete run before the final insert
-    /// has not been observed in the replay corpus, so this clause is
-    /// unexercised by any test or replayed record. Clause (b′): a `.`
+    /// seam (see the quick task SUMMARY). A delete run between the anchor and
+    /// the mark is not exempt: `EditDiff` pairs a delete run and a final
+    /// insert in one gap into a `substitute`, so the shape never reached any
+    /// test or replayed record. Clause (b′): a `.`
     /// insert directly before a final `?`/`!` insert (`etc.?`, audit ts
     /// `2026-09-30T03:41:25.798Z`) is the final mark's companion and shares
     /// its structural answer, with the anchor search starting before the
@@ -2324,7 +2314,7 @@ public enum EditGuard {
         return sentenceTerminalMarks.contains(to.text)
     }
 
-    /// The structural clauses (a), (b′), (c′) of
+    /// The structural clauses (a), (b′), (c) of
     /// `isUtteranceFinalTerminalMarkInsert`; reads `edits` only.
     private static func isUtteranceFinalMarkPosition(at i: Int, edits: [Edit]) -> Bool {
         // (a) a single-character sentence-terminal mark, inserted.
@@ -2339,14 +2329,10 @@ public enum EditGuard {
             && edits[f - 1].to?.text == "."
             && moodMarks.contains(finalMark.text)
         guard i == f || (i == f - 1 && companionPresent) else { return false }
-        // (c, c′) walk back over word/numeric deletes to the anchor: a
-        // keep/substitute of a non-punctuation baseline token — never an
-        // insert or move, which also excludes a moved last word.
-        var j = companionPresent ? f - 2 : f - 1
-        let runEnd = j
-        while j >= 0, edits[j].kind == .delete, let from = edits[j].from, from.kind != .punctuation {
-            j -= 1
-        }
+        // (c) directly preceded by the anchor: a keep/substitute of a
+        // non-punctuation baseline token — never a delete, insert or move,
+        // which also excludes a moved last word.
+        let j = companionPresent ? f - 2 : f - 1
         guard j >= 0,
               edits[j].kind == .keep || edits[j].kind == .substitute,
               let anchor = edits[j].from,
@@ -2354,11 +2340,6 @@ public enum EditGuard {
         else { return false }
         for t in 0..<j {
             if let from = edits[t].from, from.index >= anchor.index { return false }
-        }
-        if j < runEnd {
-            for t in (j + 1)...runEnd {
-                guard let from = edits[t].from, from.index > anchor.index else { return false }
-            }
         }
         return true
     }
