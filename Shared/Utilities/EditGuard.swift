@@ -2275,13 +2275,13 @@ public enum EditGuard {
     /// senkt", "said that that answer"), a pronoun whose object and
     /// subject/possessive forms coincide ("told you you were", "ob sie sie
     /// kennt", "understand it it offers"), past perfect / pseudo-cleft
-    /// copula ("had had", "what it is is a"), and a stranded preposition or
-    /// adverb followed by a new phrase ("referring to to", "do so so").
+    /// copula ("had had", "what it is is a"), and an adverb followed by a
+    /// new clause ("do so so").
     /// Consulted by `isExactAdjacentStutterDelete` clause (c). Selection is
     /// `language == "de"` for the German set, anything else the English
     /// set — the same convention `EditGuardTokenizer.numericValue` uses.
     private static let legitimateAdjacentDoubleForms: [String: Set<String>] = [
-        "en": ["that", "had", "is", "was", "you", "it", "her", "to", "so"],
+        "en": ["that", "had", "is", "was", "you", "it", "her", "so"],
         "de": ["der", "die", "das", "den", "dem", "des", "denen", "deren", "dessen", "sie", "es", "ihr", "ist", "war"]
     ]
 
@@ -2356,6 +2356,18 @@ public enum EditGuard {
     /// other delete's neighbour is itself a deleted token, so clause (b)
     /// never fires for it. A German finite verb doubled after a fronted
     /// clause ("hat hat") is not excluded beyond `ist`/`war`.
+    ///
+    /// **`to` (260930-s1f):** an infinitive or stranded-preposition `to to`
+    /// is not excluded. Across the 3767 records of the union corpus the
+    /// gate baseline holds 4 such doubles: 3 stutters and 1 legitimate
+    /// double, which the LLM split with punctuation (a `.substitute`, which
+    /// clause (a) never matches) instead of deleting. The exclusion restored
+    /// the stutter in the one live coupled revert it touched (ts
+    /// `2026-09-26T14:47:57.157Z`). A wrong collapse of a legitimate `to to`
+    /// joins two phrases without removing an argument, tense or value.
+    /// Retention rule for the remaining members: stutters must outnumber
+    /// legitimate doubles, there must be at least 2 stutters, and the LLM
+    /// must never have been measured deleting a copy of a legitimate double.
     /// Word-to-punctuation substitute drops that `disfluencyAcceptedIndices`
     /// also counts are out of scope — clause (a) requires an actual
     /// `.delete`.
