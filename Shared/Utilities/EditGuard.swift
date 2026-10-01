@@ -2256,51 +2256,109 @@ public enum EditGuard {
     /// holds is preserved here too.
     ///
     /// **Accepted costs (measured against the live-corpus replay, quick
-    /// task 260926-bbz):** a mark that lands after an LLM-INSERTED word (the
-    /// existing 49.6 Shapes C/D — the LLM added a whole clause the raw
-    /// speech never anchors) is NOT exempt, because clause (c) requires the
-    /// edit immediately before the mark to be a `.keep`/`.substitute` of the
-    /// baseline's own last word, not an accepted insert. A multi-character
-    /// run (`...`, `?!`, or a mark glued to a following quote) is NEVER
-    /// exempt: `sentenceTerminalMarks` holds only the three single-character
-    /// forms, so a run token's `text` never matches clause (a). A mark
-    /// following a dangling FUNCTION word the raw utterance trails off on is
-    /// exempt (measured: 1/74 of the replay's restored marks) — this
-    /// predicate judges the edit, not the word's part of speech. A `?`'s
-    /// mood rests entirely on whether the LLM's own reading of the raw
-    /// clause triggered `moodLockSentenceInitialVerb` elsewhere in this
-    /// `rebuild` call — clause (d) is the only place this predicate looks
-    /// outside the mark's own edit.
+    /// tasks 260926-bbz and 260930-s1c):** a mark that lands after an
+    /// LLM-INSERTED word (the existing 49.6 Shapes C/D — the LLM added a
+    /// whole clause the raw speech never anchors) is NOT exempt, because
+    /// clause (c) requires the anchor before the mark (past any delete run)
+    /// to be a `.keep`/`.substitute` of the baseline's own last word, not an
+    /// accepted insert. A mark after a moved last word, a mark followed by
+    /// another edit and a multi-character run (`...`, `?!`, or a mark glued
+    /// to a following quote) are NEVER exempt either: `sentenceTerminalMarks`
+    /// holds only the three single-character forms, so a run token's `text`
+    /// never matches clause (a). A mark following a dangling FUNCTION word
+    /// the raw utterance trails off on is exempt (measured: 1/74 of bbz's
+    /// replay) — this predicate judges the edit, not the word's part of
+    /// speech. A `?`'s mood rests entirely on whether the
+    /// LLM's own reading of the raw clause triggered
+    /// `moodLockSentenceInitialVerb` elsewhere in this `rebuild` call —
+    /// clause (d) is the only place this predicate looks outside the mark's
+    /// own edit.
+    ///
+    /// **Quick task 260930-s1c — two extensions, both structural.** Three of
+    /// the four residual audit shapes (a mark that is the `to` half of a
+    /// rejected substitute or move, `2026-09-26T15:19:02.662Z`,
+    /// `2026-09-29T16:23:34.162Z`, `2026-09-30T17:43:18.675Z`) are NOT closed
+    /// here: rendering them needs an edit of the mark's own, and the split
+    /// that provides one was withheld because
+    /// `EditGuardMaterializeInvariantTests` P5 flags its restored-word-then-mark
+    /// seam (see the quick task SUMMARY).
+    /// Clause (c′): bbz required the edit before the mark to be the anchor
+    /// itself and excluded deletes. A run of word/numeric `.delete` edits
+    /// (any verdict) between the anchor and the mark is now allowed, because
+    /// the mark still renders last whatever the verdicts are: a rejected
+    /// delete restores at the anchor's candidate slot, which lies below the
+    /// mark's `to.index`, and an accepted delete renders nothing. Every
+    /// edit before the anchor must have `from == nil` or a `from.index`
+    /// below the anchor's, and every delete in the run must have one above
+    /// it, so a moved last word (whose `from.index` is the maximum) is still
+    /// excluded. `EditDiff` pairs a delete run and a final insert in one gap
+    /// into a `substitute`, so a native delete run before the final insert
+    /// has not been observed in the replay corpus, so this clause is
+    /// unexercised by any test or replayed record. Clause (b′): a `.`
+    /// insert directly before a final `?`/`!` insert (`etc.?`, audit ts
+    /// `2026-09-30T03:41:25.798Z`) is the final mark's companion and shares
+    /// its structural answer, with the anchor search starting before the
+    /// companion for both. Clause (d) withdraws both. Only `.` followed by
+    /// `?`/`!` qualifies; `..`, `?.` and a `.` after an LLM-inserted word do
+    /// not. `collapseDanglingPunctuation` needs a space between marks, so it
+    /// leaves `etc.?` intact.
     private static func isUtteranceFinalTerminalMarkInsert(
         at i: Int, edits: [Edit], verdicts: [ClassifiedEdit]
     ) -> Bool {
-        // (a) a single-character sentence-terminal mark, inserted.
-        guard edits[i].kind == .insert,
-              let to = edits[i].to,
-              to.kind == .punctuation,
-              sentenceTerminalMarks.contains(to.text)
+        guard isUtteranceFinalMarkPosition(at: i, edits: edits),
+              let finalMark = edits[edits.count - 1].to
         else { return false }
-        // (b) the last edit in the array — nothing baseline-anchored, and
-        // no other insert or move, follows it.
-        guard i == edits.count - 1 else { return false }
-        // (c) directly preceded by a keep/substitute of the last raw
-        // (baseline) token — never a delete, insert, or move, which also
-        // excludes a moved last word (the move's own `from.index` would be
-        // the maximum, but its `kind` is `.move`, not `.keep`/`.substitute`).
-        guard i > 0 else { return false }
-        let prev = edits[i - 1]
-        guard prev.kind == .keep || prev.kind == .substitute,
-              let prevFrom = prev.from,
-              prevFrom.kind != .punctuation
-        else { return false }
-        let maxFromIndex = edits.compactMap { $0.from?.index }.max()
-        guard prevFrom.index == maxFromIndex else { return false }
         // (d) mood carve-out: a `?`/`!` insert is withdrawn if this
         // `rebuild` call's mood lock fired anywhere in the utterance — a
         // mood-locked question would otherwise ship "Er kommt morgen?".
-        if moodMarks.contains(to.text),
+        if moodMarks.contains(finalMark.text),
            verdicts.contains(where: { $0.rejectClass == RejectionClass.moodLockSentenceInitialVerb.rawValue }) {
             return false
+        }
+        return true
+    }
+
+    /// A single-character sentence-terminal mark `.insert`.
+    private static func isTerminalMarkInsert(_ edit: Edit) -> Bool {
+        guard edit.kind == .insert, let to = edit.to, to.kind == .punctuation else { return false }
+        return sentenceTerminalMarks.contains(to.text)
+    }
+
+    /// The structural clauses (a), (b′), (c′) of
+    /// `isUtteranceFinalTerminalMarkInsert`; reads `edits` only.
+    private static func isUtteranceFinalMarkPosition(at i: Int, edits: [Edit]) -> Bool {
+        // (a) a single-character sentence-terminal mark, inserted.
+        guard edits.indices.contains(i), isTerminalMarkInsert(edits[i]) else { return false }
+        // (b) the last edit in the array — nothing baseline-anchored, and
+        // no other insert or move, follows it. (b′) or the `.` companion
+        // directly before a final `?`/`!` insert.
+        let f = edits.count - 1
+        guard let finalMark = edits[f].to, isTerminalMarkInsert(edits[f]) else { return false }
+        let companionPresent = f >= 1
+            && isTerminalMarkInsert(edits[f - 1])
+            && edits[f - 1].to?.text == "."
+            && moodMarks.contains(finalMark.text)
+        guard i == f || (i == f - 1 && companionPresent) else { return false }
+        // (c, c′) walk back over word/numeric deletes to the anchor: a
+        // keep/substitute of a non-punctuation baseline token — never an
+        // insert or move, which also excludes a moved last word.
+        var j = companionPresent ? f - 2 : f - 1
+        let runEnd = j
+        while j >= 0, edits[j].kind == .delete, let from = edits[j].from, from.kind != .punctuation {
+            j -= 1
+        }
+        guard j >= 0,
+              edits[j].kind == .keep || edits[j].kind == .substitute,
+              let anchor = edits[j].from,
+              anchor.kind != .punctuation
+        else { return false }
+        for t in 0..<j {
+            if let from = edits[t].from, from.index >= anchor.index { return false }
+        }
+        if j < runEnd {
+            for t in (j + 1)...runEnd {
+                guard let from = edits[t].from, from.index > anchor.index else { return false }
+            }
         }
         return true
     }
