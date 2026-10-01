@@ -95,4 +95,128 @@ final class BoilerplateHallucinationTests: XCTestCase {
         ]
         XCTAssertEqual(BoilerplateHallucination.shipList, expected)
     }
+
+    // MARK: - Short stock words (260930-s1g)
+    //
+    // Closed set {you, and, -} discarded when the whole decode is one of them
+    // AND (clip < 1.5 s OR the Layer-2 gate heard no voice). Positives are the
+    // five measured live records, cited by discard-log timestamp only.
+
+    private func short(_ text: String, _ duration: Float, voice: Bool) -> String? {
+        BoilerplateHallucination.matchShortStock(text, durationSeconds: duration, voiceDetected: voice)
+    }
+
+    // Duration arm (voiceDetected: true is the only state a sub-2.0 s clip reaches the guard in)
+
+    func testShortStockDurationArm_0928T164929_you() {
+        XCTAssertEqual(short("you", 1.3, voice: true), "you")
+    }
+
+    func testShortStockDurationArm_0926T031841_And() {
+        XCTAssertEqual(short("And", 1.1, voice: true), "And")
+    }
+
+    func testShortStockDurationArm_0920T130717_dash() {
+        XCTAssertEqual(short("-", 1.2, voice: true), "-")
+    }
+
+    func testShortStockDurationArmTrimsWhitespace() {
+        XCTAssertEqual(short("  you \n", 1.0, voice: true), "you")
+    }
+
+    func testShortStockDurationArmComparesLowercased() {
+        XCTAssertEqual(short("You", 1.0, voice: true), "You")
+    }
+
+    func testShortStockDurationArmJustInsideBound() {
+        XCTAssertEqual(
+            short("you", BoilerplateHallucination.shortStockMaxDurationSeconds.nextDown, voice: true),
+            "you")
+    }
+
+    // No-voice arm
+
+    func testShortStockNoVoiceArm_0920T081506_you() {
+        XCTAssertEqual(short("you", 12.8, voice: false), "you")
+    }
+
+    func testShortStockNoVoiceArm_0926T053103_you() {
+        XCTAssertEqual(short("you", 2.9, voice: false), "you")
+    }
+
+    // Negatives, duration arm (voiceDetected: true)
+
+    func testShortStockBoundIsExclusive() {
+        XCTAssertNil(short("you", BoilerplateHallucination.shortStockMaxDurationSeconds, voice: true))
+    }
+
+    func testShortStockLongClipWithVoiceHeardPassesThrough() {
+        XCTAssertNil(short("you", 2.9, voice: true))
+    }
+
+    func testShortStockApprovedPassesThrough() {
+        XCTAssertNil(short("Approved.", 1.1, voice: true))
+    }
+
+    func testShortStockSingleLetterIPassesThrough() {
+        XCTAssertNil(short("I", 1.1, voice: true))
+    }
+
+    func testShortStockSoEllipsisPassesThrough() {
+        XCTAssertNil(short("So...", 1.2, voice: true))
+    }
+
+    func testShortStockPunctuatedYouPassesThrough() {
+        XCTAssertNil(short("You.", 1.2, voice: true))
+    }
+
+    func testShortStockPunctuatedAndPassesThrough() {
+        XCTAssertNil(short("and.", 1.2, voice: true))
+    }
+
+    func testShortStockMultiTokenPassesThrough() {
+        XCTAssertNil(short("you know", 1.2, voice: true))
+    }
+
+    func testShortStockThankYouIsNotInShortList() {
+        XCTAssertNil(short("Thank you.", 1.2, voice: true))
+    }
+
+    func testShortStockEmptyPassesThrough() {
+        XCTAssertNil(short("", 1.0, voice: true))
+    }
+
+    func testShortStockWhitespaceOnlyPassesThrough() {
+        XCTAssertNil(short("   ", 1.0, voice: true))
+    }
+
+    // Negatives, no-voice arm (voiceDetected: false)
+
+    func testShortStockNoVoiceOutOfSetMultiTokenPassesThrough() {
+        XCTAssertNil(short("we should ship it", 3.5, voice: false))
+    }
+
+    func testShortStockNoVoicePunctuatedYouPassesThrough() {
+        XCTAssertNil(short("You.", 2.9, voice: false))
+    }
+
+    func testShortStockNoVoiceWhitespaceOnlyPassesThrough() {
+        XCTAssertNil(short("   ", 2.9, voice: false))
+    }
+
+    // Unconditional list untouched
+
+    func testUnconditionalMatchStillRejectsBareYou() {
+        XCTAssertNil(BoilerplateHallucination.match("you"))
+    }
+
+    // Locks
+
+    func testShortStockListIsExactlyThreeEntries() {
+        XCTAssertEqual(BoilerplateHallucination.shortStockList, ["you", "and", "-"])
+    }
+
+    func testShortStockMaxDurationIsOnePointFiveSeconds() {
+        XCTAssertEqual(BoilerplateHallucination.shortStockMaxDurationSeconds, 1.5)
+    }
 }
