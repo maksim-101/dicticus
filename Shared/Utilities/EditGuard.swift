@@ -217,6 +217,29 @@ public enum EditGuard {
         /// P1 fixture in `EditGuardClauseRelocationTests` reproduces its
         /// logged `post_gate.edits` index for index.
         case clauseRelocation
+        /// Quick task 260930-s1h: assigned by `classifySubstitute` to a
+        /// casing-only `.substitute` whose baseline token is an all-caps word
+        /// (two or more letters, every letter uppercase), whose candidate form
+        /// lowers at least one of those letters, and whose baseline
+        /// predecessor is a `.` token. Stage trace of the live defect
+        /// (`2026-09-27T04:32:59.544Z`): the dictionary produced a dotted
+        /// identifier with an all-caps extension, the LLM title-cased the
+        /// extension, and step 1's casing-only accept shipped it. Evidence:
+        /// 3 all-caps lowerings in the 3436-record scan; the after-dot one is
+        /// the only one that reached the paste (the other two,
+        /// `2026-09-12T05:52:49.686Z` and `2026-09-20T04:54:04.555Z`, were
+        /// reverted by `sentenceCoupledRevert`).
+        ///
+        /// Scope is "after a dot" because the `2026-09-20T04:54:04.555Z`
+        /// mid-sentence brand recase is a correct repair, as were the
+        /// all-caps recases the pre-EditGuard gate allowed on purpose.
+        /// NOT a member of `sentenceRevertTriggerClasses`: a casing-only
+        /// restore carries no content signal, and triggering would revert the
+        /// raw sentence's other accepted punctuation. Known residual:
+        /// `projectFormatting` emits candidate casing verbatim and could in
+        /// principle lower an acronym; 0 `formattingProjection` records in
+        /// 3436.
+        case acronymLoweredAfterDot
     }
 
     /// The log-shaped record: one classified edit, ready to serialize
@@ -817,7 +840,7 @@ public enum EditGuard {
             return a.kind == .punctuation ? (true, .punctuationOrCasing, nil) : (true, nil, nil)
 
         case .substitute:
-            return classifySubstitute(edit, language: language, dictProtectedLower: dictProtectedLower, lexicon: lexicon, disfluencyIndices: disfluencyIndices, clauseRelocationIndices: clauseRelocationIndices)
+            return classifySubstitute(edit, baseline: baseline, language: language, dictProtectedLower: dictProtectedLower, lexicon: lexicon, disfluencyIndices: disfluencyIndices, clauseRelocationIndices: clauseRelocationIndices)
 
         case .insert:
             return classifyInsert(edit, language: language, candidate: candidate)
@@ -834,6 +857,7 @@ public enum EditGuard {
 
     private static func classifySubstitute(
         _ edit: Edit,
+        baseline: [Token],
         language: String,
         dictProtectedLower: Set<String>,
         lexicon: any SpellLexicon = PlatformSpellLexicon.shared,
@@ -846,6 +870,19 @@ public enum EditGuard {
         // `clauseRelocationIndices`) is rejected before any other arm.
         if a.kind == .punctuation, clauseRelocationIndices.contains(a.index) {
             return (false, nil, .clauseRelocation)
+        }
+
+        // Quick task 260930-s1h: an all-caps word lowered directly after a
+        // `.` is rejected before step 1's casing-only accept (see
+        // `RejectionClass.acronymLoweredAfterDot`).
+        if a.kind == .word, a.normalized == b.normalized,
+           a.text.contains(where: { $0.isLetter }),
+           a.text.filter({ $0.isLetter }).count >= 2,
+           a.text.allSatisfy({ !$0.isLetter || $0.isUppercase }),
+           b.text.contains(where: { $0.isLowercase }),
+           a.index > 0, baseline.indices.contains(a.index - 1),
+           baseline[a.index - 1].kind == .punctuation, baseline[a.index - 1].text == "." {
+            return (false, nil, .acronymLoweredAfterDot)
         }
 
         // 1. Casing-only fix.
