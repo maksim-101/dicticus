@@ -47,6 +47,7 @@
 		26CD77E2B237F8B2C78BCCB2 /* StarterPackBrandsRowsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A79FABA77F126D02B9899EC7 /* StarterPackBrandsRowsTests.swift */; };
 		2963F7BB4DDE8B2328F6F3B2 /* SpellLexicon.swift in Sources */ = {isa = PBXBuildFile; fileRef = 281328ADDB5579109F110264 /* SpellLexicon.swift */; };
 		2A0BC6A9E3318985B054375B /* PermissionRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 698EE4AB3AE54E73F4342A3B /* PermissionRow.swift */; };
+		2B9F45BCB518F3E939B4BB91 /* StripPreambleQuoteProvenanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A93AF98331232392217D5F1F /* StripPreambleQuoteProvenanceTests.swift */; };
 		2C44EE562FD69A88C6BC9F94 /* AppBuildInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = B24660DFE48AE6E30C151D89 /* AppBuildInfo.swift */; };
 		2C83C0A729600C6BDD9B0284 /* ITNUtility.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF52FB11E0C3E29DB9DD5308 /* ITNUtility.swift */; };
 		2CBB9E936439E4D8CA60F825 /* HotkeyManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70F70EF5ED301ED2D480B920 /* HotkeyManagerTests.swift */; };
@@ -175,6 +176,7 @@
 		B740367ACE9F28A444DEAD7F /* InMemoryUserDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2586E1752BAB530E1D162B18 /* InMemoryUserDefaults.swift */; };
 		B84B080262C8BCE1138D388B /* EditGuardPipelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 216843E09576D99E411462A0 /* EditGuardPipelineTests.swift */; };
 		B8FCF60AD1DE1C049A3DCB1E /* CleanupPromptVNextTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DDAA158F46193C40A3A8358 /* CleanupPromptVNextTests.swift */; };
+		B947275C4FF60F16AB15D011 /* EditGuardQuoteSeamSpacingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 822EB16303146DC39368B6EF /* EditGuardQuoteSeamSpacingTests.swift */; };
 		B97D08BDD9CB8B1843005F2D /* BrandStringMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A3E0DD3883D76BF248B7EB8 /* BrandStringMetrics.swift */; };
 		BC46646AC6ACB62C88CE8114 /* DicticusDefaultsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 81A5F07A50992847BD7F6EBB /* DicticusDefaultsTests.swift */; };
 		BC9086C08969A4C914C160BC /* SentenceAligner.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE16406238860D488CDF8B58 /* SentenceAligner.swift */; };
@@ -359,6 +361,7 @@
 		814FDCB63B61CE120268D143 /* AboutPane.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AboutPane.swift; sourceTree = "<group>"; };
 		81A5F07A50992847BD7F6EBB /* DicticusDefaultsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DicticusDefaultsTests.swift; sourceTree = "<group>"; };
 		81DE763C61392CC53C40C123 /* starter-pack-brands.csv */ = {isa = PBXFileReference; path = "starter-pack-brands.csv"; sourceTree = "<group>"; };
+		822EB16303146DC39368B6EF /* EditGuardQuoteSeamSpacingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditGuardQuoteSeamSpacingTests.swift; sourceTree = "<group>"; };
 		839A422D88E41D76CCFE3A59 /* .gitkeep */ = {isa = PBXFileReference; path = .gitkeep; sourceTree = "<group>"; };
 		852A9A64040275AE2A20C425 /* lexicon-de.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "lexicon-de.txt"; sourceTree = "<group>"; };
 		85844C88385261660FE6757B /* DictionaryExactPassCaseTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictionaryExactPassCaseTests.swift; sourceTree = "<group>"; };
@@ -399,6 +402,7 @@
 		A79871663647645D625FA964 /* EditGuardGrammarRegressionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditGuardGrammarRegressionTests.swift; sourceTree = "<group>"; };
 		A79FABA77F126D02B9899EC7 /* StarterPackBrandsRowsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StarterPackBrandsRowsTests.swift; sourceTree = "<group>"; };
 		A7D03D036A33A2051FEFAB61 /* EditGuardFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditGuardFixtures.swift; sourceTree = "<group>"; };
+		A93AF98331232392217D5F1F /* StripPreambleQuoteProvenanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StripPreambleQuoteProvenanceTests.swift; sourceTree = "<group>"; };
 		A95123FD20501B4871C75668 /* AppLocalMigrationServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLocalMigrationServiceTests.swift; sourceTree = "<group>"; };
 		AA3ABD8D43E7EB02B7D002EA /* CapitalizationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapitalizationTests.swift; sourceTree = "<group>"; };
 		ABA71A6F64C7DA9ED75C9FF1 /* SelfCorrectionResolverTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelfCorrectionResolverTests.swift; sourceTree = "<group>"; };
@@ -797,6 +801,7 @@
 				E29AE36115156F5CFED4B1D5 /* EditGuardPauseSplitParakeetAuditTests.swift */,
 				216843E09576D99E411462A0 /* EditGuardPipelineTests.swift */,
 				B0FC1D8FAD13709807AABBA4 /* EditGuardProjectionSalvageTests.swift */,
+				822EB16303146DC39368B6EF /* EditGuardQuoteSeamSpacingTests.swift */,
 				02507396F705EA789DBA4801 /* EditGuardRunTokenizationReplayTests.swift */,
 				563054E122CDA669E9808B05 /* EditGuardSeamSpacingTests.swift */,
 				07E8AD126537E7029E61D9DD /* EditGuardTests.swift */,
@@ -813,6 +818,7 @@
 				CEC46F666F4D931F4C683636 /* PosTaggerProbeTests.swift */,
 				17D1BB9DFF0AB047BBF9D391 /* ReasoningLeakTests.swift */,
 				A79FABA77F126D02B9899EC7 /* StarterPackBrandsRowsTests.swift */,
+				A93AF98331232392217D5F1F /* StripPreambleQuoteProvenanceTests.swift */,
 				7F70BB4A9D38C630EABED3A7 /* SwissNumberGroupingTests.swift */,
 				4264C1E2C32A2EF75493B53E /* SwissNumberTokenIntegrityTests.swift */,
 				61F670950CE1A5DA081BE0E7 /* TestIsolationCanaryTests.swift */,
@@ -1180,6 +1186,7 @@
 				9D7A21E2A8257707109AACED /* EditGuardPauseSplitParakeetAuditTests.swift in Sources */,
 				B84B080262C8BCE1138D388B /* EditGuardPipelineTests.swift in Sources */,
 				84A628BF3C641F4A29204CAC /* EditGuardProjectionSalvageTests.swift in Sources */,
+				B947275C4FF60F16AB15D011 /* EditGuardQuoteSeamSpacingTests.swift in Sources */,
 				BEFDF81CFEF4CCB358B14CBC /* EditGuardRunTokenizationReplayTests.swift in Sources */,
 				251804AB71D4F7D94516A60F /* EditGuardSeamSpacingTests.swift in Sources */,
 				17FB04E9771817C360006E70 /* EditGuardTests.swift in Sources */,
@@ -1216,6 +1223,7 @@
 				EE60B4BDA6BFCEFA64F975AF /* SelfCorrectionResolverTests.swift in Sources */,
 				6A56E4E84BD5D0AB9EDCD43E /* SentenceAlignerTests.swift in Sources */,
 				26CD77E2B237F8B2C78BCCB2 /* StarterPackBrandsRowsTests.swift in Sources */,
+				2B9F45BCB518F3E939B4BB91 /* StripPreambleQuoteProvenanceTests.swift in Sources */,
 				87A22847652809E518D36722 /* SwissDialectFormsTests.swift in Sources */,
 				77E629F73BA61CF10EF8CAC5 /* SwissNumberFormatterTests.swift in Sources */,
 				116C78BC1384C3ADF34F92CD /* SwissNumberGroupingTests.swift in Sources */,
