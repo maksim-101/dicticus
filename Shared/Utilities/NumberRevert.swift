@@ -11,6 +11,15 @@ import Foundation
 /// Count-budget design prevents over-rewriting legitimate duplicates:
 /// "three things, all three" — each occurrence tracked individually (Pitfall 4).
 ///
+/// German `N.` for N = 1..10 is both an ordinal and a sentence-final cardinal, so it lives in
+/// the ordinal budget and the digit-budget Case C never sees it. Case C-ordinal therefore
+/// reverts a re-spelling (`drei.`, `dritten`) to that baseline `N.` token, and only ever emits
+/// a token that exists verbatim and unconsumed in the baseline. This matters because
+/// FactPreservationGuard runs next and discards the whole output when the literal is missing
+/// (quick task 260930-s1b, record 2026-09-29T17:30:15.605Z). Residuals: a re-spelling that lost
+/// its own period (`drei,`, bare `drei` for an ordinal) is left for FactPreservationGuard, and
+/// the mirror direction (baseline word `drei.`, LLM digit `3.`) is not handled.
+///
 /// EN and DE maps cover cardinals and ordinals. The `@MainActor` annotation present
 /// in the spike (Numbers006.swift) is removed — this is a pure transform; the
 /// `@MainActor` call site (TextProcessingService) handles isolation.
@@ -182,6 +191,22 @@ public enum NumberRevert {
                 changes.append(Change(from: t, to: replacement))
                 result.append(replacement)
                 continue
+            }
+
+            // Case C-ordinal: a German baseline `N.` (N = 1..10) is an ordinal key, so it sits
+            // in the ordinal budget and Case C never sees it. Revert a re-spelling to that
+            // exact unconsumed token, in two unambiguous shapes only: an ordinal word
+            // ("dritten") or a cardinal word carrying its own trailing period ("drei.").
+            if let digit = map[cardinalLowerC], baseWordCounts[cardinalLowerC, default: 0] == 0 {
+                let ordinalForm = digit.hasSuffix(".") ? digit : digit + "."
+                if digit.hasSuffix(".") || trailingPeriodC == ".",
+                   outOrdinalBudget[ordinalForm, default: 0] > 0 {
+                    outOrdinalBudget[ordinalForm]! -= 1
+                    let replacement = t.replacingOccurrences(of: core, with: ordinalForm)
+                    changes.append(Change(from: t, to: replacement))
+                    result.append(replacement)
+                    continue
+                }
             }
 
             result.append(t)

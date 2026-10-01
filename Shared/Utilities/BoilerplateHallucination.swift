@@ -11,7 +11,7 @@ import Foundation
 /// imports, directly unit-testable. Lives in `Shared/` for the same reason
 /// `NoSpeechDiscard` does — a Whisper-specific predicate with a shared test target and
 /// therefore a single test copy — and is called only from macOS (iOS runs Parakeet and
-/// does not exhibit this hallucination class).
+/// does not exhibit this hallucination class). That holds for both lists below.
 ///
 /// **Hard constraint: no threshold of any kind.** This is a string comparison and
 /// nothing else — no confidence, avgLogprob, noSpeechProb, compression ratio,
@@ -19,7 +19,14 @@ import Foundation
 /// confidence gating was measured and rejected in spike 260805-qx7 (brand mishearings
 /// score deeper than garbles, recall 28.6%).
 ///
-/// Matching semantics, pinned:
+/// Reviewed amendment (quick task 260930-s1g): `matchShortStock` and ONLY it reads two
+/// non-text inputs, both named here so no third can arrive silently. (1) Clip duration,
+/// the lever Layer 1's 0.3 s guard and Phase 50's 2.0 s bypass already use; it is not a
+/// confidence signal. (2) The Layer-2 gate's already-computed `voiceDetected` Bool. This
+/// file reads no energy value and sets no energy threshold; the gate made that call for
+/// its own discard decision, and it is not a confidence signal either.
+///
+/// Matching semantics, pinned (for `shipList`; `matchShortStock` compares lowercased, see below):
 /// - Trim leading/trailing whitespace and newlines, then compare for EXACT string
 ///   equality against the closed list below. No lowercasing, no punctuation stripping,
 ///   no substring search, no prefix/suffix matching, no normalisation.
@@ -58,5 +65,44 @@ enum BoilerplateHallucination {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         return shipList.contains(trimmed) ? trimmed : nil
+    }
+
+    /// Closed short list (quick task 260930-s1g): a lone "you", "and" or "-" that Whisper
+    /// decodes from a stray short key press or from a recording in which the voice gate
+    /// heard nothing. Compared lowercased against the trimmed whole utterance. Widening
+    /// is a reviewed edit (`testShortStockListIsExactlyThreeEntries`).
+    ///
+    /// Measured over every discard log on disk (mid-August to 2026-09-30, macOS only):
+    /// 5 hits among the pass records, 0 false positives; no standalone "you"/"and"/"-"
+    /// that the user meant appears in any cleanup record. Deliberately EXCLUDED:
+    /// punctuated forms (`You.`, `And.`) on both arms, since a person can plausibly
+    /// dictate them, and energy or VAD AND-terms on the duration arm, which did not
+    /// separate the hits from anything.
+    static let shortStockList: Set<String> = ["you", "and", "-"]
+
+    /// Duration-arm bound, exclusive. The three measured duration-arm hits last
+    /// 1.1-1.3 s; genuine one-word dictations (`Approved.`, `Commit.`, `Yeah.`) are
+    /// outside the set at any length.
+    static let shortStockMaxDurationSeconds: Float = 1.5
+
+    /// Returns the trimmed text when it is, lowercased, a member of `shortStockList` AND
+    /// (`durationSeconds < shortStockMaxDurationSeconds` OR the gate found no voice).
+    /// Set membership is required on both arms; the two conditions are an OR. Returns nil
+    /// otherwise, including for an empty or whitespace-only input.
+    ///
+    /// - Duration arm: 3 hits at 1.1-1.3 s (2026-09-20T13:07:17, 09-26T03:18:41,
+    ///   09-28T16:49:29).
+    /// - No-voice arm: `voiceDetected == false` is exactly a logged `vad_true_frame_count`
+    ///   of 0, because `AdaptiveVoiceGate.evaluate` sets `voiceDetected` to
+    ///   `maxFrameEnergy > threshold` and the count is the number of frames above that
+    ///   threshold. 2 hits (2026-09-20T08:15:06, 09-26T05:31:03) among the 6 no-voice
+    ///   pass records since 2026-09-16; the other 4 decode to 2-28 tokens and are
+    ///   untouched. These clips reach Whisper only through Phase 50 D-01's duration
+    ///   bypass, so for these three tokens this arm is that bypass's backstop.
+    static func matchShortStock(_ text: String, durationSeconds: Float, voiceDetected: Bool) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, shortStockList.contains(trimmed.lowercased()) else { return nil }
+        guard durationSeconds < shortStockMaxDurationSeconds || !voiceDetected else { return nil }
+        return trimmed
     }
 }

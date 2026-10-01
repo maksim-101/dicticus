@@ -139,6 +139,7 @@ class TextProcessingService: ObservableObject {
         #if DEBUG_RECORDER
         var dbgReplacements = dictTrace.replacements
         var dbgBlocked = dictTrace.blocked
+        let dbgVetoed = dictTrace.vetoed
         let dbgPostDict = processedText
         let dbgPostDictMs = Date().timeIntervalSince(dbgRawStart) * 1000.0
         let dbgItnStart = Date()
@@ -598,7 +599,9 @@ class TextProcessingService: ObservableObject {
             resolved_context: (mode == .aiCleanup ? context : .default).rawValue,   // Phase 38 Plan 01 (D-10)
             // Quick task 260805-qme: empty array (not nil) distinguishes "matcher
             // ran, changed nothing" from a historical record predating this field.
-            brand_rewrites: dbgBrandRewrites.map { DebugCleanupRecord.BrandRewriteEntry(from: $0.surface, to: $0.canon, jw: $0.jw, dl: $0.dl) }
+            brand_rewrites: dbgBrandRewrites.map { DebugCleanupRecord.BrandRewriteEntry(from: $0.surface, to: $0.canon, jw: $0.jw, dl: $0.dl) },
+            // Quick task 260930-s1e: always an array; [] = "ran, nothing vetoed".
+            lexicon_vetoed: dbgVetoed.map { DebugCleanupRecord.DictionaryBlockedEntry(key: $0.key, from: $0.from, to: $0.to, ratio: $0.ratio) }
         )
         await DebugRecorder.shared.record(record)
         #endif

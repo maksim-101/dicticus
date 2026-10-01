@@ -193,6 +193,53 @@ public enum EditGuard {
         /// `MM-DD:N` only, per D-12 — no record text): 08-30:16, 08-30:27,
         /// 08-20:21, 08-20:10, 08-20:13, 09-03:25.
         case sentenceCoupledRevert
+        /// Quick task 260930-s19: assigned by `classifyMove`, `classifyDelete`
+        /// and `classifySubstitute` to a baseline token that
+        /// `clauseRelocationIndices` marks: a member of a RUN of two or more
+        /// word/numeric `.move` edits that carries a clause across a clause
+        /// boundary or a raw sentence boundary, or a coupled sentence-terminal
+        /// mark the LLM removed to make room for it. A run is a set of moves
+        /// whose `from` tokens are consecutive in the BASELINE stream (only
+        /// baseline punctuation between members). Criterion A: a
+        /// clause-boundary mark sits between two members. Criterion B: a
+        /// member's jumped span holds a raw terminal mark that has a word
+        /// after it. Coupled marks: a `.delete` (or `.substitute` to a
+        /// non-terminal mark) of the terminal mark ending the sentence before
+        /// the run's origin sentence, or lying inside a member's jumped span,
+        /// unless `isPauseSplitPeriod` holds.
+        ///
+        /// A member of `sentenceRevertTriggerClasses`: the repro's two
+        /// inserted commas sit in a punctuation-only cluster that atomic
+        /// coupling reverts only because a move destination happens to bridge
+        /// into it, whereas the coupled-sentence revert returns the rest of
+        /// each touched raw sentence to raw deterministically. Live repro
+        /// (ts only, no text): `2026-09-29T13:01:45.693Z` (de); the synthetic
+        /// P1 fixture in `EditGuardClauseRelocationTests` reproduces its
+        /// logged `post_gate.edits` index for index.
+        case clauseRelocation
+        /// Quick task 260930-s1h: assigned by `classifySubstitute` to a
+        /// casing-only `.substitute` whose baseline token is an all-caps word
+        /// (two or more letters, every letter uppercase), whose candidate form
+        /// lowers at least one of those letters, and whose baseline
+        /// predecessor is a `.` token. Stage trace of the live defect
+        /// (`2026-09-27T04:32:59.544Z`): the dictionary produced a dotted
+        /// identifier with an all-caps extension, the LLM title-cased the
+        /// extension, and step 1's casing-only accept shipped it. Evidence:
+        /// 3 all-caps lowerings in the 3436-record scan; the after-dot one is
+        /// the only one that reached the paste (the other two,
+        /// `2026-09-12T05:52:49.686Z` and `2026-09-20T04:54:04.555Z`, were
+        /// reverted by `sentenceCoupledRevert`).
+        ///
+        /// Scope is "after a dot" because the `2026-09-20T04:54:04.555Z`
+        /// mid-sentence brand recase is a correct repair, as were the
+        /// all-caps recases the pre-EditGuard gate allowed on purpose.
+        /// NOT a member of `sentenceRevertTriggerClasses`: a casing-only
+        /// restore carries no content signal, and triggering would revert the
+        /// raw sentence's other accepted punctuation. Known residual:
+        /// `projectFormatting` emits candidate casing verbatim and could in
+        /// principle lower an acronym; 0 `formattingProjection` records in
+        /// 3436.
+        case acronymLoweredAfterDot
     }
 
     /// The log-shaped record: one classified edit, ready to serialize
@@ -559,8 +606,17 @@ public enum EditGuard {
     /// owned upstream, at the token level where provenance is still known, by
     /// `collapseMixedProvenancePunctuationRuns` (see its doc comment) — this pass keeps owning
     /// exactly the spaced same-source case it always has.
+    ///
+    /// A mark directly followed by a letter or digit starts a token (a dotted name such as `.NET`,
+    /// `.env`, `.claude`, or `.5`), so it is not dangling: the second mark needs whitespace, the end
+    /// of the string, or a closing quote/bracket after it. The lookahead mirrors `stripPreamble`'s
+    /// Pitfall-5 lookahead. This pass runs on the rebuilt STRING after `multisetInvariantHolds` and
+    /// `renderingInvariantHolds`, so no fail-closed net sees its output;
+    /// `EditGuardMaterializeInvariantTests` P7 is the property that guards it. Quick task
+    /// 260930-s1a (audit record ts 2026-09-28T04:01:36.829Z: `things: .NET` was pasted as
+    /// `things.NET`).
     static func collapseDanglingPunctuation(_ text: String) -> String {
-        guard let regex = try? NSRegularExpression(pattern: " *([.,;:!?]) +([.,;:!?])") else { return text }
+        guard let regex = try? NSRegularExpression(pattern: " *([.,;:!?]) +([.,;:!?])(?=\\s|$|[\"')\\]])") else { return text }
         let terminals: Set<Character> = [".", "!", "?"]
         var current = text
         // Loop so a run of 3+ (e.g. ` , . ;`) fully collapses.
@@ -677,13 +733,15 @@ public enum EditGuard {
     ) -> [ClassifiedEdit] {
         let dictProtectedLower = Set(dictProtected.map { $0.lowercased() })
         let disfluencyIndices = disfluencyAcceptedIndices(edits: edits, baseline: baseline, language: language)
+        let clauseRelocation = clauseRelocationIndices(edits: edits, baseline: baseline)
         var result: [ClassifiedEdit] = []
         result.reserveCapacity(edits.count)
 
         for edit in edits {
             let (accepted, acceptClass, rejectClass) = classifyOne(
                 edit, baseline: baseline, language: language, dictProtectedLower: dictProtectedLower,
-                candidate: candidate, lexicon: lexicon, disfluencyIndices: disfluencyIndices
+                candidate: candidate, lexicon: lexicon, disfluencyIndices: disfluencyIndices,
+                clauseRelocationIndices: clauseRelocation
             )
             result.append(ClassifiedEdit(
                 kind: edit.kind.rawValue,
@@ -773,7 +831,8 @@ public enum EditGuard {
         dictProtectedLower: Set<String>,
         candidate: [Token],
         lexicon: any SpellLexicon,
-        disfluencyIndices: Set<Int>
+        disfluencyIndices: Set<Int>,
+        clauseRelocationIndices: Set<Int>
     ) -> (accepted: Bool, acceptClass: AcceptClass?, rejectClass: RejectionClass?) {
         switch edit.kind {
         case .keep:
@@ -781,16 +840,16 @@ public enum EditGuard {
             return a.kind == .punctuation ? (true, .punctuationOrCasing, nil) : (true, nil, nil)
 
         case .substitute:
-            return classifySubstitute(edit, language: language, dictProtectedLower: dictProtectedLower, lexicon: lexicon, disfluencyIndices: disfluencyIndices)
+            return classifySubstitute(edit, baseline: baseline, language: language, dictProtectedLower: dictProtectedLower, lexicon: lexicon, disfluencyIndices: disfluencyIndices, clauseRelocationIndices: clauseRelocationIndices)
 
         case .insert:
             return classifyInsert(edit, language: language, candidate: candidate)
 
         case .delete:
-            return classifyDelete(edit, baseline: baseline, language: language, disfluencyIndices: disfluencyIndices)
+            return classifyDelete(edit, baseline: baseline, language: language, disfluencyIndices: disfluencyIndices, clauseRelocationIndices: clauseRelocationIndices)
 
         case .move:
-            return classifyMove(edit, language: language)
+            return classifyMove(edit, language: language, clauseRelocationIndices: clauseRelocationIndices)
         }
     }
 
@@ -798,12 +857,33 @@ public enum EditGuard {
 
     private static func classifySubstitute(
         _ edit: Edit,
+        baseline: [Token],
         language: String,
         dictProtectedLower: Set<String>,
         lexicon: any SpellLexicon = PlatformSpellLexicon.shared,
-        disfluencyIndices: Set<Int> = []
+        disfluencyIndices: Set<Int> = [],
+        clauseRelocationIndices: Set<Int> = []
     ) -> (accepted: Bool, acceptClass: AcceptClass?, rejectClass: RejectionClass?) {
         guard let a = edit.from, let b = edit.to else { return (false, nil, .unclassified) }
+
+        // Quick task 260930-s19: a coupled sentence-terminal mark (see
+        // `clauseRelocationIndices`) is rejected before any other arm.
+        if a.kind == .punctuation, clauseRelocationIndices.contains(a.index) {
+            return (false, nil, .clauseRelocation)
+        }
+
+        // Quick task 260930-s1h: an all-caps word lowered directly after a
+        // `.` is rejected before step 1's casing-only accept (see
+        // `RejectionClass.acronymLoweredAfterDot`).
+        if a.kind == .word, a.normalized == b.normalized,
+           a.text.contains(where: { $0.isLetter }),
+           a.text.filter({ $0.isLetter }).count >= 2,
+           a.text.allSatisfy({ !$0.isLetter || $0.isUppercase }),
+           b.text.contains(where: { $0.isLowercase }),
+           a.index > 0, baseline.indices.contains(a.index - 1),
+           baseline[a.index - 1].kind == .punctuation, baseline[a.index - 1].text == "." {
+            return (false, nil, .acronymLoweredAfterDot)
+        }
 
         // 1. Casing-only fix.
         if a.normalized == b.normalized, a.text != b.text {
@@ -1031,11 +1111,18 @@ public enum EditGuard {
         _ edit: Edit,
         baseline: [Token],
         language: String,
-        disfluencyIndices: Set<Int> = []
+        disfluencyIndices: Set<Int> = [],
+        clauseRelocationIndices: Set<Int> = []
     ) -> (accepted: Bool, acceptClass: AcceptClass?, rejectClass: RejectionClass?) {
         guard let a = edit.from else { return (false, nil, .unclassified) }
 
         if a.kind == .punctuation {
+            // Quick task 260930-s19: a coupled sentence-terminal mark (see
+            // `clauseRelocationIndices`) is rejected before the pause-split
+            // and unconditional-accept arms.
+            if clauseRelocationIndices.contains(a.index) {
+                return (false, nil, .clauseRelocation)
+            }
             // Quick task 260801-m8o: checked FIRST, before the unconditional
             // punctuation accept below — a qualifying pause-split period gets
             // its own class so `applyAtomicGroupCoupling` can exempt it
@@ -1171,9 +1258,14 @@ public enum EditGuard {
     /// reachable from outside the module, so no app target can flip it.
     internal static var experimentalAllowPunctuationMove = false
 
+    /// Word moves are permitted (D-04), one edit at a time; a RUN of two or
+    /// more word moves that carries a clause across a clause or sentence
+    /// boundary is rejected as `clauseRelocation` — see
+    /// `clauseRelocationIndices` (quick task 260930-s19).
     private static func classifyMove(
         _ edit: Edit,
-        language: String
+        language: String,
+        clauseRelocationIndices: Set<Int> = []
     ) -> (accepted: Bool, acceptClass: AcceptClass?, rejectClass: RejectionClass?) {
         guard let a = edit.from, let b = edit.to else { return (false, nil, .unclassified) }
 
@@ -1216,6 +1308,12 @@ public enum EditGuard {
         if isFillerToken(a.normalized, language: language) {
             return (false, nil, .unclassified)
         }
+        // Quick task 260930-s19: a member of a clause-relocating RUN of
+        // moves is rejected — see `clauseRelocationIndices`. A lone move is
+        // never a member.
+        if clauseRelocationIndices.contains(a.index) {
+            return (false, nil, .clauseRelocation)
+        }
         // A pure positional move of a pronoun with UNCHANGED person is
         // fine; a move by construction pairs tokens with identical
         // `.normalized` text, so person cannot actually differ here — this
@@ -1232,6 +1330,164 @@ public enum EditGuard {
         // rebuild's second pass — NOT here, per edit. Do not re-implement
         // that comparison in this function.
         return (true, .wordOrderRepair, nil)
+    }
+
+    // MARK: - Quick task 260930-s19: clause-relocation bound
+
+    /// Characters a `.punctuation` token may consist of to count as a
+    /// clause-boundary mark for criterion A of `clauseRelocationIndices`.
+    /// Quotes, apostrophes, slashes and other symbols do not count.
+    private static let clauseBoundaryMarkCharacters: Set<Character> = [
+        ",", ";", ":", "\u{2014}", "\u{2013}", "\u{2026}", ".", "!", "?", "(", ")",
+    ]
+
+    /// Quick task 260930-s19: baseline token indices that belong to a
+    /// clause-relocating run of moves, or to a terminal mark coupled with
+    /// one. Computed once per `classify` call (the `disfluencyAcceptedIndices`
+    /// precedent) and consulted by `classifyMove`, `classifyDelete` and
+    /// `classifySubstitute`; it depends on `edits` and `baseline` only, so
+    /// every `rebuild` call site and the mood-lock re-invocations see
+    /// identical verdicts. A baseline token is the `from` of exactly one
+    /// edit, so indexing by baseline index is exact.
+    ///
+    /// **Run.** Members are `.move` edits whose `from.kind` is `.word` or
+    /// `.numeric`. Two members belong to one run when every baseline token
+    /// strictly between their `from.index` values is `.punctuation`
+    /// (whatever edit that token has). A run needs at least two members; a
+    /// lone move is never touched. Contiguity is judged on the baseline only
+    /// (the raw-side rule of `baselineSentenceIndex`): an LLM that relocates
+    /// a clause and also reorders words inside it scatters the members'
+    /// candidate positions, and a both-stream rule such as
+    /// `applyMoveRunCoupling`'s would split such a run into lone moves.
+    ///
+    /// **Criterion A (relocates a clause).** A baseline token strictly
+    /// between two consecutive members is a clause-boundary mark
+    /// (`clauseBoundaryMarkCharacters`).
+    ///
+    /// **Criterion B (crosses a raw sentence boundary).** Per member, the
+    /// candidate-order `.keep` bracket (`prevKeep`: the keep with the
+    /// largest `to.index` below the member's, `nextKeep`: the smallest
+    /// above) is a baseline interval because keeps are monotone in both
+    /// streams. If `prevKeep.from.index` exceeds the member's `from.index`
+    /// the member moved later and its jumped span is the open baseline
+    /// interval (member, `nextKeep.from.index`), to the end of the baseline
+    /// when there is no `nextKeep`; if `nextKeep.from.index` is below the
+    /// member's it moved earlier and the span is (`prevKeep.from.index`,
+    /// member), from the start when there is no `prevKeep`; otherwise it did
+    /// not jump. The run is rejected when any span contains a token in
+    /// `sentenceTerminalMarks` with a `.word` or `.numeric` baseline token
+    /// somewhere after it; a terminal mark followed only by punctuation ends
+    /// the utterance and cannot be crossed. Only baseline indices and
+    /// `from.sentenceIndex` are read; `to.sentenceIndex` never is.
+    ///
+    /// **Coupled terminal marks.** For each rejected run, let `o` be the
+    /// smallest `from.sentenceIndex` among its members and `start` the
+    /// baseline index of the first token of sentence `o`. An edit is a
+    /// coupled mark when its `from` is a terminal `.punctuation` token, it is
+    /// a `.delete` or a `.substitute` to a non-terminal mark, and its
+    /// `from.index` is `start - 1` or lies inside some member's jumped span,
+    /// except that a pause-split period (`isPauseSplitPeriod`) is excluded:
+    /// its merge is self-contained and restoring it would put a period before
+    /// the lowercase raw continuation. The mark ending the run's own sentence
+    /// needs no coupling because the sentence-coupled revert flips it. The
+    /// rule is explicit because atomic coupling reaches the period only when
+    /// it shares a keep-bounded cluster with the moves, which depends on
+    /// edit-array adjacency.
+    ///
+    /// **Why this is not one of the three bounds already rejected**
+    /// (`EditGuardFixtures`): a sentence-index bound (-32 % `wordOrderRepair`),
+    /// a fixed distance cap (legitimate moves span 0-89 tokens) and a local
+    /// anchor window (-21.6 %) each bounded every move, single-word moves
+    /// included. This rule bounds only multi-member runs that span a clause
+    /// mark or cross a raw terminal mark. Planning-time corpus scan (2114
+    /// records, 08-13..09-26, plus live 09-26..09-30 logs): five records
+    /// carry an accepted run of two or more moves; `2026-08-13T06:56:04.382Z`,
+    /// `2026-09-09T03:56:07.872Z`, `2026-09-10T03:56:30.453Z` and
+    /// `2026-09-25T04:02:13.356Z` are good in-clause repairs that this rule
+    /// leaves untouched, the fifth is `2026-09-29T13:01:45.693Z`.
+    ///
+    /// **Accepted costs.** A clause moved as a chunk without interior
+    /// punctuation inside its own raw sentence is not caught (had the LLM
+    /// moved only a few words around a clause, A and B would both stay
+    /// silent). Two independent single-word moves adjacent in the baseline
+    /// across a comma count as one run (zero instances among the corpus's
+    /// accepted moves). A single-word move across a sentence boundary stays
+    /// accepted; the mood lock remains the backstop for a fronted finite
+    /// verb. When a coupled mark's sentence is triggered, its
+    /// context-dependent edits revert with it.
+    private static func clauseRelocationIndices(edits: [Edit], baseline: [Token]) -> Set<Int> {
+        let members = edits.compactMap { edit -> (from: Token, to: Token)? in
+            guard edit.kind == .move, let from = edit.from, let to = edit.to,
+                  from.kind == .word || from.kind == .numeric else { return nil }
+            return (from, to)
+        }.sorted { $0.from.index < $1.from.index }
+        guard members.count >= 2 else { return [] }
+
+        var runs: [[(from: Token, to: Token)]] = []
+        for member in members {
+            if let last = runs.last?.last,
+               (last.from.index + 1..<member.from.index).allSatisfy({ baseline[$0].kind == .punctuation }) {
+                runs[runs.count - 1].append(member)
+            } else {
+                runs.append([member])
+            }
+        }
+        guard runs.contains(where: { $0.count >= 2 }) else { return [] }
+
+        let keeps = edits.compactMap { edit -> (from: Token, to: Token)? in
+            guard edit.kind == .keep, let from = edit.from, let to = edit.to else { return nil }
+            return (from, to)
+        }.sorted { $0.to.index < $1.to.index }
+        let lastContentIndex = baseline.lastIndex { $0.kind == .word || $0.kind == .numeric } ?? -1
+
+        var flagged = Set<Int>()
+        for run in runs where run.count >= 2 {
+            var fires = false
+            for (a, b) in zip(run, run.dropFirst()) {
+                let between = (a.from.index + 1..<b.from.index)
+                if between.contains(where: { isClauseBoundaryMark(baseline[$0]) }) { fires = true }
+            }
+            var spans: [Range<Int>] = []
+            for member in run {
+                let prevKeep = keeps.last { $0.to.index < member.to.index }
+                let nextKeep = keeps.first { $0.to.index > member.to.index }
+                let span: Range<Int>
+                if let prevKeep, prevKeep.from.index > member.from.index {
+                    span = member.from.index + 1..<(nextKeep?.from.index ?? baseline.count)
+                } else if let nextKeep, nextKeep.from.index < member.from.index {
+                    span = (prevKeep?.from.index ?? -1) + 1..<member.from.index
+                } else {
+                    continue
+                }
+                guard !span.isEmpty else { continue }
+                spans.append(span)
+                if span.contains(where: {
+                    baseline[$0].kind == .punctuation && sentenceTerminalMarks.contains(baseline[$0].text) && $0 < lastContentIndex
+                }) { fires = true }
+            }
+            guard fires else { continue }
+
+            for member in run { flagged.insert(member.from.index) }
+
+            let origin = run.map { $0.from.sentenceIndex }.min() ?? 0
+            guard let start = baseline.firstIndex(where: { $0.sentenceIndex == origin }) else { continue }
+            for edit in edits {
+                guard edit.kind == .delete || edit.kind == .substitute,
+                      let from = edit.from, from.kind == .punctuation,
+                      sentenceTerminalMarks.contains(from.text) else { continue }
+                if edit.kind == .substitute {
+                    guard let to = edit.to, to.kind == .punctuation, !sentenceTerminalMarks.contains(to.text) else { continue }
+                }
+                guard from.index == start - 1 || spans.contains(where: { $0.contains(from.index) }) else { continue }
+                if isPauseSplitPeriod(from, baseline: baseline) { continue }
+                flagged.insert(from.index)
+            }
+        }
+        return flagged
+    }
+
+    private static func isClauseBoundaryMark(_ token: Token) -> Bool {
+        token.kind == .punctuation && !token.text.isEmpty && token.text.allSatisfy { clauseBoundaryMarkCharacters.contains($0) }
     }
 
     // MARK: - Quick task 260723-sx1, criterion A: non-word repair
@@ -1921,6 +2177,11 @@ public enum EditGuard {
     /// a derived verdict is never itself a trigger, which is what keeps
     /// this pass idempotent (see `applySentenceCoupledRevert`'s doc
     /// comment).
+    ///
+    /// Quick task 260930-s19: `clauseRelocation` is a trigger — the raw
+    /// sentence whose words were carried away (and the sentence whose end
+    /// mark was coupled) returns to raw, including the commas the LLM
+    /// inserted to make the relocated clause read.
     private static let sentenceRevertTriggerClasses: Set<String> = [
         RejectionClass.contentWordIdentityChange.rawValue,
         RejectionClass.contentWordInsertion.rawValue,
@@ -1932,6 +2193,7 @@ public enum EditGuard {
         RejectionClass.pronounDeleted.rawValue,
         RejectionClass.pronounPersonChange.rawValue,
         RejectionClass.moodLockSentenceInitialVerb.rawValue,
+        RejectionClass.clauseRelocation.rawValue,
     ]
 
     /// Phase 49.6 (D-02): the revert-eligible (CONTEXT-DEPENDENT) accept
@@ -1994,51 +2256,90 @@ public enum EditGuard {
     /// holds is preserved here too.
     ///
     /// **Accepted costs (measured against the live-corpus replay, quick
-    /// task 260926-bbz):** a mark that lands after an LLM-INSERTED word (the
-    /// existing 49.6 Shapes C/D — the LLM added a whole clause the raw
-    /// speech never anchors) is NOT exempt, because clause (c) requires the
-    /// edit immediately before the mark to be a `.keep`/`.substitute` of the
-    /// baseline's own last word, not an accepted insert. A multi-character
-    /// run (`...`, `?!`, or a mark glued to a following quote) is NEVER
-    /// exempt: `sentenceTerminalMarks` holds only the three single-character
-    /// forms, so a run token's `text` never matches clause (a). A mark
-    /// following a dangling FUNCTION word the raw utterance trails off on is
-    /// exempt (measured: 1/74 of the replay's restored marks) — this
-    /// predicate judges the edit, not the word's part of speech. A `?`'s
-    /// mood rests entirely on whether the LLM's own reading of the raw
-    /// clause triggered `moodLockSentenceInitialVerb` elsewhere in this
-    /// `rebuild` call — clause (d) is the only place this predicate looks
-    /// outside the mark's own edit.
+    /// tasks 260926-bbz and 260930-s1c):** a mark that lands after an
+    /// LLM-INSERTED word (the existing 49.6 Shapes C/D — the LLM added a
+    /// whole clause the raw speech never anchors) is NOT exempt, because
+    /// clause (c) requires the edit directly before the mark (or its `.`
+    /// companion) to be a `.keep`/`.substitute` of the baseline's own last word, not an
+    /// accepted insert. A mark after a moved last word, a mark followed by
+    /// another edit and a multi-character run (`...`, `?!`, or a mark glued
+    /// to a following quote) are NEVER exempt either: `sentenceTerminalMarks`
+    /// holds only the three single-character forms, so a run token's `text`
+    /// never matches clause (a). A mark following a dangling FUNCTION word
+    /// the raw utterance trails off on is exempt (measured: 1/74 of bbz's
+    /// replay) — this predicate judges the edit, not the word's part of
+    /// speech. A `?`'s mood rests entirely on whether the
+    /// LLM's own reading of the raw clause triggered
+    /// `moodLockSentenceInitialVerb` elsewhere in this `rebuild` call —
+    /// clause (d) is the only place this predicate looks outside the mark's
+    /// own edit.
+    ///
+    /// **Quick task 260930-s1c — one structural extension.** Three of
+    /// the four residual audit shapes (a mark that is the `to` half of a
+    /// rejected substitute or move, `2026-09-26T15:19:02.662Z`,
+    /// `2026-09-29T16:23:34.162Z`, `2026-09-30T17:43:18.675Z`) are NOT closed
+    /// here: rendering them needs an edit of the mark's own, and the split
+    /// that provides one was withheld because
+    /// `EditGuardMaterializeInvariantTests` P5 flags its restored-word-then-mark
+    /// seam (see the quick task SUMMARY). A delete run between the anchor and
+    /// the mark is not exempt: `EditDiff` pairs a delete run and a final
+    /// insert in one gap into a `substitute`, so the shape never reached any
+    /// test or replayed record. Clause (b′): a `.`
+    /// insert directly before a final `?`/`!` insert (`etc.?`, audit ts
+    /// `2026-09-30T03:41:25.798Z`) is the final mark's companion and shares
+    /// its structural answer, with the anchor search starting before the
+    /// companion for both. Clause (d) withdraws both. Only `.` followed by
+    /// `?`/`!` qualifies; `..`, `?.` and a `.` after an LLM-inserted word do
+    /// not. `collapseDanglingPunctuation` needs a space between marks, so it
+    /// leaves `etc.?` intact.
     private static func isUtteranceFinalTerminalMarkInsert(
         at i: Int, edits: [Edit], verdicts: [ClassifiedEdit]
     ) -> Bool {
-        // (a) a single-character sentence-terminal mark, inserted.
-        guard edits[i].kind == .insert,
-              let to = edits[i].to,
-              to.kind == .punctuation,
-              sentenceTerminalMarks.contains(to.text)
+        guard isUtteranceFinalMarkPosition(at: i, edits: edits),
+              let finalMark = edits[edits.count - 1].to
         else { return false }
-        // (b) the last edit in the array — nothing baseline-anchored, and
-        // no other insert or move, follows it.
-        guard i == edits.count - 1 else { return false }
-        // (c) directly preceded by a keep/substitute of the last raw
-        // (baseline) token — never a delete, insert, or move, which also
-        // excludes a moved last word (the move's own `from.index` would be
-        // the maximum, but its `kind` is `.move`, not `.keep`/`.substitute`).
-        guard i > 0 else { return false }
-        let prev = edits[i - 1]
-        guard prev.kind == .keep || prev.kind == .substitute,
-              let prevFrom = prev.from,
-              prevFrom.kind != .punctuation
-        else { return false }
-        let maxFromIndex = edits.compactMap { $0.from?.index }.max()
-        guard prevFrom.index == maxFromIndex else { return false }
         // (d) mood carve-out: a `?`/`!` insert is withdrawn if this
         // `rebuild` call's mood lock fired anywhere in the utterance — a
         // mood-locked question would otherwise ship "Er kommt morgen?".
-        if moodMarks.contains(to.text),
+        if moodMarks.contains(finalMark.text),
            verdicts.contains(where: { $0.rejectClass == RejectionClass.moodLockSentenceInitialVerb.rawValue }) {
             return false
+        }
+        return true
+    }
+
+    /// A single-character sentence-terminal mark `.insert`.
+    private static func isTerminalMarkInsert(_ edit: Edit) -> Bool {
+        guard edit.kind == .insert, let to = edit.to, to.kind == .punctuation else { return false }
+        return sentenceTerminalMarks.contains(to.text)
+    }
+
+    /// The structural clauses (a), (b′), (c) of
+    /// `isUtteranceFinalTerminalMarkInsert`; reads `edits` only.
+    private static func isUtteranceFinalMarkPosition(at i: Int, edits: [Edit]) -> Bool {
+        // (a) a single-character sentence-terminal mark, inserted.
+        guard edits.indices.contains(i), isTerminalMarkInsert(edits[i]) else { return false }
+        // (b) the last edit in the array — nothing baseline-anchored, and
+        // no other insert or move, follows it. (b′) or the `.` companion
+        // directly before a final `?`/`!` insert.
+        let f = edits.count - 1
+        guard let finalMark = edits[f].to, isTerminalMarkInsert(edits[f]) else { return false }
+        let companionPresent = f >= 1
+            && isTerminalMarkInsert(edits[f - 1])
+            && edits[f - 1].to?.text == "."
+            && moodMarks.contains(finalMark.text)
+        guard i == f || (i == f - 1 && companionPresent) else { return false }
+        // (c) directly preceded by the anchor: a keep/substitute of a
+        // non-punctuation baseline token — never a delete, insert or move,
+        // which also excludes a moved last word.
+        let j = companionPresent ? f - 2 : f - 1
+        guard j >= 0,
+              edits[j].kind == .keep || edits[j].kind == .substitute,
+              let anchor = edits[j].from,
+              anchor.kind != .punctuation
+        else { return false }
+        for t in 0..<j {
+            if let from = edits[t].from, from.index >= anchor.index { return false }
         }
         return true
     }
@@ -2050,13 +2351,13 @@ public enum EditGuard {
     /// senkt", "said that that answer"), a pronoun whose object and
     /// subject/possessive forms coincide ("told you you were", "ob sie sie
     /// kennt", "understand it it offers"), past perfect / pseudo-cleft
-    /// copula ("had had", "what it is is a"), and a stranded preposition or
-    /// adverb followed by a new phrase ("referring to to", "do so so").
+    /// copula ("had had", "what it is is a"), and an adverb followed by a
+    /// new clause ("do so so").
     /// Consulted by `isExactAdjacentStutterDelete` clause (c). Selection is
     /// `language == "de"` for the German set, anything else the English
     /// set — the same convention `EditGuardTokenizer.numericValue` uses.
     private static let legitimateAdjacentDoubleForms: [String: Set<String>] = [
-        "en": ["that", "had", "is", "was", "you", "it", "her", "to", "so"],
+        "en": ["that", "had", "is", "was", "you", "it", "her", "so"],
         "de": ["der", "die", "das", "den", "dem", "des", "denen", "deren", "dessen", "sie", "es", "ihr", "ist", "war"]
     ]
 
@@ -2131,6 +2432,18 @@ public enum EditGuard {
     /// other delete's neighbour is itself a deleted token, so clause (b)
     /// never fires for it. A German finite verb doubled after a fronted
     /// clause ("hat hat") is not excluded beyond `ist`/`war`.
+    ///
+    /// **`to` (260930-s1f):** an infinitive or stranded-preposition `to to`
+    /// is not excluded. Across the 3767 records of the union corpus the
+    /// gate baseline holds 4 such doubles: 3 stutters and 1 legitimate
+    /// double, which the LLM split with punctuation (a `.substitute`, which
+    /// clause (a) never matches) instead of deleting. The exclusion restored
+    /// the stutter in the one live coupled revert it touched (ts
+    /// `2026-09-26T14:47:57.157Z`). A wrong collapse of a legitimate `to to`
+    /// joins two phrases without removing an argument, tense or value.
+    /// Retention rule for the remaining members: stutters must outnumber
+    /// legitimate doubles, there must be at least 2 stutters, and the LLM
+    /// must never have been measured deleting a copy of a legitimate double.
     /// Word-to-punctuation substitute drops that `disfluencyAcceptedIndices`
     /// also counts are out of scope — clause (a) requires an actual
     /// `.delete`.
