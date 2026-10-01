@@ -431,7 +431,16 @@ public struct SwissNumberFormatter {
             return token
         }
         let body = emitSwiss(value, originalSampleForFractionDigits: core)
+        // The Decimal round trip is lossy: Foundation keeps only the numeric
+        // prefix of "2-3", a zero-led "006" loses its zeros, and "0.125" reads
+        // as German thousands. A rewrite may differ from its input in the
+        // separators only; anything else keeps the token as dictated.
+        guard withoutSeparators(body) == withoutSeparators(core) else { return token }
         return leadingGlyph + body + tail
+    }
+
+    private static func withoutSeparators(_ s: String) -> String {
+        s.filter { !".,'\u{2019}".contains($0) }
     }
 
     private static func parseSwiss(_ s: String) -> Decimal? {
