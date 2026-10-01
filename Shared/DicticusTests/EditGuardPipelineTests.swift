@@ -260,6 +260,29 @@ final class EditGuardPipelineTests: XCTestCase {
         XCTAssertFalse(output.contains("six francs"), "final output \"\(output)\" must NOT contain the LLM's word form \"six francs\" — NumberRevert must have reverted it")
     }
 
+    // MARK: - testAcceptedEditsSurviveGermanSentenceFinalNumberFormChange
+
+    /// Quick task 260930-s1b, logged record ts 2026-09-29T17:30:15.605Z. NumberRevert's Case C
+    /// never saw the ordinal-shaped baseline `3.` (it lives in the ordinal budget), so `drei.`
+    /// stayed. FactPreservationGuard then found `3` missing and discarded the whole output,
+    /// and the accepted `ist`->`seid` went with it. The strings are a shape-preserving
+    /// anonymization of that record, not its text.
+    func testAcceptedEditsSurviveGermanSentenceFinalNumberFormChange() async {
+        let raw = "Nun ich muss ehrlich zugeben, es ist sehr mühsam, was da bei euch jeweils läuft. Ganz, ganz schlimm. Und echt seltsam, wie ihr unvorbereitet ist, hoch 3. Dann sieht man, wie schnell man neue Partner vergrault."
+        let llm = "Nun muss ich ehrlich zugeben, es ist sehr mühsam, was bei euch jeweils läuft. Ganz, ganz schlimm. Und echt seltsam, wie ihr unvorbereitet seid, hoch drei. Dann sieht man, wie schnell man neue Partner vergrault."
+        let baseline = await rulesCleanedBaseline(for: raw, language: "de")
+        XCTAssertEqual(baseline, raw, "fixture precondition: the rules-cleaned baseline equals the raw text")
+
+        let mock = PipelineMockCleanupProvider()
+        mock.returnValue = llm
+        let service = TextProcessingService(
+            dictionaryService: dictionaryService, cleanupService: mock, historyService: testHistory
+        )
+        let output = await service.process(text: raw, language: "de", mode: .aiCleanup)
+
+        XCTAssertEqual(output, "Nun ich muss ehrlich zugeben, es ist sehr mühsam, was da bei euch jeweils läuft. Ganz, ganz schlimm. Und echt seltsam, wie ihr unvorbereitet seid, hoch 3. Dann sieht man, wie schnell man neue Partner vergrault.")
+    }
+
     // MARK: - testGateEntryCarriesClassifiedEdits
 
     #if DEBUG_RECORDER

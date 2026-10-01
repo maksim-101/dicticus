@@ -351,6 +351,39 @@ final class BrandMatcher {
                 let cDigits = cnorm.filter(\.isNumber)
                 guard wDigits == cDigits else { continue }
 
+                // Interior-punctuation parity guard (quick task 260930-s1d):
+                // a fuzzy match that must also edit letters (dl >= 1) may not
+                // delete a word-joining dot or hyphen the canonical lacks. Live
+                // record 2026-09-27T04:15:14.358Z: Whisper wrote two words glued
+                // by a dot, the single token scored dl 1 / jw 0.957 against
+                // "iCloud" and was pasted as the brand. The whitespace form is
+                // already vetoed by guard A (function-word window); the glued
+                // form reaches `matchToken` as ONE token and bypasses it.
+                // Interior punctuation = per word, core characters (first to
+                // last letter/number) that are neither letter nor number,
+                // minus apostrophes (Defect A1: `normalize` and `isCommon`
+                // already treat them as intra-word, which keeps possessive
+                // repairs such as "CCMetrix's" -> "CCMetrics") and minus a
+                // character flanked by digits on both sides (a version or
+                // decimal point, "4.2EB" -> "4 E2B"). The window's set must be
+                // a subset of the canonical's, so dotted canonicals such as
+                // "claude.ai" keep their dot. dl 0 is exempt: when every letter
+                // and digit already matches, dropping a hyphen is brand
+                // formatting ("1-password" -> "1Password", "I-Term" -> "iTerm").
+                // Rejected alternatives: skipping every token with interior
+                // punctuation kills the "cloud.ai" -> "claude.ai" family; strict
+                // parity with no dl 0 exemption and apostrophes counted loses
+                // the dl 0 reformats and the apostrophe repairs; dot-only parity
+                // leaves hyphen-glued merges open ("in-cloud", a dropped "-CH"
+                // segment); vetoing when a dot part is a lexicon word kills
+                // "cloud.ai" because "cloud" is one. Accepted cost: a dl >= 1
+                // repair that also drops a hyphen is now a MISS ("In-Mail" ->
+                // "email", dl 2).
+                if m.dl > 0,
+                   !interiorPunctuation(window).isSubset(of: interiorPunctuation(m.canon)) {
+                    continue
+                }
+
                 // Co-occurring-trigger context gate (quick task 260830-fm2,
                 // change 2): for the SPECIFIC canonicals registered in
                 // `shortCanonicalTriggers` (GSD/Zed/Opus — all short bundled
@@ -546,6 +579,23 @@ final class BrandMatcher {
     private func isBareNumeric(_ w: String) -> Bool {
         let d = depunct(w)
         return !d.isEmpty && d.allSatisfy { $0.isNumber }
+    }
+
+    /// Non-letter/number characters strictly inside the core of any whitespace
+    /// word of `s`, excluding apostrophes and a character flanked by digits on
+    /// both sides. See the interior-punctuation parity guard (260930-s1d).
+    private func interiorPunctuation(_ s: String) -> Set<Character> {
+        var found = Set<Character>()
+        for word in s.split(whereSeparator: { $0.isWhitespace }) {
+            let w = String(word)
+            let core = Array(w.dropFirst(leadingNonCore(w).count).dropLast(trailingNonCore(w).count))
+            for (i, ch) in core.enumerated() where !(ch.isLetter || ch.isNumber) {
+                if ch == "\u{27}" || ch == "\u{2019}" { continue }
+                if i > 0, i < core.count - 1, core[i - 1].isNumber, core[i + 1].isNumber { continue }
+                found.insert(ch)
+            }
+        }
+        return found
     }
 
     /// Phonetic key for `s` under the encoder chosen by `language`: Kölner

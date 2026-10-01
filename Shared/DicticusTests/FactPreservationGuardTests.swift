@@ -113,6 +113,16 @@ final class FactPreservationGuardTests: XCTestCase {
         XCTAssertTrue(result.preserved, "legitimate numberFormChange, reverted, must pass: missing \(result.missingLiterals)")
     }
 
+    /// 260930-s1b: German sentence-final sibling. A baseline `3.` re-spelled `drei.` must be
+    /// reverted by NumberRevert so the guard finds the literal and keeps the accepted edits.
+    func testAllowsLegitimateDigitToWordFormChangeAfterNumberRevert_deSentenceFinal() {
+        let baseline = "Der Faktor lautet hoch 3."
+        let llmOutput = "Der Faktor lautet hoch drei."
+        let reverted = NumberRevert.apply(baseline: baseline, output: llmOutput, language: "de").text
+        let result = FactPreservationGuard.check(baseline: baseline, output: reverted)
+        XCTAssertTrue(result.preserved, "legitimate numberFormChange, reverted, must pass: missing \(result.missingLiterals)")
+    }
+
     func testAllowsLegitimateDigitToWordFormChangeAfterNumberRevert_en() {
         let baseline = "I called 10 customers."
         let llmOutput = "I called ten customers."
