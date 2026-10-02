@@ -180,8 +180,8 @@ final class EditGuardClauseRelocationTests: XCTestCase {
     /// is shorter than five characters). The period belongs to the run's own
     /// sentence, so no coupling is needed.
     func testN4_multiWordMoveWithOwnSentencePeriodMergeAccepted() {
-        let baseline = "it showed me for this week many open tasks or I read the chart as such. according to the report."
-        let llm = "it showed me many open tasks for this week, or I read the chart as such according to the report."
+        let baseline = "it gave us for this week many small jobs or we saw the plan as such. thanks to the update."
+        let llm = "it gave us many small jobs for this week, or we saw the plan as such thanks to the update."
         let result = guardResult(baseline, llm)
         XCTAssertEqual(result.text, llm, "edits: \(result.edits)")
         XCTAssertEqual(moves(result).map { $0.from ?? "" }, ["for", "this", "week"], "edits: \(result.edits)")
