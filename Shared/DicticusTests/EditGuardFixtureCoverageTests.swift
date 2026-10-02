@@ -250,11 +250,20 @@ final class EditGuardFixtureCoverageTests: XCTestCase {
         // happens to equal baseline byte-for-byte. Exempted for the same
         // reason d01Bundled is: the per-verdict check assumes `.accept`
         // always changes text, which is no longer true for this record.
+        // fx-sub-punct-en-orphan-contraction (261002-6oh): its single edit is
+        // still rejected and its word stays, while the carrier split appends
+        // the candidate's final mark as a separate accepted insert, so its
+        // expectedText is baseline + ".".
         let exemptIDs: Set<String> = [
             "fx-d01-bundled-repair-and-corruption-de",
             "fx-del-content-de-restoration-boundary-glue",
-            "fx-mov-content-de-crossclause-manicht-knownopen"
+            "fx-mov-content-de-crossclause-manicht-knownopen",
+            "fx-sub-punct-en-orphan-contraction"
         ]
+
+        if let orphan = EditGuardFixtures.all.first(where: { $0.id == "fx-sub-punct-en-orphan-contraction" }) {
+            XCTAssertEqual(orphan.expectedText, orphan.baseline + ".")
+        }
 
         for fixture in EditGuardFixtures.all where !exemptIDs.contains(fixture.id) {
             switch fixture.expectedVerdict {

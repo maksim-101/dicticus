@@ -22,7 +22,7 @@ import XCTest
 /// | WORD multiset (accepted inserts/deletes/substitutes/moves balance) | `EditGuard.multisetInvariantHolds` (in-code, fail-closed on every call) | `EditGuard.swift` | Phase 44 (pre-dates the quick-task series; punctuation deliberately excluded — this invariant is about words, not formatting) |
 /// | WORD-bigram order / neither-source splice (word-only) | `EditGuardMergeAtomicityTests.testAggregate_allGoldenFixturesNeitherSourceClean` (tier 1, zero allowances, all of `EditGuardFixtures.all`) + this file's `testTier1NeitherSourceClean_productionRecords_P3Extension` (same tier-1 checker, widened to `productionRecords`) | `EditGuardMergeAtomicityTests.swift` / this file | 260723-rif (`applyAtomicGroupCoupling`), extended here (P3) |
 /// | Punctuation RUNS of length >= 2 (character-level interleaving of both sources) | `EditGuardDanglingPunctuationTests.testPunctuationRunsAreSingleSourced_acrossFixtureCorpus` | `EditGuardDanglingPunctuationTests.swift` | 260830-dc4 |
-/// | Full-token adjacency including punctuation ("tier 2") | `testFullTokenAdjacencyProvenance_P5` below — promotes the tier-2 result `EditGuardMergeAtomicityTests.neitherSourceViolations` already computed and discarded at every prior call site | this file | 260830-dc4 / 260831-ad8 (promoted here) |
+/// | Full-token adjacency including punctuation ("tier 2") | `testFullTokenAdjacencyProvenance_P5` below — promotes the tier-2 result `EditGuardMergeAtomicityTests.neitherSourceViolations` already computed and discarded at every prior call site; the checker carries two structural allowances (single-mark-after-word, and the output-final seam of 261002-6oh) | this file | 260830-dc4 / 260831-ad8 (promoted here) / 261002-6oh |
 /// | WHITESPACE / separator provenance (a restored/rebuilt adjacency's spacing must match SOME input occurrence of that adjacency) | `testAdjacencySpacingFidelity_P4` below — the hole nothing owned before this quick task | this file | 260801-9n7 (dropped-space direction) / 260831-gd9 (fabricated-space direction) |
 /// | ACCEPTED-substitute survival through the string-level post-passes | `testAcceptedSubstituteTargetSurvives_P7` below | this file | 260930-s1a |
 ///
@@ -42,8 +42,9 @@ import XCTest
 /// space, meant for the comma it drops, stranded in front of the dash that
 /// survives in its place). CLOSED by Phase 49.5's `deriveSeamSpacing`
 /// renderer (`.planning/todos/pending/editguard-stray-space-before-surviving-emdash.md`)
-/// — every exemption set that once cited this residual has been removed;
-/// all three properties below are now zero-allowance hard gates.
+/// — every exemption set that once cited this residual has been removed, so
+/// none remains; P5's checker carries the two structural
+/// allowances named in its doc comment.
 @MainActor
 final class EditGuardMaterializeInvariantTests: XCTestCase {
 
@@ -225,8 +226,25 @@ final class EditGuardMaterializeInvariantTests: XCTestCase {
     /// adjacencies absent from both inputs, e.g. the 260830-dc4 "und.," and
     /// 260831-ad8 comma-dash mixed-provenance shapes — see this checker's own
     /// doc comment for the exact spec (byte-for-byte port of the harness's
-    /// `Atomicity.check`, including its sanctioned single-mark-after-word
-    /// allowance).
+    /// `Atomicity.check`, including its two sanctioned allowances: the
+    /// single-mark-after-word allowance and, added by 261002-6oh, the
+    /// output-final seam allowance).
+    ///
+    /// Quick task 261002-6oh: the carrier split renders the baseline's last
+    /// word followed directly by the candidate's final terminal mark, an
+    /// adjacency neither input holds (`fx-sub-punct-en-orphan-contraction`:
+    /// `it's .`). The first allowance cannot cover it, because a baseline-final
+    /// word the LLM deleted is never followed by a mark in either input. The
+    /// decision, with evidence in `6oh-planning-prediction.json`: the seam is
+    /// correct text under the policy bbz shipped (raw tail kept, the LLM's
+    /// closing mark appended), 4 live records carried it at the pre tree, the
+    /// split's 16 new tier-2 pairs are all output-final and no non-final pair
+    /// moves. The second allowance therefore sanctions exactly the output's
+    /// last adjacency between the baseline's last word and the candidate's
+    /// last token when that is `.`, `?` or `!`, and this test asserts it fires
+    /// at least once. Blind spot: a candidate-final mark rendered where it
+    /// should not render at all (a mood-locked `?`) passes the checker;
+    /// `EditGuardUtteranceFinalMarkTests` owns that axis.
     ///
     /// The only tier-2 violations this property ever found were the same
     /// em-dash residual P4 found and filed
@@ -240,6 +258,8 @@ final class EditGuardMaterializeInvariantTests: XCTestCase {
         var violations: [Violation] = []
         var adjacenciesEvaluated = 0
         var casesExercising = 0
+        var finalMarkFired = 0
+        var finalMarkCases: [String] = []
 
         for c in corpus {
             let out = guardOut(c.baseline, c.candidate, c.language)
@@ -247,6 +267,8 @@ final class EditGuardMaterializeInvariantTests: XCTestCase {
                 output: out, sourceA: c.baseline, sourceB: c.candidate
             )
             adjacenciesEvaluated += v.tier2Evaluated
+            finalMarkFired += v.finalMarkAllowed
+            if v.finalMarkAllowed > 0 { finalMarkCases.append(c.id) }
             if v.tier2Evaluated > 0 { casesExercising += 1 }
             for pair in v.tier2 {
                 violations.append(Violation(caseID: c.id, pair: pair))
@@ -256,6 +278,12 @@ final class EditGuardMaterializeInvariantTests: XCTestCase {
         print("[P5 non-vacuity] adjacenciesEvaluated=\(adjacenciesEvaluated) " +
               "casesExercising=\(casesExercising) totalTier2Violations=\(violations.count) " +
               "(of \(corpus.count) total cases)")
+        print("[P5 utterance-final allowance] fired=\(finalMarkFired) cases=\(finalMarkCases)")
+        XCTAssertGreaterThan(
+            finalMarkFired, 0,
+            "The utterance-final allowance sanctioned nothing in this corpus; it exists for the " +
+            "261002-6oh carrier split and must be removed together with the split if the split is ever removed."
+        )
         XCTAssertGreaterThan(
             adjacenciesEvaluated, 0,
             "P5 evaluated ZERO full-token adjacencies across the whole corpus — the property " +
