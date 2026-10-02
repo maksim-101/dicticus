@@ -431,4 +431,43 @@ final class EditGuardMergeAtomicityTests: XCTestCase {
         }
         XCTAssertTrue(violatingIDs.isEmpty, "tier-1 neither-source violations in golden fixtures: \(violatingIDs)")
     }
+
+    // MARK: - Quick task 261002-6oh: utterance-final mark allowance pins
+    //
+    // The tier-2 allowance sanctions the output's last adjacency when it is the
+    // baseline's last word followed by the candidate's final terminal mark, the
+    // seam bbz ships for a rejected last-word substitute and the carrier split
+    // ships for a dropped or moved tail. P is RED until 261002-6oh lands the
+    // allowance; each N pins one conjunct (N1 position, N2 candidate-last, N3
+    // baseline-last, N4 terminal set, N5 word-before-mark).
+
+    func testTier2UtteranceFinalMarkAllowance_P_baselineLastWordThenCandidateFinalMark() {
+        let v = Self.neitherSourceViolations(output: "the team shipped the update.", sourceA: "the team shipped the update", sourceB: "The team shipped the release.")
+        XCTAssertEqual(v.tier2, [])
+    }
+
+    func testTier2UtteranceFinalMarkAllowance_N1_interiorSeamStillFlagged() {
+        let v = Self.neitherSourceViolations(output: "check the update. notes then ship the update", sourceA: "check the update notes then ship the update", sourceB: "Check the notes, then ship the release.")
+        XCTAssertEqual(v.tier2, ["update .", ". notes"])
+    }
+
+    func testTier2UtteranceFinalMarkAllowance_N2_markNotCandidatesLastTokenStillFlagged() {
+        let v = Self.neitherSourceViolations(output: "the team shipped the update.", sourceA: "the team shipped the update", sourceB: "The team shipped the release. Then they left")
+        XCTAssertEqual(v.tier2, ["update ."])
+    }
+
+    func testTier2UtteranceFinalMarkAllowance_N3_wordNotBaselinesLastTokenStillFlagged() {
+        let v = Self.neitherSourceViolations(output: "the team shipped the update.", sourceA: "the team shipped the update today", sourceB: "The team shipped the release.")
+        XCTAssertEqual(v.tier2, ["update ."])
+    }
+
+    func testTier2UtteranceFinalMarkAllowance_N4_nonTerminalMarkStillFlagged() {
+        let v = Self.neitherSourceViolations(output: "the team shipped the update,", sourceA: "the team shipped the update", sourceB: "The team shipped the release,")
+        XCTAssertEqual(v.tier2, ["update ,"])
+    }
+
+    func testTier2UtteranceFinalMarkAllowance_N5_punctuationBeforeFinalMarkStillFlagged() {
+        let v = Self.neitherSourceViolations(output: "the team shipped the update,.", sourceA: "the team shipped the update,", sourceB: "The team shipped the release.")
+        XCTAssertEqual(v.tier2, [", ."])
+    }
 }
