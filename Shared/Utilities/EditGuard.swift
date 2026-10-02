@@ -2268,32 +2268,37 @@ public enum EditGuard {
     /// tasks 260926-bbz and 260930-s1c):** a mark that lands after an
     /// LLM-INSERTED word (the existing 49.6 Shapes C/D — the LLM added a
     /// whole clause the raw speech never anchors) is NOT exempt, because
-    /// clause (c) requires the edit directly before the mark (or its `.`
-    /// companion) to be a `.keep`/`.substitute` of the baseline's own last word, not an
-    /// accepted insert. A mark after a moved last word, a mark followed by
+    /// clause (c) requires the anchor before the mark (past any delete run
+    /// and the `.` companion) to be a `.keep`/`.substitute` of the
+    /// baseline's own last word, not an accepted insert. A mark after a moved last word, a mark followed by
     /// another edit and a multi-character run (`...`, `?!`, or a mark glued
     /// to a following quote) are NEVER exempt either: `sentenceTerminalMarks`
     /// holds only the three single-character forms, so a run token's `text`
     /// never matches clause (a). A mark following a dangling FUNCTION word
     /// the raw utterance trails off on is exempt (measured: 1/74 of bbz's
-    /// replay) — this predicate judges the edit, not the word's part of
-    /// speech. A `?`'s mood rests entirely on whether the
+    /// replay), and since 261002-6oh so is a mark after a restored dropped
+    /// tail, which can leave a function word dangling before the mark
+    /// (hand-read in the 260930-s1c and 261002-6oh replays) — this predicate
+    /// judges the edit, not the word's part of speech. A `?`'s mood rests entirely on whether the
     /// LLM's own reading of the raw clause triggered
     /// `moodLockSentenceInitialVerb` elsewhere in this `rebuild` call —
     /// clause (d) is the only place this predicate looks outside the mark's
     /// own edit.
     ///
-    /// **Quick task 260930-s1c — one structural extension.** Three of
-    /// the four residual audit shapes (a mark that is the `to` half of a
-    /// rejected substitute or move, `2026-09-26T15:19:02.662Z`,
-    /// `2026-09-29T16:23:34.162Z`, `2026-09-30T17:43:18.675Z`) are NOT closed
-    /// here: rendering them needs an edit of the mark's own, and the split
-    /// that provides one was withheld because
-    /// `EditGuardMaterializeInvariantTests` P5 flags its restored-word-then-mark
-    /// seam (see the quick task SUMMARY). A delete run between the anchor and
-    /// the mark is not exempt: `EditDiff` pairs a delete run and a final
-    /// insert in one gap into a `substitute`, so the shape never reached any
-    /// test or replayed record. Clause (b′): a `.`
+    /// **Quick tasks 260930-s1c and 261002-6oh — two structural extensions.**
+    /// Clause (c′), shipped by 261002-6oh with `splitUtteranceFinalMarkCarrier`:
+    /// bbz required the edit before the mark to be the anchor itself and
+    /// excluded deletes. A run of word/numeric `.delete` edits (any verdict)
+    /// between the anchor and the mark is allowed, because the mark still
+    /// renders last whatever the verdicts are: a rejected delete restores at
+    /// the anchor's candidate slot, which lies below the mark's `to.index`,
+    /// and an accepted delete renders nothing. Every edit before the anchor
+    /// must have `from == nil` or a `from.index` below the anchor's, and
+    /// every delete in the run must have one above it, so a moved last word
+    /// (whose `from.index` is the maximum) is still excluded. The run is the
+    /// split's own output: `EditDiff` pairs a delete run and a final insert
+    /// in one gap into a `substitute`, so a native delete run before the
+    /// final insert has not been observed. Clause (b′), 260930-s1c: a `.`
     /// insert directly before a final `?`/`!` insert (`etc.?`, audit ts
     /// `2026-09-30T03:41:25.798Z`) is the final mark's companion and shares
     /// its structural answer, with the anchor search starting before the
@@ -2323,8 +2328,10 @@ public enum EditGuard {
         return sentenceTerminalMarks.contains(to.text)
     }
 
-    /// The structural clauses (a), (b′), (c) of
-    /// `isUtteranceFinalTerminalMarkInsert`; reads `edits` only.
+    /// The structural clauses (a), (b′), (c′) of
+    /// `isUtteranceFinalTerminalMarkInsert`; reads `edits` only, so
+    /// `splitUtteranceFinalMarkCarrier` checks its own output against the
+    /// same clauses.
     private static func isUtteranceFinalMarkPosition(at i: Int, edits: [Edit]) -> Bool {
         // (a) a single-character sentence-terminal mark, inserted.
         guard edits.indices.contains(i), isTerminalMarkInsert(edits[i]) else { return false }
@@ -2338,10 +2345,14 @@ public enum EditGuard {
             && edits[f - 1].to?.text == "."
             && moodMarks.contains(finalMark.text)
         guard i == f || (i == f - 1 && companionPresent) else { return false }
-        // (c) directly preceded by the anchor: a keep/substitute of a
-        // non-punctuation baseline token — never a delete, insert or move,
-        // which also excludes a moved last word.
-        let j = companionPresent ? f - 2 : f - 1
+        // (c, c′) walk back over word/numeric deletes to the anchor: a
+        // keep/substitute of a non-punctuation baseline token — never an
+        // insert or move, which also excludes a moved last word.
+        var j = companionPresent ? f - 2 : f - 1
+        let runEnd = j
+        while j >= 0, edits[j].kind == .delete, let from = edits[j].from, from.kind != .punctuation {
+            j -= 1
+        }
         guard j >= 0,
               edits[j].kind == .keep || edits[j].kind == .substitute,
               let anchor = edits[j].from,
@@ -2350,7 +2361,129 @@ public enum EditGuard {
         for t in 0..<j {
             if let from = edits[t].from, from.index >= anchor.index { return false }
         }
+        if j < runEnd {
+            for t in (j + 1)...runEnd {
+                guard let from = edits[t].from, from.index > anchor.index else { return false }
+            }
+        }
         return true
+    }
+
+    /// Quick task 261002-6oh (designed and replay-measured in 260930-s1c,
+    /// withheld there over the P5 finding below): a REJECTED edit that
+    /// carries the candidate's final terminal mark as its `to` half loses
+    /// the mark with the edit's own rejection, and no exemption from the
+    /// coupling passes can render it, so the mark needs an edit of its own.
+    /// Audit ts (all `A-fix-verification.md` §2, 4 of 47 LLM-added marks
+    /// after bbz): `2026-09-26T15:19:02.662Z` (substitute carrier plus a
+    /// trailing delete), `2026-09-29T16:23:34.162Z` (substitute carrier,
+    /// last edit), `2026-09-30T17:43:18.675Z` (move of a raw interior
+    /// period). The fourth, `2026-09-30T03:41:25.798Z`, is a pure predicate
+    /// gap (clause b′).
+    ///
+    /// Runs at the top of `rebuild`, AFTER `classify`, on purpose. The split
+    /// delete keeps the carrier's verdict verbatim, so the gate never
+    /// accepts the word drop and the dropped word (or the raw interior
+    /// period, which `classifyDelete` would otherwise accept, shipping a
+    /// run-on the raw never had) renders exactly where it rendered before.
+    /// Splitting before `classify` would let `classifyDelete` re-judge both.
+    /// Only rejected carriers split: an accepted one already renders the
+    /// mark, and leaving it keeps `disfluencyCollapse` and the calibration
+    /// counts unchanged.
+    ///
+    /// Gates: (1) the candidate's last token is a single-character terminal
+    /// mark `m`. (2) The baseline is non-empty and does not already end in
+    /// one, so the mark is LLM-added and a double mark is impossible. (3)
+    /// The edit with `to == m` is rejected. (4a) A substitute carrier: a
+    /// word/numeric `from`, and every later edit a word/numeric delete. (4b)
+    /// A move carrier: a terminal mark `from` that is not contiguous in both
+    /// streams with a neighbouring move (`applyMoveRunCoupling`'s test), so
+    /// a clause relocated together with its period is never split; a word
+    /// move is never split. (5) The rewritten arrays satisfy
+    /// `isUtteranceFinalMarkPosition` at the new final insert; otherwise
+    /// (for example an LLM-inserted word before the mark, Shapes C/D) the
+    /// inputs come back unchanged.
+    ///
+    /// Output: `edits[k]` becomes a `.delete` of the carrier's `from`
+    /// carrying the carrier's `accepted`/`acceptClass`/`rejectClass`, and an
+    /// `.insert` of `m`, classified by `classifyInsert` (prosodic, so
+    /// accepted `punctuationOrCasing`), is appended. Consequences: for these
+    /// records `rebuild` returns a `classified` array one longer than its
+    /// input (the D-11 log and the harness verdict-line count see it), and a
+    /// split delete is logged with its carrier's reject class (for example
+    /// a `delete` carrying `contentWordIdentityChange`). Per-class reject
+    /// counts are unchanged; `punctuationOrCasing` accepts rise by one per
+    /// rendered mark. A rejected `.delete` and a rejected `.move` restore
+    /// through the same `restorationTargets` path in `materialize`.
+    ///
+    /// The rendered seam is the baseline's last word followed directly by
+    /// the candidate's final mark, an adjacency neither input holds. bbz
+    /// already ships it whenever the last raw word is a rejected substitute
+    /// (four live records in the 260930-s1c corpus). The tier-2 checker
+    /// `EditGuardMergeAtomicityTests.neitherSourceViolations` sanctions
+    /// exactly that output-final adjacency (261002-6oh); every other seam
+    /// stays under its original allowance.
+    private static func splitUtteranceFinalMarkCarrier(
+        edits: [Edit], classified: [ClassifiedEdit],
+        baseline: [Token], candidate: [Token], language: String
+    ) -> (edits: [Edit], classified: [ClassifiedEdit]) {
+        guard let m = candidate.last, m.kind == .punctuation, sentenceTerminalMarks.contains(m.text),
+              let baselineLast = baseline.last,
+              !(baselineLast.kind == .punctuation && sentenceTerminalMarks.contains(baselineLast.text)),
+              let k = edits.firstIndex(where: { $0.to?.index == m.index }),
+              !classified[k].accepted,
+              let carrierFrom = edits[k].from
+        else { return (edits, classified) }
+
+        switch edits[k].kind {
+        case .substitute:
+            guard carrierFrom.kind != .punctuation else { return (edits, classified) }
+            for t in (k + 1)..<edits.count {
+                guard edits[t].kind == .delete, let from = edits[t].from, from.kind != .punctuation else {
+                    return (edits, classified)
+                }
+            }
+        case .move:
+            guard carrierFrom.kind == .punctuation, sentenceTerminalMarks.contains(carrierFrom.text) else {
+                return (edits, classified)
+            }
+            if let to = edits[k].to {
+                if k > 0, edits[k - 1].kind == .move,
+                   let a = edits[k - 1].from, let b = edits[k - 1].to,
+                   carrierFrom.index == a.index + 1, to.index == b.index + 1 {
+                    return (edits, classified)
+                }
+                if k + 1 < edits.count, edits[k + 1].kind == .move,
+                   let a = edits[k + 1].from, let b = edits[k + 1].to,
+                   a.index == carrierFrom.index + 1, b.index == to.index + 1 {
+                    return (edits, classified)
+                }
+            }
+        default:
+            return (edits, classified)
+        }
+
+        let insert = Edit(kind: .insert, from: nil, to: m)
+        var newEdits = edits
+        newEdits[k] = Edit(kind: .delete, from: carrierFrom, to: nil)
+        newEdits.append(insert)
+        guard isUtteranceFinalMarkPosition(at: newEdits.count - 1, edits: newEdits) else {
+            return (edits, classified)
+        }
+
+        var newClassified = classified
+        newClassified[k] = ClassifiedEdit(
+            kind: EditKind.delete.rawValue, from: classified[k].from, to: nil,
+            accepted: classified[k].accepted, acceptClass: classified[k].acceptClass,
+            rejectClass: classified[k].rejectClass
+        )
+        let verdict = classifyInsert(insert, language: language, candidate: candidate)
+        newClassified.append(ClassifiedEdit(
+            kind: EditKind.insert.rawValue, from: nil, to: m.text,
+            accepted: verdict.accepted, acceptClass: verdict.acceptClass?.rawValue,
+            rejectClass: verdict.rejectClass?.rawValue
+        ))
+        return (newEdits, newClassified)
     }
 
     /// Quick task 260926-dbi: per-language closed sets of words whose
@@ -3402,6 +3535,12 @@ public enum EditGuard {
     /// both necessary for correctness, documented as a deviation in
     /// `44-10-SUMMARY.md`.
     ///
+    /// Quick task 261002-6oh: before any coupling pass, a rejected carrier
+    /// of the candidate's final terminal mark is split into a delete that
+    /// keeps the carrier's verdict plus an appended insert of the mark — see
+    /// `splitUtteranceFinalMarkCarrier`; the returned `classified` array is
+    /// then one longer than the input.
+    ///
     /// - Returns: `nil` when the multiset invariant fails to hold after
     ///   every pass — `apply` treats `nil` as fail-closed
     ///   (`failClosedReason == "rebuildInvariant"`).
@@ -3414,6 +3553,9 @@ public enum EditGuard {
     ) -> (text: String, classified: [ClassifiedEdit])? {
         guard edits.count == classified.count else { return nil }
 
+        let (edits, classified) = splitUtteranceFinalMarkCarrier(
+            edits: edits, classified: classified, baseline: baseline, candidate: candidate, language: language
+        )
         var verdicts = classified
         applyInsertRunCoupling(edits: edits, verdicts: &verdicts)
         applyMoveRunCoupling(edits: edits, verdicts: &verdicts)

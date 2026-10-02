@@ -470,6 +470,7 @@ final class BrandMatcher {
             let accept = (orthoOk && (phon || jw >= BrandMatcher.strongOrthoThreshold)) || phonOk
             if accept {
                 let score = jw + (phon ? 0.15 : 0.0)
+                // Strict `>`: an exact tie keeps the earlier candidate; `resolvedCanonicals` fixes that order.
                 if best == nil || score > best!.score {
                     best = (entry.canon, score, jw, dl)
                 }
@@ -613,9 +614,23 @@ final class BrandMatcher {
     /// Base bundled canonicals unioned with the live user-dictionary replacement
     /// targets (when a provider is wired). Deduped + NFC. Personal brands stay
     /// local — only the bundled seed ships in the repo.
+    ///
+    /// Order (quick 261002-6oi): bundled canonicals in their given order, then
+    /// live targets by String `<`. The provider arrives in hash-seeded
+    /// Dictionary order (`TextProcessingService`; found in 260930-s1d), which
+    /// differs per process, so it must not decide anything. Two consequences:
+    /// `dedupeNFC` keeps the first case variant in this order, and `matchToken`
+    /// gives an exact score tie to the earlier candidate. Bundled spellings
+    /// outrank live ones because they are the curated forms.
+    /// Rejected: preferring the candidate closest to the dictated surface (one
+    /// brand would still come out differently depending on how the ASR cased
+    /// the mishearing); longer string first (picks a trailing-punctuated target
+    /// such as "Zed." over "Zed" once both are live); majority vote over
+    /// duplicate targets (flips when one entry is added, and dedupe discards
+    /// the counts).
     private func resolvedCanonicals() -> [String] {
         guard let provider = liveDictionaryCanonicalProvider else { return baseCanonicals }
-        return BrandMatcher.dedupeNFC(baseCanonicals + provider())
+        return BrandMatcher.dedupeNFC(baseCanonicals + provider().sorted())
     }
 
     private static func dedupeNFC(_ list: [String]) -> [String] {
