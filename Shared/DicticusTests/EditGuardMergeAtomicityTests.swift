@@ -12,6 +12,11 @@ import XCTest
 /// `EditGuardTokenizer` logic — its own trivial tokenizer). Duplication
 /// between the two copies is DELIBERATE (small, self-contained, same spec)
 /// rather than sharing one implementation — see the plan's Task 1(d).
+///
+/// The tier-2 check carries two allowances: the 260901-8m3 single-mark-after-
+/// word allowance written for `collapseDanglingPunctuation`, and, added by
+/// 261002-6oh, the output-final seam allowance documented on
+/// `neitherSourceViolations`.
 @MainActor
 final class EditGuardMergeAtomicityTests: XCTestCase {
 
@@ -22,6 +27,7 @@ final class EditGuardMergeAtomicityTests: XCTestCase {
     // MARK: - R2 independent neither-source checker (internal copy)
 
     private static let punctuationChars: Set<Character> = [",", ".", ";", ":", "!", "?"]
+    private static let utteranceFinalMarks: Set<String> = [".", "?", "!"]
 
     private static func tokenize(_ s: String) -> [String] {
         var tokens: [String] = []
@@ -54,12 +60,32 @@ final class EditGuardMergeAtomicityTests: XCTestCase {
     }
 
     /// Tier 1 (HARD, word-only bigrams, zero allowances) + Tier 2
-    /// (full-token bigrams, with the sanctioned `collapseDanglingPunctuation`
-    /// allowance) — see `Atomicity.check` in the harness for the full spec;
-    /// this is a byte-for-byte port.
+    /// (full-token bigrams, with two sanctioned allowances) — see
+    /// `Atomicity.check` in the harness for the full spec; this is a
+    /// byte-for-byte port.
+    ///
+    /// Allowance 1 (260901-8m3): a (word, mark) adjacency absent from both
+    /// inputs passes when that word is followed by some mark in at least one
+    /// input and the mark occurs in an input; written for
+    /// `collapseDanglingPunctuation`.
+    ///
+    /// Allowance 2 (261002-6oh): the output's LAST adjacency passes when t0 is
+    /// a word equal to sourceA's last token and t1 is `.`, `?` or `!` equal
+    /// to sourceB's last token, i.e. the baseline's last word followed by the
+    /// candidate's final terminal mark. It sanctions the seam bbz ships for a
+    /// rejected last-word substitute and the carrier split
+    /// (`splitUtteranceFinalMarkCarrier`) ships for a dropped or moved tail.
+    /// Evidence (`6oh-planning-prediction.json`): 4 bbz-shaped live records
+    /// carried the seam at the pre tree, the split adds 16 tier-2 pairs that
+    /// are all output-final, and no non-final pair moves. Blind spot: a
+    /// candidate-final mark rendered after the baseline's last word where it
+    /// should not render at all (for example a mood-locked `?`) passes this
+    /// checker; `EditGuardUtteranceFinalMarkTests` `testN4_*` and
+    /// `testS1c_N4_*` own that axis. `finalMarkAllowed` counts the passes so
+    /// callers can assert the allowance fires.
     /// Internal, not `private`, so `EditGuardMaterializeInvariantTests`
     /// reuses this checker instead of forking a third copy of the spec.
-    static func neitherSourceViolations(output: String, sourceA: String, sourceB: String) -> (tier1: [String], tier2: [String], tier2Evaluated: Int) {
+    static func neitherSourceViolations(output: String, sourceA: String, sourceB: String) -> (tier1: [String], tier2: [String], tier2Evaluated: Int, finalMarkAllowed: Int) {
         let outTokens = tokenize(output)
         let aTokens = tokenize(sourceA)
         let bTokens = tokenize(sourceB)
@@ -98,6 +124,7 @@ final class EditGuardMergeAtomicityTests: XCTestCase {
         // stays large and only collapses if the sweep genuinely stops
         // looking at anything (260901-8m3).
         var tier2Evaluated = 0
+        var finalMarkAllowed = 0
         if outTokens.count > 1 {
             for i in 0..<(outTokens.count - 1) {
                 let t0 = outTokens[i], t1 = outTokens[i + 1]
@@ -109,10 +136,16 @@ final class EditGuardMergeAtomicityTests: XCTestCase {
                    allSourceMarks.contains(t1) {
                     continue
                 }
+                if i == outTokens.count - 2, !isPunctToken(t0),
+                   utteranceFinalMarks.contains(t1),
+                   aTokens.last == t0, bTokens.last == t1 {
+                    finalMarkAllowed += 1
+                    continue
+                }
                 tier2.append("\(t0) \(t1)")
             }
         }
-        return (tier1, tier2, tier2Evaluated)
+        return (tier1, tier2, tier2Evaluated, finalMarkAllowed)
     }
 
     private func assertNeitherSourceClean(_ output: String, _ baseline: String, _ llm: String, file: StaticString = #filePath, line: UInt = #line) {
@@ -430,5 +463,44 @@ final class EditGuardMergeAtomicityTests: XCTestCase {
             }
         }
         XCTAssertTrue(violatingIDs.isEmpty, "tier-1 neither-source violations in golden fixtures: \(violatingIDs)")
+    }
+
+    // MARK: - Quick task 261002-6oh: utterance-final mark allowance pins
+    //
+    // The tier-2 allowance sanctions the output's last adjacency when it is the
+    // baseline's last word followed by the candidate's final terminal mark, the
+    // seam bbz ships for a rejected last-word substitute and the carrier split
+    // ships for a dropped or moved tail. P is RED until 261002-6oh lands the
+    // allowance; each N pins one conjunct (N1 position, N2 candidate-last, N3
+    // baseline-last, N4 terminal set, N5 word-before-mark).
+
+    func testTier2UtteranceFinalMarkAllowance_P_baselineLastWordThenCandidateFinalMark() {
+        let v = Self.neitherSourceViolations(output: "the team shipped the update.", sourceA: "the team shipped the update", sourceB: "The team shipped the release.")
+        XCTAssertEqual(v.tier2, [])
+    }
+
+    func testTier2UtteranceFinalMarkAllowance_N1_interiorSeamStillFlagged() {
+        let v = Self.neitherSourceViolations(output: "check the update. notes then ship the update", sourceA: "check the update notes then ship the update", sourceB: "Check the notes, then ship the release.")
+        XCTAssertEqual(v.tier2, ["update .", ". notes"])
+    }
+
+    func testTier2UtteranceFinalMarkAllowance_N2_markNotCandidatesLastTokenStillFlagged() {
+        let v = Self.neitherSourceViolations(output: "the team shipped the update.", sourceA: "the team shipped the update", sourceB: "The team shipped the release. Then they left")
+        XCTAssertEqual(v.tier2, ["update ."])
+    }
+
+    func testTier2UtteranceFinalMarkAllowance_N3_wordNotBaselinesLastTokenStillFlagged() {
+        let v = Self.neitherSourceViolations(output: "the team shipped the update.", sourceA: "the team shipped the update today", sourceB: "The team shipped the release.")
+        XCTAssertEqual(v.tier2, ["update ."])
+    }
+
+    func testTier2UtteranceFinalMarkAllowance_N4_nonTerminalMarkStillFlagged() {
+        let v = Self.neitherSourceViolations(output: "the team shipped the update,", sourceA: "the team shipped the update", sourceB: "The team shipped the release,")
+        XCTAssertEqual(v.tier2, ["update ,"])
+    }
+
+    func testTier2UtteranceFinalMarkAllowance_N5_punctuationBeforeFinalMarkStillFlagged() {
+        let v = Self.neitherSourceViolations(output: "the team shipped the update,.", sourceA: "the team shipped the update,", sourceB: "The team shipped the release.")
+        XCTAssertEqual(v.tier2, [", ."])
     }
 }

@@ -760,13 +760,15 @@ enum EditGuardFixtures {
     // not a word-pair InflectionRules has any opinion on, so it does not
     // belong in that coupled test's sweep.
 
+    // 261002-6oh: the carrier split keeps the restored "it's" and appends the
+    // candidate's "." as a separate accepted insert, so expectedText ends in ".".
     static let substitutePunctuationBoundary: [Fixture] = [
         Fixture(
             id: "fx-sub-punct-en-orphan-contraction",
             language: "en",
             baseline: "This is also in proper grammar and style it's",
             candidate: "This is also in proper grammar and style.",
-            expectedText: "This is also in proper grammar and style it's",
+            expectedText: "This is also in proper grammar and style it's.",
             editKind: .substitute, tokenClass: .contentWord, position: .interior,
             expectedVerdict: .reject, expectedClass: "contentWordIdentityChange",
             note: "SC#3 gap-closure fixture (44-FIDELITY-REPLAY.md §2/§6) — " +

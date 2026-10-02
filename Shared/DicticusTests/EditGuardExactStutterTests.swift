@@ -135,9 +135,9 @@ final class EditGuardExactStutterTests: XCTestCase {
     /// rejected content deletions revert to raw) and no reordered or
     /// doubled token (the materialize-anchor check).
     func testP4_atomicShapeInInTermsOf() {
-        let baseline = "let's talk about everything in in terms of the budget for this quarter"
-        let llm = "Let's talk about everything in the budget for this quarter."
-        let expected = "let's talk about everything in terms of the budget for this quarter."
+        let baseline = "let's talk about staffing in in terms of the budget for this quarter"
+        let llm = "Let's talk about staffing in the budget for this quarter."
+        let expected = "let's talk about staffing in terms of the budget for this quarter."
         let out = guardOut(baseline, llm)
         let result = guardResult(baseline, llm)
         XCTAssertEqual(out, expected, "edits: \(result.edits)")
