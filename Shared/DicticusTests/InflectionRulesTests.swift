@@ -425,7 +425,7 @@ final class InflectionRulesTests: XCTestCase {
     }
 
     /// EXPECTED FALSE REJECT — the stem `gut` is below the floor. A priced
-    /// miss in the style of the lauft/singen tests; do not lower the floor.
+    /// miss like the lauft/singen tests; do not lower the floor.
     func testGutemToGutenIsRejectedAsDeliberateFalseReject() {
         XCTAssertFalse(
             InflectionRules.isAllowedInflection("gutem", "guten", language: "de"),
