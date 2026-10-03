@@ -120,8 +120,9 @@ public actor PostEditProbe {
             return
         }
         let caret = Self.caretLocation(focused)
+        let fieldTokens = PostEditDiff.tokenize(value)
         let result = PostEditDiff.locateAtPaste(
-            pasted: pasted, field: value, fieldTokens: PostEditDiff.tokenize(value), caretUTF16: caret)
+            pasted: pasted, field: value, fieldTokens: fieldTokens, caretUTF16: caret)
         let axMs = elapsed()
         switch result {
         case .failure(let failure):
@@ -132,7 +133,9 @@ public actor PostEditProbe {
             generationCounter += 1
             let generation = generationCounter
             var p = Pending(
-                app: app, element: focused, session: PostEditDiff.Session(pasted: pastedTokens.map(\.text)),
+                app: app, element: focused, session: PostEditDiff.Session(
+                    pasted: pastedTokens.map(\.text),
+                    anchor: PostEditDiff.Anchor(range: located.range, fieldTokens: fieldTokens)),
                 partial: makeRecord(base, outcome: .unchanged, located: true, matchKind: located.matchKind,
                                     end: "paste", role: role, subrole: subrole, fieldUTF16: fieldUTF16, axMs: axMs),
                 pasteInstant: pasteDate, generation: generation, axMsMax: axMs, lastLocatedMs: nil, pollTask: nil)

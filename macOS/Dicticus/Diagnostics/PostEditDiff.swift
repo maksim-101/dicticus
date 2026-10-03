@@ -17,6 +17,7 @@ enum PostEditDiff {
     static let hunkSideCap = 6
     static let hunkCountCap = 8
     static let alignmentCellCap = 3_000_000
+    static let anchorSlackUTF16 = 32
 
     static let excludedBundleIDs: Set<String> = [
         "com.1password.1password", "com.agilebits.onepassword7", "com.agilebits.onepassword-osx",
@@ -161,7 +162,7 @@ enum PostEditDiff {
 
     /// Semi-global token alignment of the pasted span against the field: free leading and trailing
     /// field tokens, unit cost for substitution, insertion and deletion. Nil beyond the tolerance.
-    static func relocate(pasted: [String], fieldTokens: [Token], caretUTF16: Int?) -> Range<Int>? {
+    static func relocate(pasted: [String], fieldTokens: [Token], caretUTF16: Int?, window: Range<Int>? = nil) -> Range<Int>? {
         let n = pasted.count
         guard n > 0, !fieldTokens.isEmpty else { return nil }
         let maxDist = max(1, (2 * n) / 5)
@@ -290,6 +291,19 @@ enum PostEditDiff {
         return (kept, changes.count - kept.count)
     }
 
+    /// Where the span sat at paste time (UTF-16 offsets in the field) and how long the field was then.
+    struct Anchor: Equatable, Sendable {
+        let start: Int
+        let end: Int
+        let fieldUTF16: Int
+
+        init(range: Range<Int>, fieldTokens: [Token]) {
+            start = fieldTokens[range.lowerBound].utf16Start
+            end = fieldTokens[range.upperBound - 1].utf16End
+            fieldUTF16 = fieldTokens.last?.utf16End ?? 0
+        }
+    }
+
     enum EndReason: String {
         case focusLeft = "focus_left"
         case nextDictation = "next_dictation"
@@ -306,14 +320,16 @@ enum PostEditDiff {
 
     struct Session: Sendable {
         let pasted: [String]
+        let anchor: Anchor?
         private(set) var lastLocated: [String]?
         private(set) var polls = 0
         private(set) var locatedPolls = 0
         private(set) var consecutiveLost = 0
         private(set) var sawGone = false
 
-        init(pasted: [String]) {
+        init(pasted: [String], anchor: Anchor?) {
             self.pasted = pasted
+            self.anchor = anchor
         }
 
         mutating func ingest(_ read: FieldRead, elapsedMs: Int) -> EndReason? {
