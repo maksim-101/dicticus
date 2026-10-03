@@ -31,6 +31,16 @@ import UIKit
 /// deterministic. Paid once, small.
 public protocol SpellLexicon: Sendable {
     func isKnownWord(_ text: String, language: String) -> Bool
+
+    /// Quick task 261003-aua: true iff the platform checker knows `source`
+    /// only as an unlisted form (a compound it accepts by splitting), names
+    /// `candidate` among its guesses, and lists `candidate` itself. Callers
+    /// apply their own string guards first.
+    func isCompoundAcceptedRepair(source: String, candidate: String, language: String) -> Bool
+}
+
+public extension SpellLexicon {
+    func isCompoundAcceptedRepair(source: String, candidate: String, language: String) -> Bool { false }
 }
 
 /// The production implementation: `NSSpellChecker` (macOS) / `UITextChecker`
@@ -114,6 +124,36 @@ public final class PlatformSpellLexicon: SpellLexicon, @unchecked Sendable {
         return result
     }
 
+    public func isCompoundAcceptedRepair(source: String, candidate: String, language: String) -> Bool {
+        guard language.hasPrefix("de") else { return false }
+        let lowerSource = source.lowercased()
+        let lowerCandidate = candidate.lowercased()
+        let key = "rep:de:\(lowerSource)>\(lowerCandidate)"
+
+        lock.lock()
+        if let cached = cache[key] {
+            lock.unlock()
+            return cached
+        }
+        lock.unlock()
+
+        let result: Bool
+        if augmentation.contains(lowerSource) {
+            result = false
+        } else {
+            result = isKnownWord(source, language: "de")
+                && !Self.platformSelfListed(source)
+                && isKnownWord(candidate, language: "de")
+                && Self.platformSelfListed(candidate)
+                && Self.platformGuesses(source).contains { $0.lowercased() == lowerCandidate }
+        }
+
+        lock.lock()
+        cache[key] = result
+        lock.unlock()
+        return result
+    }
+
     /// Follow-up (260723-sx1, R6 compound-constituent closure): a
     /// hyphenated compound counts as known when ANY hyphen-separated
     /// constituent (case-insensitive) is itself an augmented term — e.g.
@@ -129,6 +169,37 @@ public final class PlatformSpellLexicon: SpellLexicon, @unchecked Sendable {
     private func hasAugmentedConstituent(_ lower: String) -> Bool {
         guard lower.contains("-") else { return false }
         return lower.split(separator: "-").contains { augmentation.contains(String($0)) }
+    }
+
+    private static func platformSelfListed(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        #if canImport(AppKit)
+        let completions = NSSpellChecker.shared.completions(
+            forPartialWordRange: NSRange(location: 0, length: (text as NSString).length),
+            in: text, language: "de", inSpellDocumentWithTag: 0) ?? []
+        return completions.contains { $0.lowercased() == lower }
+        #elseif canImport(UIKit)
+        let completions = UITextChecker().completions(
+            forPartialWordRange: NSRange(location: 0, length: (text as NSString).length),
+            in: text, language: "de") ?? []
+        return completions.contains { $0.lowercased() == lower }
+        #else
+        return false
+        #endif
+    }
+
+    private static func platformGuesses(_ text: String) -> [String] {
+        #if canImport(AppKit)
+        return NSSpellChecker.shared.guesses(
+            forWordRange: NSRange(location: 0, length: (text as NSString).length),
+            in: text, language: "de", inSpellDocumentWithTag: 0) ?? []
+        #elseif canImport(UIKit)
+        return UITextChecker().guesses(
+            forWordRange: NSRange(location: 0, length: (text as NSString).length),
+            in: text, language: "de") ?? []
+        #else
+        return []
+        #endif
     }
 
     private static func platformKnown(_ text: String, language: String) -> Bool {
