@@ -5,6 +5,7 @@ import WhisperKit
 
 /// Quick task 261003-jej: the ASR token trace is built synchronously before paste.
 /// Budget: median at most 15 ms for ~300 text tokens with the real large-v3 tokenizer.
+/// Opt-in: `TEST_RUNNER_DICTICUS_RUN_LATENCY_TESTS=1 xcodebuild ... test` (DEBUG_RECORDER override run).
 final class AsrTokenTraceLatencyTests: XCTestCase {
 
     private static let paragraph = """
@@ -25,15 +26,21 @@ final class AsrTokenTraceLatencyTests: XCTestCase {
     """
 
     func testTraceBuildAndEncodeMedianWithinBudget() async throws {
-        let tokenizerJSON = try XCTUnwrap(
-            FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
-        ).appendingPathComponent("huggingface/models/openai/whisper-large-v3/tokenizer.json")
+        let optIn = ProcessInfo.processInfo.environment["DICTICUS_RUN_LATENCY_TESTS"]
+        guard let optIn, !optIn.isEmpty else {
+            throw XCTSkip("Set DICTICUS_RUN_LATENCY_TESTS=1 to run the ASR token-trace latency budget.")
+        }
+
+        let base = AsrModelLoader.whisperDownloadBase()
+        let tokenizerJSON = base
+            .appendingPathComponent(AsrModelLoader.whisperTokenizerSubpath)
+            .appendingPathComponent("tokenizer.json")
         try XCTSkipUnless(
             FileManager.default.fileExists(atPath: tokenizerJSON.path),
             "Whisper large-v3 tokenizer not cached locally"
         )
 
-        let tokenizer = try await ModelUtilities.loadTokenizer(for: .largev3)
+        let tokenizer = try await ModelUtilities.loadTokenizer(for: .largev3, tokenizerFolder: base)
         let special = tokenizer.specialTokens
         let textIds = tokenizer.encode(text: Self.paragraph).filter { $0 < special.specialTokenBegin }
         XCTAssertGreaterThanOrEqual(textIds.count, 250)
