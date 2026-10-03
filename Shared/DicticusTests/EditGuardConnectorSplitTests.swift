@@ -22,8 +22,8 @@ import XCTest
 /// reverts it when the recase of the word after it is itself reverted.
 ///
 /// `;`, `,` and `:` as targets, `but`, `or`, `because`, `so` and their German
-/// counterparts, word swaps (D-09), noun coordination, contraction expansion
-/// and `which` -> `:` stay rejected; the negatives below pin each.
+/// counterparts, word swaps (D-09), noun coordination and `which` -> `:` stay
+/// rejected; the negatives below pin each.
 ///
 /// Every fixture is an invented sentence with the structural shape of a
 /// logged case; records are cited only as `10-03:#N` from
@@ -201,11 +201,12 @@ final class EditGuardConnectorSplitTests: XCTestCase {
         assertRejected(run(p), from: "it", to: "them", .pronounPersonChange)
     }
 
-    /// 10-03:#55 shape: coupled with a contraction expansion (`where's` -> `where is`), which stays rejected.
-    func testAudit55_splitCoupledWithContractionExpansion_RED() {
+    /// 10-03:#55 shape: the split ships with a contraction expansion (`where's` -> `where is`). 261003-fiu superseded
+    /// au9 decision 3 for contractions: the expansion is accepted, so it no longer drags the split back.
+    func testAudit55_splitShipsWithContractionExpansion_RED() {
         let p = Fx.audit55
-        assertSplitRejected(p, connector: "and", .sentenceCoupledRevert)
-        assertRejected(run(p), from: "where's", .contentWordIdentityChange)
+        assertSplitAccepted(p, connector: "and")
+        assertAccepted(run(p), from: "where's", to: "where", kind: "substitute", "contractionExpansion")
     }
 
     /// 10-03:#63 shape: coupled with `so` -> `.`, which stays `contentWordIdentityChange`.
