@@ -389,6 +389,12 @@ struct ITNUtility {
         "zee": "Z",
     ]
 
+    // MARK: - Spoken punctuation commands (quick 261003-p7e)
+
+    static func applySpokenPunctuationCommands(to text: String) -> String {
+        return text
+    }
+
     // MARK: - Spoken punctuation collapse (Phase 32 PUNCT-01/PUNCT-02)
 
     static func collapseSpokenPunctuation(to text: String) -> String {

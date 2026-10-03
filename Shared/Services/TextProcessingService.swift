@@ -611,6 +611,12 @@ class TextProcessingService: ObservableObject {
         return processedText
     }
 
+    // MARK: - Dictated-mark shortfall (quick 261003-p7e)
+
+    nonisolated static func dictatedMarkShortfall(thresholds: [String: Int], rulesCleaned: String, output: String) -> [String] {
+        return []
+    }
+
     // MARK: - Post-gate capitalization (42-07/MLANG-01)
 
     /// Deterministic post-gate capitalization: the first alphabetic
