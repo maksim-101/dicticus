@@ -1,6 +1,8 @@
 import XCTest
 #if canImport(AppKit)
 import AppKit
+#elseif canImport(UIKit)
+import UIKit
 #endif
 @testable import Dicticus
 
@@ -236,6 +238,33 @@ final class EditGuardCompoundRepairTests: XCTestCase {
 
     func testR3_realChecker_reverseDirectionRejected() {
         assertRejected(p1Llm, p1Baseline, source: "Schreibweise", lexicon: PlatformSpellLexicon())
+    }
+
+    func testR4_platformLexiconMethod() {
+        let lexicon = PlatformSpellLexicon()
+        XCTAssertTrue(lexicon.isCompoundAcceptedRepair(source: "Schreiweise", candidate: "Schreibweise", language: "de"))
+        XCTAssertTrue(lexicon.isCompoundAcceptedRepair(source: "Reisekasten", candidate: "Reisekosten", language: "de"))
+        XCTAssertFalse(lexicon.isCompoundAcceptedRepair(source: "Koma", candidate: "Komma", language: "de"))
+        XCTAssertFalse(lexicon.isCompoundAcceptedRepair(source: "Schreibweise", candidate: "Schreiweise", language: "de"))
+        XCTAssertFalse(lexicon.isCompoundAcceptedRepair(source: "Schreiweise", candidate: "Schreibweise", language: "en"))
+    }
+    #endif
+
+    #if canImport(UIKit) && !canImport(AppKit)
+    /// iOS contract: where `UITextChecker` lists no completions for the
+    /// candidate (the measured simulator state) the branch never fires; where
+    /// it does (a device may), the parity path is active and unpinned.
+    func testI1_iosWithoutCompletionsNeverFires() throws {
+        let word = "Schreibweise"
+        let completions = UITextChecker().completions(
+            forPartialWordRange: NSRange(location: 0, length: (word as NSString).length),
+            in: word, language: "de") ?? []
+        try XCTSkipUnless(completions.isEmpty, "this runtime lists completions, so the parity path is active and unpinned")
+        let lexicon = PlatformSpellLexicon()
+        XCTAssertFalse(lexicon.isCompoundAcceptedRepair(source: "Schreiweise", candidate: "Schreibweise", language: "de"))
+        let result = EditGuard.apply(
+            rulesCleaned: p1Baseline, llmOutput: p1Llm, language: "de", lexicon: lexicon)
+        XCTAssertEqual(result.text, p1Baseline)
     }
     #endif
 }

@@ -142,6 +142,11 @@ public enum EditGuard {
         /// `classify` — the ONLY scope holding `dictProtectedLower` and the
         /// only place that runs before `rebuild`'s coupling passes.
         case hyphenCompoundJoin
+        /// Quick task 261003-aua: a German substitute whose source the
+        /// platform checker knows only as an unlisted compound split
+        /// (`Schreiweise`) and whose candidate it suggests and lists
+        /// (`Schreibweise`). Assigned at `classifySubstitute` step 8.5.
+        case compoundRepair
     }
 
     /// D-11's forensics vocabulary — the classes of edit this guard REJECTS.
@@ -1011,6 +1016,15 @@ public enum EditGuard {
         if InflectionRules.isAllowedInflection(a.normalized, b.normalized, language: language) {
             return (true, .inflectionFix, nil)
         }
+        // 8.5. Quick task 261003-aua: a long German one-edit repair the checker
+        // knows only as a compound split. After step 7 so the derivational
+        // lock still guards real words; the string guards run first so
+        // `guesses` is paid only for long one-edit pairs.
+        if a.kind == .word, b.kind == .word,
+           isCompoundRepairShape(a, b, language: language, dictProtectedLower: dictProtectedLower),
+           lexicon.isCompoundAcceptedRepair(source: a.text, candidate: b.text, language: language) {
+            return (true, .compoundRepair, nil)
+        }
         // 9. Fail closed.
         return (false, nil, .contentWordIdentityChange)
     }
@@ -1542,6 +1556,27 @@ public enum EditGuard {
 
     private static func foldForSimilarity(_ s: String) -> String {
         s.lowercased().folding(options: .diacriticInsensitive, locale: nil)
+    }
+
+    // MARK: - Quick task 261003-aua
+
+    /// String guards of step 8.5: German, letters only, no dictProtected word
+    /// on either side, folded source >= 10 characters, folded distance
+    /// exactly 1 with >= 3 shared characters at both ends, and not an affix
+    /// pair (shorter is a prefix of longer with at most 3 extra characters).
+    private static func isCompoundRepairShape(
+        _ a: Token, _ b: Token, language: String, dictProtectedLower: Set<String>
+    ) -> Bool {
+        guard language.hasPrefix("de") else { return false }
+        guard a.text.allSatisfy({ $0.isLetter }), b.text.allSatisfy({ $0.isLetter }) else { return false }
+        guard !dictProtectedLower.contains(a.normalized), !dictProtectedLower.contains(b.normalized) else { return false }
+        let fa = foldForSimilarity(a.normalized)
+        let fb = foldForSimilarity(b.normalized)
+        guard fa.count >= 10, LevenshteinDistance.distance(fa, fb) == 1 else { return false }
+        guard zip(fa, fb).prefix(while: { $0 == $1 }).count >= 3 else { return false }
+        guard zip(fa.reversed(), fb.reversed()).prefix(while: { $0 == $1 }).count >= 3 else { return false }
+        let (shorter, longer) = fa.count <= fb.count ? (fa, fb) : (fb, fa)
+        return !(longer.hasPrefix(shorter) && longer.count - shorter.count <= 3)
     }
 
     // MARK: - Quick task 260723-sx1, criterion C: prosodic-punctuation allowlist
@@ -2209,7 +2244,7 @@ public enum EditGuard {
     /// classes for `applySentenceCoupledRevert` — an accepted edit only
     /// reverts if its `acceptClass` is one of these. The SELF-CONTAINED
     /// survive classes (`fillerDeletion`, `repetitionDeletion`,
-    /// `nonWordRepair`, `hyphenCompoundJoin`, `numberFormChange`) are
+    /// `nonWordRepair`, `compoundRepair`, `hyphenCompoundJoin`, `numberFormChange`) are
     /// deliberately NOT coded here — anything not in this set survives, by
     /// construction.
     private static let sentenceRevertContextDependentClasses: Set<String> = [
