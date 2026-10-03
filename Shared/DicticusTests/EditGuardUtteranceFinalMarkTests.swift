@@ -73,7 +73,8 @@ final class EditGuardUtteranceFinalMarkTests: XCTestCase {
     func testP2_atomicNeighbourRejectedLastWordSubstitute() {
         let baseline = "she finished the report"
         let llm = "She finished the assessment."
-        let expected = baseline + "."
+        // 261003-gp8: the lone swap stays reverted; the first-word capital now ships.
+        let expected = "She finished the report."
         let out = guardOut(baseline, llm)
         let result = guardResult(baseline, llm)
         XCTAssertEqual(out, expected, "edits: \(result.edits)")
@@ -96,7 +97,8 @@ final class EditGuardUtteranceFinalMarkTests: XCTestCase {
     func testP3_multiSentenceSecondSentenceRevertsWithFinalMark() {
         let baseline = "I called him yesterday. she never returned the call"
         let llm = "I called him, yesterday. She never returned the item."
-        let expected = "I called him, yesterday. she never returned the call."
+        // 261003-gp8: the lone swap stays reverted; the first-word capital now ships.
+        let expected = "I called him, yesterday. She never returned the call."
         let out = guardOut(baseline, llm)
         let result = guardResult(baseline, llm)
         XCTAssertEqual(out, expected, "edits: \(result.edits)")
@@ -107,9 +109,9 @@ final class EditGuardUtteranceFinalMarkTests: XCTestCase {
         XCTAssertEqual(last.acceptClass, "punctuationOrCasing")
         // Sentence 1's comma survives — no trigger in that raw sentence.
         XCTAssertTrue(result.edits.contains { $0.kind == "insert" && $0.to == "," && $0.accepted && $0.acceptClass == "punctuationOrCasing" })
-        // Sentence 2's content trigger and casing revert.
+        // Sentence 2's content trigger reverts; 261003-gp8: its casing now ships as punctuationOrCasing.
         XCTAssertTrue(result.edits.contains { $0.kind == "substitute" && $0.from == "call" && $0.to == "item" && $0.rejectClass == "contentWordIdentityChange" })
-        XCTAssertTrue(result.edits.contains { $0.kind == "substitute" && $0.from == "she" && $0.to == "She" && $0.rejectClass == "sentenceCoupledRevert" })
+        XCTAssertTrue(result.edits.contains { $0.kind == "substitute" && $0.from == "she" && $0.to == "She" && $0.accepted && $0.acceptClass == "punctuationOrCasing" })
         let v = EditGuardMergeAtomicityTests.neitherSourceViolations(output: out, sourceA: baseline, sourceB: llm)
         XCTAssertTrue(v.tier1.isEmpty, "tier-1 neither-source violation(s) \(v.tier1) in: \(out)")
     }
@@ -146,7 +148,8 @@ final class EditGuardUtteranceFinalMarkTests: XCTestCase {
     func testN1_rawAlreadyEndsInPeriodNoDoubleMark() {
         let baseline = "he fixed the printer."
         let llm = "He fixed the router."
-        let expected = baseline
+        // 261003-gp8: the lone swap stays reverted; the first-word capital now ships.
+        let expected = "He fixed the printer."
         let out = guardOut(baseline, llm)
         let result = guardResult(baseline, llm)
         XCTAssertEqual(out, expected, "edits: \(result.edits)")
