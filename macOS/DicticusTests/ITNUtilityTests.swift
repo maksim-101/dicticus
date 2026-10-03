@@ -482,8 +482,9 @@ final class ITNUtilitySpokenPunctuationTests: XCTestCase {
         XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "a asterisk b"), "a * b")
     }
 
-    func testSemicolon_collapses() {
-        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "x semicolon y"), "x ; y")
+    func testSemicolon_isLeftForSpokenCommandPass() {
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "x semicolon y"), "x semicolon y")
+        XCTAssertEqual(ITNUtility.applySpokenPunctuationCommands(to: "x semicolon y"), "x; y")
     }
 
     func testAtSign_twoToken_collapses() {
