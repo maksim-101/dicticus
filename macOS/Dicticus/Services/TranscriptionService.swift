@@ -856,10 +856,8 @@ extension TranscriptionService {
     /// Returns true if the WhisperKit large-v3-turbo model is cached on this machine.
     /// Used by tests to conditionally skip model-dependent tests.
     static func isWhisperKitAvailable() -> Bool {
-        let documentsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
-        guard let base = documentsDir else { return false }
-        let modelDir = base
-            .appendingPathComponent("huggingface/models/argmaxinc/whisperkit-coreml")
+        let modelDir = AsrModelLoader.whisperDownloadBase()
+            .appendingPathComponent(AsrModelLoader.whisperRepoSubpath)
             .appendingPathComponent(AsrModelLoader.modelName)
         return (try? FileManager.default.contentsOfDirectory(atPath: modelDir.path))?.isEmpty == false
     }

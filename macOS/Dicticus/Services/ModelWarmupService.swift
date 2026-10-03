@@ -196,6 +196,13 @@ class ModelWarmupService: ObservableObject {
 
         warmupTask = Task.detached(priority: .utility) { [weak self] in
             do {
+                let warmupLog = Logger(subsystem: "com.dicticus", category: "warmup")
+
+                // One-shot move of the model out of ~/Documents/huggingface (261003-raz). Runs
+                // here, not inside loadWhisperKit, so the unsigned test host never probes Documents.
+                let migration = AsrModelLoader.migrateLegacyWhisperModelIfNeeded()
+                warmupLog.notice("Whisper model migration: \(String(describing: migration), privacy: .public)")
+
                 // Step 1: Download + prewarm + load WhisperKit large-v3-turbo CoreML
                 // models from HuggingFace via the shared bounded-retry wrapper. First run
                 // downloads ~626 MB; subsequent runs use cached CoreML package.
@@ -216,7 +223,6 @@ class ModelWarmupService: ObservableObject {
                 // WHISP-02 / D-06: purge the stale Parakeet cache only AFTER a successful
                 // WhisperKit load — never before, so a failed download leaves no data-loss
                 // window (the old Parakeet models stay usable until Whisper is confirmed).
-                let warmupLog = Logger(subsystem: "com.dicticus", category: "warmup")
                 if let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
                     let parakeetCache = appSupport.appendingPathComponent("FluidAudio/Models")
                     if FileManager.default.fileExists(atPath: parakeetCache.path) {
