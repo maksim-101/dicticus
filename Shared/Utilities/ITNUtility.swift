@@ -398,7 +398,8 @@ struct ITNUtility {
     ///
     /// A phrase stays as words after an article, determiner, preposition, "like"/"as" or a
     /// conjunction (G1; a closing bracket is exempt while a bracket opened by command is still
-    /// open). "?" and "!" fire only at a clause end (G2). A line break does not fire before
+    /// open). A bracket command tolerates one ASR comma before its last word ("parentheses,
+    /// open"). "?" and "!" fire only at a clause end (G2). A line break does not fire before
     /// of/for/von/für (G3). The semicolon follows G1 only.
     static func applySpokenPunctuationCommands(to text: String) -> String {
         let (toks, gaps) = scanSpokenCommandTokens(text)
@@ -556,6 +557,13 @@ struct ITNUtility {
     private enum SpokenCommandKind {
         case openParen, closeParen, openSquare, closeSquare, ellipsis, question, exclamation, lineBreak, semicolon
 
+        var isBracket: Bool {
+            switch self {
+            case .openParen, .closeParen, .openSquare, .closeSquare: return true
+            default: return false
+            }
+        }
+
         var openerForCloser: Character? {
             switch self {
             case .closeParen: return "("
@@ -621,7 +629,8 @@ struct ITNUtility {
                 guard t.lead.isEmpty, t.core.lowercased() == w else { ok = false; break }
                 if n < words.count - 1 {
                     let allowed: String = kind == .ellipsis ? ",." : ""
-                    if !t.trail.allSatisfy({ allowed.contains($0) }) { ok = false; break }
+                    let oneAsrComma = n == words.count - 2 && kind.isBracket && t.trail == ","
+                    if !oneAsrComma && !t.trail.allSatisfy({ allowed.contains($0) }) { ok = false; break }
                 }
             }
             if ok { return (kind, words.count) }
