@@ -167,6 +167,15 @@ enum PostEditDiff {
         guard n > 0, !fieldTokens.isEmpty else { return nil }
         let maxDist = max(1, (2 * n) / 5)
         let total = fieldTokens.count
+        // Position anchor: only matches overlapping `window` (UTF-16 offsets) may be returned.
+        func overlapsWindow(_ i: Int) -> Bool {
+            guard let window else { return true }
+            return fieldTokens[i].utf16End > window.lowerBound && fieldTokens[i].utf16Start < window.upperBound
+        }
+        let overlapping = (0..<total).filter(overlapsWindow)
+        if window != nil && overlapping.isEmpty { return nil }
+        let minEnd = (overlapping.first ?? 0) + 1
+        let maxEnd = window == nil ? total : (overlapping.last ?? 0) + 1 + n + maxDist
         let caretIdx = caretUTF16.map { c in fieldTokens.filter { $0.utf16End <= c }.count } ?? total
         var lo = 0
         var hi = total
@@ -188,6 +197,7 @@ enum PostEditDiff {
         var best: (cost: Int, dist: Int, end: Int)?
         for j in stride(from: 1, through: window.count, by: 1) {
             let end = lo + j
+            if end < minEnd || end > maxEnd { continue }
             let cand = (cost: prev[j], dist: abs(end - caretIdx), end: end)
             if let b = best {
                 if (cand.cost, cand.dist, -cand.end) < (b.cost, b.dist, -b.end) { best = cand }
@@ -228,7 +238,9 @@ enum PostEditDiff {
         // Privacy: the range starts and ends on exact token matches, so a substituted or inserted
         // neighbour at either boundary (text the user did not dictate) is never part of the span.
         guard let firstExact, let lastExact else { return nil }
-        return (sliceStart + firstExact)..<(sliceStart + lastExact + 1)
+        let range = (sliceStart + firstExact)..<(sliceStart + lastExact + 1)
+        if window != nil && !range.contains(where: overlapsWindow) { return nil }
+        return range
     }
 
     private static func reduced(_ tokens: [String]) -> String {
@@ -238,7 +250,7 @@ enum PostEditDiff {
 
     /// Token LCS between the pasted span and its current text, grouped into maximal hunks.
     /// Context is drawn from the pasted array only, so field text outside the span cannot leak.
-    static func diff(pasted: [String], current: [String]) -> (changes: [Change], truncated: Int) {
+    static func diff(pasted: [String], current: [String], countsOnly: Bool = false) -> (changes: [Change], truncated: Int) {
         let n = pasted.count
         let m = current.count
         var l = [[Int]](repeating: [Int](repeating: 0, count: m + 1), count: n + 1)
@@ -272,7 +284,7 @@ enum PostEditDiff {
                 // Privacy: a hunk touching either end of the span logs counts only; its replacement
                 // text sits at the boundary, where field text outside the span could be mistaken for it.
                 let touchesEnd = prevP == 0 || prevC == 0 || a == n || b == m
-                if touchesEnd || from.count > hunkSideCap || to.count > hunkSideCap {
+                if countsOnly || touchesEnd || from.count > hunkSideCap || to.count > hunkSideCap {
                     changes.append(Change(kind: "rewrite", from: nil, to: nil, before: nil, after: nil,
                                           from_n: from.count, to_n: to.count))
                 } else {
@@ -339,7 +351,13 @@ enum PostEditDiff {
                 sawGone = true
                 return .elementGone
             case .read(let tokens, let caretUTF16, let stillFocused):
-                if let range = PostEditDiff.relocate(pasted: pasted, fieldTokens: tokens, caretUTF16: caretUTF16) {
+                var window: Range<Int>?
+                if let anchor {
+                    let growth = max(0, (tokens.last?.utf16End ?? 0) - anchor.fieldUTF16)
+                    window = (anchor.start - PostEditDiff.anchorSlackUTF16)
+                        ..< (anchor.end + PostEditDiff.anchorSlackUTF16 + growth)
+                }
+                if let range = PostEditDiff.relocate(pasted: pasted, fieldTokens: tokens, caretUTF16: caretUTF16, window: window) {
                     lastLocated = tokens[range].map(\.text)
                     locatedPolls += 1
                     consecutiveLost = 0
@@ -356,7 +374,7 @@ enum PostEditDiff {
             guard locatedPolls > 0, let lastLocated else {
                 return sawGone ? (.fieldGone, nil, nil, nil, 0) : (.spanNotFound, "lost", nil, nil, 0)
             }
-            let d = PostEditDiff.diff(pasted: pasted, current: lastLocated)
+            let d = PostEditDiff.diff(pasted: pasted, current: lastLocated, countsOnly: anchor == nil)
             if d.changes.isEmpty { return (.unchanged, nil, nil, nil, 0) }
             return (.edited, nil, d.changes, d.truncated > 0 ? d.truncated : nil,
                     d.changes.filter { $0.kind == "word" }.count)
