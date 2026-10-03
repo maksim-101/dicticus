@@ -117,6 +117,21 @@ final class SpokenPunctuationCommandTests: XCTestCase {
         expect(Array(Self.positives[28..<31]))
     }
 
+    /// One ASR comma between the two words of a bracket command ("parentheses, open").
+    static let innerCommaPositives: [(String, String)] = [
+        ("This works, parentheses, open, mostly parentheses, closed, semicolon, the rest, question mark, new line, next line.",
+         "This works (mostly); the rest?\nnext line."),
+        ("Ship it, parenthesis, open, see notes, parenthesis, close, now", "Ship it (see notes) now"),
+        ("Ship it, open, parenthesis, see notes, closing, parenthesis, now", "Ship it (see notes) now"),
+        ("The list, square brackets, open, draft, square brackets, close, is ready", "The list [draft] is ready"),
+        ("Das gilt Klammer, auf vorläufig Klammer, zu für alle", "Das gilt (vorläufig) für alle"),
+        ("Status eckige Klammer, auf offen eckige Klammer, zu", "Status [offen]"),
+    ]
+
+    func testBracketInnerCommaPositives_RED() {
+        expect(Self.innerCommaPositives)
+    }
+
     // MARK: - Negatives (byte-identical before and after)
 
     func testSemicolonNegatives() {
@@ -159,13 +174,25 @@ final class SpokenPunctuationCommandTests: XCTestCase {
         for s in inputs { XCTAssertEqual(f(s), s) }
     }
 
+    func testBracketInnerCommaNegatives() {
+        let inputs = [
+            "the parentheses, open questions remain",
+            "in square brackets, open items are marked",
+            "Die Klammer, auf die du zeigst, ist falsch",
+            "wegen der Klammer, zu der es keine Regel gibt",
+            "note parentheses. Open items follow",
+            "see parentheses; open the file",
+        ]
+        for s in inputs { XCTAssertEqual(f(s), s) }
+    }
+
     func testNoPhraseTextIsByteIdentical() {
         let s = "plain  text\twith   odd gaps\nand a second line  "
         XCTAssertEqual(f(s), s)
     }
 
     func testIdempotentOnPositives() {
-        for (input, _) in Self.positives {
+        for (input, _) in Self.positives + Self.innerCommaPositives {
             let once = f(input)
             XCTAssertEqual(f(once), once, "input: \(input)")
         }
