@@ -297,6 +297,20 @@ final class PostEditDiffTests: XCTestCase {
         XCTAssertEqual(s.result().reason, "lost")
     }
 
+    func testAnchorGrowthZoneSimilarSentenceIsNeverLogged() throws {
+        let pasteField = "Intro line here. " + sentence.joined(separator: " ") + " Tail."
+        let newText = String(repeating: "freshly typed filler words ", count: 5)
+        let field = "Intro line here. " + newText + "Ask the MARKERX to water MARKERY twice Tail."
+        XCTAssertGreaterThan(field.utf16.count - pasteField.utf16.count, 100)
+        for caret in [nil, field.utf16.count] as [Int?] {
+            var s = makeSession(pasteField: pasteField)
+            _ = s.ingest(.read(tokens: toks(field), caretUTF16: caret, stillFocused: true), elapsedMs: 500)
+            let line = String(decoding: try XCTUnwrap(PostEditDiff.encodeLine(finalizedRecord(s))), as: UTF8.self)
+            XCTAssertFalse(line.contains("MARKERX") || line.contains("MARKERY"), line)
+            XCTAssertEqual(s.result().outcome, .spanNotFound)
+        }
+    }
+
     func testAnchorAllowsAUserInsertionOfFiveWordsBeforeTheSpan() {
         var s = makeSession(pasteField: "Notes here. Ask the robot to water it twice")
         let field = "one two three four five Notes here. Ask the rover to water it twice"
