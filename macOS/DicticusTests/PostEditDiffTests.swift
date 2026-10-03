@@ -78,6 +78,20 @@ final class PostEditDiffTests: XCTestCase {
         XCTAssertEqual(v.matchKind, .tokens)
     }
 
+    // 261003-orx: iTerm2 reports the unwritten gap cells of Claude Code's input box as U+0000,
+    // so a pasted line reads "❯ Ask\0the\0robot…" through Accessibility.
+    func testLocateNulGappedTerminalInputLine() {
+        let rule = String(repeating: "\u{2500}", count: 12)
+        let field = "Done.\n" + rule + "\n\u{276F}\u{00A0}Ask\u{0}the\u{0}robot\u{0}to\u{0}water\u{0}it\u{0}twice\n" + rule + "\n"
+        let tokens = PostEditDiff.tokenize(field)
+        XCTAssertEqual(tokens.map(\.text), ["Done.", "\u{276F}", "Ask", "the", "robot", "to", "water", "it", "twice"])
+        let caret = offset(of: "twice", in: field) + 5
+        let r = PostEditDiff.locateAtPaste(pasted: "Ask the robot to water it twice", field: field,
+                                           fieldTokens: tokens, caretUTF16: caret)
+        guard let v = located(r) else { return }
+        XCTAssertEqual(v.range, 2..<9)
+    }
+
     func testLocateFailures() {
         let field = "Something else entirely here "
         let tokens = PostEditDiff.tokenize(field)

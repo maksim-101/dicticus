@@ -42,8 +42,10 @@ enum PostEditDiff {
         let utf16End: Int
     }
 
+    /// U+0000 counts as a gap: iTerm2's Accessibility text reports cells a TUI never wrote as NUL,
+    /// which is how word gaps in Claude Code's input box arrive (261003-orx).
     static func isSeparator(_ u: Unicode.Scalar) -> Bool {
-        CharacterSet.whitespacesAndNewlines.contains(u) || (0x2500...0x257F).contains(u.value)
+        CharacterSet.whitespacesAndNewlines.contains(u) || u.value == 0 || (0x2500...0x257F).contains(u.value)
     }
 
     static func tokenize(_ s: String) -> [Token] {
