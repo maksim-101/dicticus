@@ -34,8 +34,8 @@ import XCTest
 /// the change. Guard pins and their mutations: M1 lone (`testTwoSwaps...`),
 /// M2 word to word (`testWordToCommaSwap...`), M3 coordinator or negator
 /// (`testCoordinatorSwap...`, `testNegatorSwap...`), M4 terminal exclusion
-/// (`testPeriodSplit...`, `testQuestionMark...`, `testPeriodDeleteMerge...`),
-/// M5 release set (`testFunctionWordFix...`), M45 both (`testPauseSplitMerge...`),
+/// (`testPeriodSplit...`, `testQuestionMark...`, `testFinalPeriodDelete...`),
+/// M5 release set (`testFunctionWordFix...`), M45 both (`testPauseSplitMerge...`, `testPeriodDeleteMerge...`),
 /// M6 utterance-final period (`testUtteranceFinalPeriod...`), M9 number words
 /// (`testNumberWordSwap...`), M11 lowering (`testLoweringEdit...`), M12 cluster
 /// (`testSwapSharingCluster...`). A pronoun-side swap is classified
@@ -103,6 +103,9 @@ final class EditGuardLoneSwapPropagationTests: XCTestCase {
         static let periodDeleteMerge = Pair("en",
             "The bees are calm today. and the queen is laying well.",
             "The bees are quiet today and the queen is laying well.")
+        static let finalPeriodDelete = Pair("en",
+            "the bees are calm today and the queen is laying well.",
+            "The bees are quiet today, and the queen is laying well")
         static let functionWordFix = Pair("de",
             "Der Honig schleudere ich morgen mit dem Imkerverein Bergblick",
             "Den Honig verkaufe ich morgen mit dem Imkerverein Bergblick.")
@@ -250,7 +253,14 @@ final class EditGuardLoneSwapPropagationTests: XCTestCase {
         assertCouples(p, p.baseline)
     }
 
-    /// M4: a `.` delete merging two raw sentences, with a swap in the first.
+    /// M4: the raw final `.` is deleted (the LLM drops the closing mark).
+    func testFinalPeriodDeleteStillCouples() {
+        let p = Fx.finalPeriodDelete
+        assertCouples(p, p.baseline)
+    }
+
+    /// M45: a `.` delete merging two raw sentences, with a swap in the first. The delete is a pause-split merge, so it is
+    /// held by the terminal exclusion and by the release set together.
     func testPeriodDeleteMergeStillCouples() {
         let p = Fx.periodDeleteMerge
         assertCouples(p, p.baseline)
