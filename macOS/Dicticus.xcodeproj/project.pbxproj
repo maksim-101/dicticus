@@ -27,6 +27,7 @@
 		13DAE6D10AD94A540B1B02A1 /* DictionaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D6EAC45934BA02E00EE3D4E /* DictionaryView.swift */; };
 		1718F875E73BC178C22EA283 /* SparkleUpdater.swift in Sources */ = {isa = PBXBuildFile; fileRef = 685C77F14D62DFF404AEC44C /* SparkleUpdater.swift */; };
 		171DF828BD9397910CE051FF /* DictionaryService.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6C74F55E49D9613F8A46172 /* DictionaryService.swift */; };
+		1788BEC1502569F560EE2DC5 /* PostEditProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D72715BACF5E80C062DC1FD /* PostEditProbe.swift */; };
 		17FB04E9771817C360006E70 /* EditGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07E8AD126537E7029E61D9DD /* EditGuardTests.swift */; };
 		18668EE01D6AAE03785B0B5B /* TranscriptionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1E5718DD249C8651C7F1DB0 /* TranscriptionService.swift */; };
 		19275F32EEE16136B152773A /* CleanupService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EA0A8578A28FA69DEFD2AEB /* CleanupService.swift */; };
@@ -357,6 +358,7 @@
 		6A122EFDB00326E2C4702EAF /* CleanupSpikeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CleanupSpikeView.swift; sourceTree = "<group>"; };
 		6AB5B77A0DA6C9BF33771F7E /* PopoverHeader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PopoverHeader.swift; sourceTree = "<group>"; };
 		6D3F532C7AEB317140E6D49F /* DictationContextTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DictationContextTests.swift; sourceTree = "<group>"; };
+		6D72715BACF5E80C062DC1FD /* PostEditProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostEditProbe.swift; sourceTree = "<group>"; };
 		6F35F72CF7220AF1A7E02E47 /* canonical-brands.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "canonical-brands.txt"; sourceTree = "<group>"; };
 		70F70EF5ED301ED2D480B920 /* HotkeyManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HotkeyManagerTests.swift; sourceTree = "<group>"; };
 		7120D194DA4BD3C1C594DB71 /* ColognePhonetic.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ColognePhonetic.swift; sourceTree = "<group>"; };
@@ -884,6 +886,7 @@
 				E15BD28687EA00B00127FFF7 /* LlmLifecycleProbe.swift */,
 				581D101921D572E116C6A241 /* PasteProbe.swift */,
 				C8F8B7747F35412791E28FAF /* PostEditDiff.swift */,
+				6D72715BACF5E80C062DC1FD /* PostEditProbe.swift */,
 			);
 			path = Diagnostics;
 			sourceTree = "<group>";
@@ -1128,6 +1131,7 @@
 				58AA0894BDE4D726570395B6 /* PopoverRoot.swift in Sources */,
 				51977229D2AED0DC836D6D19 /* PosTagger.swift in Sources */,
 				9A93A6F8109E4F0CD454DB20 /* PostEditDiff.swift in Sources */,
+				1788BEC1502569F560EE2DC5 /* PostEditProbe.swift in Sources */,
 				AAE74D64DE0010627D22F0CD /* PronounPersonMap.swift in Sources */,
 				98C72003DDFF3D3FD3DE3F8C /* RevertToRawAction.swift in Sources */,
 				1F897D672CB96960F9F40148 /* RulesCleanupService.swift in Sources */,

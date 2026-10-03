@@ -41,12 +41,35 @@ enum PostEditDiff {
         let utf16End: Int
     }
 
+    static func isSeparator(_ u: Unicode.Scalar) -> Bool {
+        CharacterSet.whitespacesAndNewlines.contains(u) || (0x2500...0x257F).contains(u.value)
+    }
+
     static func tokenize(_ s: String) -> [Token] {
-        []
+        var out: [Token] = []
+        var cur = String.UnicodeScalarView()
+        var start = 0
+        var offset = 0
+        for u in s.unicodeScalars {
+            if isSeparator(u) {
+                if !cur.isEmpty {
+                    out.append(Token(text: String(cur), utf16Start: start, utf16End: offset))
+                    cur = String.UnicodeScalarView()
+                }
+            } else {
+                if cur.isEmpty { start = offset }
+                cur.append(u)
+            }
+            offset += u.utf16.count
+        }
+        if !cur.isEmpty { out.append(Token(text: String(cur), utf16Start: start, utf16End: offset)) }
+        return out
     }
 
     static func exclusion(bundleID: String?, role: String?, subrole: String?) -> Outcome? {
-        nil
+        if let bundleID, excludedBundleIDs.contains(bundleID) { return .excludedApp }
+        if subrole == "AXSecureTextField" { return .secure }
+        return nil
     }
 
     enum LocateFailure: String, Error {
@@ -62,7 +85,26 @@ enum PostEditDiff {
     static func locateAtPaste(
         pasted: String, field: String, fieldTokens: [Token], caretUTF16: Int?
     ) -> Result<(range: Range<Int>, matchKind: MatchKind), LocateFailure> {
-        .failure(.pasteTime)
+        let pastedTexts = tokenize(pasted).map(\.text)
+        let n = pastedTexts.count
+        guard n >= minPastedTokens else { return .failure(.tooShort) }
+        var ends: [Int] = []
+        if fieldTokens.count >= n {
+            for i in 0...(fieldTokens.count - n) where (0..<n).allSatisfy({ fieldTokens[i + $0].text == pastedTexts[$0] }) {
+                ends.append(i + n)
+            }
+        }
+        guard !ends.isEmpty else { return .failure(.pasteTime) }
+        let chosenEnd: Int
+        if let caretUTF16 {
+            let caretIdx = fieldTokens.filter { $0.utf16End <= caretUTF16 }.count
+            chosenEnd = ends.min { (abs($0 - caretIdx), -$0) < (abs($1 - caretIdx), -$1) }!
+        } else {
+            chosenEnd = ends.last!
+        }
+        let trimmed = pasted.trimmingCharacters(in: .whitespacesAndNewlines)
+        let kind: MatchKind = field.contains(trimmed) ? .exact : .tokens
+        return .success((range: (chosenEnd - n)..<chosenEnd, matchKind: kind))
     }
 
     struct Change: Codable, Sendable, Equatable {
