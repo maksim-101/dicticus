@@ -58,7 +58,7 @@ class PermissionManager: ObservableObject {
     /// NOT refreshed by the 2s polling timer (D-07: mdfind every 2s would be wasteful).
     @Published var multipleDicticusCopies: [URL] = []
 
-    private static let onboardingKey = "hasCompletedOnboarding"
+    nonisolated static let onboardingKey = "hasCompletedOnboarding"
 
     private var pollTimer: Timer?
 
