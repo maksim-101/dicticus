@@ -145,7 +145,7 @@ public final class PlatformSpellLexicon: SpellLexicon, @unchecked Sendable {
                 && !Self.platformSelfListed(source)
                 && isKnownWord(candidate, language: "de")
                 && Self.platformSelfListed(candidate)
-                && Self.platformGuesses(source).contains { $0.lowercased() == lowerCandidate }
+                && Self.platformGuessesInclude(source, lowerCandidate: lowerCandidate)
         }
 
         lock.lock()
@@ -179,26 +179,36 @@ public final class PlatformSpellLexicon: SpellLexicon, @unchecked Sendable {
             in: text, language: "de", inSpellDocumentWithTag: 0) ?? []
         return completions.contains { $0.lowercased() == lower }
         #elseif canImport(UIKit)
-        let completions = UITextChecker().completions(
-            forPartialWordRange: NSRange(location: 0, length: (text as NSString).length),
-            in: text, language: "de") ?? []
-        return completions.contains { $0.lowercased() == lower }
+        // UITextChecker is main-actor isolated in the iOS SDK; its array
+        // results must not leave the main actor, so reduce to a Bool inside.
+        guard Thread.isMainThread else { return false }
+        return MainActor.assumeIsolated {
+            let completions = UITextChecker().completions(
+                forPartialWordRange: NSRange(location: 0, length: (text as NSString).length),
+                in: text, language: "de") ?? []
+            return completions.contains { $0.lowercased() == lower }
+        }
         #else
         return false
         #endif
     }
 
-    private static func platformGuesses(_ text: String) -> [String] {
+    private static func platformGuessesInclude(_ text: String, lowerCandidate: String) -> Bool {
         #if canImport(AppKit)
-        return NSSpellChecker.shared.guesses(
+        let guesses = NSSpellChecker.shared.guesses(
             forWordRange: NSRange(location: 0, length: (text as NSString).length),
             in: text, language: "de", inSpellDocumentWithTag: 0) ?? []
+        return guesses.contains { $0.lowercased() == lowerCandidate }
         #elseif canImport(UIKit)
-        return UITextChecker().guesses(
-            forWordRange: NSRange(location: 0, length: (text as NSString).length),
-            in: text, language: "de") ?? []
+        guard Thread.isMainThread else { return false }
+        return MainActor.assumeIsolated {
+            let guesses = UITextChecker().guesses(
+                forWordRange: NSRange(location: 0, length: (text as NSString).length),
+                in: text, language: "de") ?? []
+            return guesses.contains { $0.lowercased() == lowerCandidate }
+        }
         #else
-        return []
+        return false
         #endif
     }
 
