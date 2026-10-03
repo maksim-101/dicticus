@@ -41,6 +41,11 @@ func revertToRaw(history: HistoryService = .shared, injector: TextInjector = .sh
     guard let last = history.entries.first, last.rawText != last.text else {
         return
     }
+    #if DEBUG_RECORDER
+    // 261003-jvq: finalize without a read, unawaited so the revert paste never queues behind an
+    // in-flight Accessibility read; the generation guard keeps a stale poll from writing afterwards.
+    Task { await PostEditProbe.shared.finalizePending(end: .revertToRaw, readFirst: false) }
+    #endif
     let outcome = await injector.injectText(last.rawText)
     if case .fallbackToClipboard = outcome {
         NotificationService.shared.post(.pasteUndeliverable)
