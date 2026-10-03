@@ -389,6 +389,291 @@ struct ITNUtility {
         "zee": "Z",
     ]
 
+    // MARK: - Spoken punctuation commands (quick 261003-p7e)
+
+    /// Turns dictated bracket, ellipsis, `?`, `!`, `;` and line-break commands (EN and DE) into
+    /// their symbols. Runs after ITN (a bracket glued to a word before ITN breaks number
+    /// conversion) and never re-joins the text: only the fired spans change, and all other
+    /// bytes, whitespace between words included, are copied unchanged.
+    ///
+    /// A phrase stays as words after an article, determiner, preposition, "like"/"as" or a
+    /// conjunction (G1; a closing bracket is exempt while a bracket opened by command is still
+    /// open). "?" and "!" fire only at a clause end (G2). A line break does not fire before
+    /// of/for/von/für (G3). The semicolon follows G1 only.
+    static func applySpokenPunctuationCommands(to text: String) -> String {
+        let (toks, gaps) = scanSpokenCommandTokens(text)
+        guard !toks.isEmpty else { return text }
+
+        var out: [(gap: String, text: String, locked: Bool)] = []
+        var pendingPrefix = ""
+        var pendingGap = ""
+        var nextGap: String? = nil
+        var openStack: [Character] = []
+        var fired = false
+
+        func flushPending() {
+            guard !pendingPrefix.isEmpty else { return }
+            out.append((pendingGap, pendingPrefix, true))
+            pendingPrefix = ""
+        }
+
+        /// Removes the trailing run of `marks` from the last emitted item and returns it; the
+        /// item keeps at least one character and command-emitted marks are not touched.
+        func stripTail(_ marks: String) -> String {
+            guard var last = out.popLast() else { return "" }
+            defer { out.append(last) }
+            if last.locked { return "" }
+            var run = ""
+            var base = last.text
+            while let c = base.last, marks.contains(c) {
+                run = String(c) + run
+                base.removeLast()
+            }
+            if base.isEmpty { return "" }
+            last.text = base
+            return run
+        }
+
+        func appendToLast(_ s: String, locked: Bool) {
+            if var last = out.popLast() {
+                last.text += s
+                last.locked = locked
+                out.append(last)
+            }
+        }
+
+        func emitToken(_ n: Int) {
+            let gap = nextGap ?? gaps[n]
+            nextGap = nil
+            if !pendingPrefix.isEmpty {
+                out.append((pendingGap, pendingPrefix + toks[n].raw, false))
+                pendingPrefix = ""
+            } else {
+                out.append((gap, toks[n].raw, false))
+            }
+        }
+
+        var i = 0
+        while i < toks.count {
+            guard let m = matchSpokenCommand(toks, at: i) else {
+                emitToken(i)
+                i += 1
+                continue
+            }
+            let j = i + m.words - 1
+            var k = j
+            var absorbed: [String] = []
+            while k + 1 < toks.count, toks[k + 1].isStandalonePunctuation,
+                  toks[k + 1].raw.allSatisfy({ ",.?!".contains($0) }) {
+                absorbed.append(toks[k + 1].raw)
+                k += 1
+            }
+            let ownTrail = toks[j].trail + absorbed.joined()
+            let kind = m.kind
+
+            // G1: mention guard.
+            let prevWord = i > 0 ? toks[i - 1].core.lowercased() : ""
+            var guarded = spokenCommandMentionWords.contains(prevWord)
+            if guarded, let opener = kind.openerForCloser, openStack.contains(opener) { guarded = false }
+            // G2: question and exclamation marks only at a clause end.
+            if !guarded, kind == .question || kind == .exclamation {
+                var clauseEnd = k + 1 >= toks.count
+                if !clauseEnd, let c = toks[j].trail.first, ".?!".contains(c) { clauseEnd = true }
+                if !clauseEnd, let a = absorbed.first, a.allSatisfy({ ".?!".contains($0) }) { clauseEnd = true }
+                if !clauseEnd, k + 1 < toks.count, let n = matchSpokenCommand(toks, at: k + 1), n.kind == .lineBreak { clauseEnd = true }
+                if !clauseEnd { guarded = true }
+            }
+            // G3: a line break does not fire before of/for/von/für.
+            if !guarded, kind == .lineBreak, toks[j].trail.isEmpty, j + 1 < toks.count,
+               ["of", "for", "von", "für"].contains(toks[j + 1].core.lowercased()) {
+                guarded = true
+            }
+            if guarded {
+                for n in i...j { emitToken(n) }
+                i = j + 1
+                continue
+            }
+
+            fired = true
+            let residueDrop: String = (kind == .question || kind == .exclamation) ? ",.?!" : ",."
+            let residue = String(ownTrail.filter { !residueDrop.contains($0) })
+            switch kind {
+            case .openParen, .openSquare:
+                if pendingPrefix.isEmpty {
+                    _ = stripTail(",")   // an ASR comma glued to the previous word is dropped
+                    pendingGap = nextGap ?? gaps[i]
+                    nextGap = nil
+                }
+                pendingPrefix += kind == .openParen ? "(" : "["
+                openStack.append(kind == .openParen ? "(" : "[")
+            case .closeParen, .closeSquare:
+                flushPending()
+                let sym: Character = kind == .closeParen ? ")" : "]"
+                var moved = ""
+                if out.isEmpty {
+                    out.append((nextGap ?? gaps[i], String(sym), false))
+                    nextGap = nil
+                } else {
+                    moved = stripTail(",.?!").filter { ".?!".contains($0) }
+                    appendToLast(String(sym), locked: false)
+                }
+                if moved.isEmpty, let c = ownTrail.first(where: { ".?!".contains($0) }) { moved = String(c) }
+                let otherMarks = String(ownTrail.filter { !",.?!".contains($0) })
+                if !moved.isEmpty || !otherMarks.isEmpty { appendToLast(moved + otherMarks, locked: false) }
+                if let idx = openStack.lastIndex(of: kind == .closeParen ? "(" : "[") { openStack.remove(at: idx) }
+            case .ellipsis, .question, .exclamation, .semicolon:
+                flushPending()
+                let sym: String
+                switch kind {
+                case .ellipsis: sym = "..."
+                case .question: sym = "?"
+                case .exclamation: sym = "!"
+                default: sym = ";"
+                }
+                if out.isEmpty {
+                    out.append((nextGap ?? gaps[i], sym, true))
+                    nextGap = nil
+                } else {
+                    _ = stripTail(kind == .semicolon ? "," : (kind == .ellipsis ? ",." : ",.?!"))
+                    appendToLast(sym, locked: true)
+                }
+                if !residue.isEmpty { appendToLast(residue, locked: true) }
+            case .lineBreak:
+                flushPending()
+                nextGap = (nextGap ?? "") + "\n"
+            }
+            i = k + 1
+        }
+        flushPending()
+        guard fired else { return text }
+
+        var result = ""
+        for item in out { result += item.gap + item.text }
+        result += nextGap ?? gaps[toks.count]
+        return result
+    }
+
+    private enum SpokenCommandKind {
+        case openParen, closeParen, openSquare, closeSquare, ellipsis, question, exclamation, lineBreak, semicolon
+
+        var openerForCloser: Character? {
+            switch self {
+            case .closeParen: return "("
+            case .closeSquare: return "["
+            default: return nil
+            }
+        }
+    }
+
+    private struct SpokenCommandToken {
+        let raw: String
+        let lead: String
+        let core: String
+        let trail: String
+        var isStandalonePunctuation: Bool { core.isEmpty }
+    }
+
+    /// Splits `text` into non-whitespace tokens and the whitespace runs around them
+    /// (`gaps[n]` precedes token `n`; `gaps[toks.count]` is the trailing run).
+    private static func scanSpokenCommandTokens(_ text: String) -> ([SpokenCommandToken], [String]) {
+        var toks: [SpokenCommandToken] = []
+        var gaps: [String] = []
+        var gap = ""
+        var cur = ""
+        func closeToken() {
+            guard !cur.isEmpty else { return }
+            let chars = Array(cur)
+            if let first = chars.firstIndex(where: { $0.isLetter || $0.isNumber }),
+               let last = chars.lastIndex(where: { $0.isLetter || $0.isNumber }) {
+                toks.append(SpokenCommandToken(
+                    raw: cur, lead: String(chars[..<first]),
+                    core: String(chars[first...last]), trail: String(chars[(last + 1)...])))
+            } else {
+                toks.append(SpokenCommandToken(raw: cur, lead: "", core: "", trail: cur))
+            }
+            cur = ""
+        }
+        for ch in text {
+            if ch.isWhitespace {
+                if !cur.isEmpty {
+                    closeToken()
+                    gap = ""
+                }
+                gap.append(ch)
+            } else {
+                if cur.isEmpty {
+                    gaps.append(gap)
+                    gap = ""
+                }
+                cur.append(ch)
+            }
+        }
+        closeToken()
+        gaps.append(gap)
+        return (toks, gaps)
+    }
+
+    private static func matchSpokenCommand(_ toks: [SpokenCommandToken], at i: Int) -> (kind: SpokenCommandKind, words: Int)? {
+        for (words, kind) in spokenCommandPhrases where i + words.count <= toks.count {
+            var ok = true
+            for (n, w) in words.enumerated() {
+                let t = toks[i + n]
+                guard t.lead.isEmpty, t.core.lowercased() == w else { ok = false; break }
+                if n < words.count - 1 {
+                    let allowed: String = kind == .ellipsis ? ",." : ""
+                    if !t.trail.allSatisfy({ allowed.contains($0) }) { ok = false; break }
+                }
+            }
+            if ok { return (kind, words.count) }
+        }
+        return nil
+    }
+
+    private static let spokenCommandPhrases: [([String], SpokenCommandKind)] = {
+        var p: [([String], SpokenCommandKind)] = []
+        let nouns = ["parenthesis", "parentheses", "paren"]
+        for n in nouns {
+            p.append((["open", n], .openParen))
+            p.append(([n, "open"], .openParen))
+            for a in ["close", "closed", "closing"] { p.append(([a, n], .closeParen)) }
+            for a in ["close", "closed"] { p.append(([n, a], .closeParen)) }
+        }
+        p.append((["klammer", "auf"], .openParen))
+        p.append((["runde", "klammer", "auf"], .openParen))
+        p.append((["klammer", "zu"], .closeParen))
+        p.append((["runde", "klammer", "zu"], .closeParen))
+        for b in ["bracket", "brackets"] {
+            p.append((["open", "square", b], .openSquare))
+            p.append((["square", b, "open"], .openSquare))
+            for a in ["close", "closed", "closing"] { p.append(([a, "square", b], .closeSquare)) }
+            for a in ["close", "closed"] { p.append((["square", b, a], .closeSquare)) }
+        }
+        p.append((["eckige", "klammer", "auf"], .openSquare))
+        p.append((["eckige", "klammer", "zu"], .closeSquare))
+        p.append((["dot", "dot", "dot"], .ellipsis))
+        p.append((["punkt", "punkt", "punkt"], .ellipsis))
+        p.append((["question", "mark"], .question))
+        p.append((["fragezeichen"], .question))
+        p.append((["exclamation", "mark"], .exclamation))
+        p.append((["exclamation", "point"], .exclamation))
+        p.append((["ausrufezeichen"], .exclamation))
+        p.append((["ausrufzeichen"], .exclamation))
+        p.append((["new", "line"], .lineBreak))
+        p.append((["newline"], .lineBreak))
+        p.append((["neue", "zeile"], .lineBreak))
+        p.append((["zeilenumbruch"], .lineBreak))
+        p.append((["semicolon"], .semicolon))
+        return p.sorted { $0.0.count > $1.0.count }
+    }()
+
+    private static let spokenCommandMentionWords: Set<String> = Set("""
+        a an the this that these those my your his her its our their some any no every each another
+        in into with without of for about from by on at to like as and or nor
+        der die das den dem des ein eine einen einem einer eines kein keine keinen keinem keiner
+        mein meine meinen meinem dein deine sein seine ihr ihre unser unsere dieser diese dieses diesen
+        jede jeder jedes jeden im am ins zum zur beim mit ohne von vom für über um als wie und oder bisschen
+        """.split(whereSeparator: { $0.isWhitespace }).map(String.init))
+
     // MARK: - Spoken punctuation collapse (Phase 32 PUNCT-01/PUNCT-02)
 
     static func collapseSpokenPunctuation(to text: String) -> String {
@@ -556,7 +841,6 @@ struct ITNUtility {
     // Standalone tokens replace themselves with a symbol, preserving surrounding spaces
     private static let standalonePunctuation: [String: String] = [
         "asterisk": "*",
-        "semicolon": ";",
         "hash": "#",
         "caret": "^",
         "tilde": "~",
