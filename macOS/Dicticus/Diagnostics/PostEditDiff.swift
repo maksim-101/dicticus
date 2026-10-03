@@ -147,16 +147,136 @@ enum PostEditDiff {
         func finalized(result: (outcome: Outcome, reason: String?, changes: [Change]?, truncated: Int?, wordEdits: Int),
                        end: EndReason, polls: Int, locatedPolls: Int, observedMs: Int, lastLocatedMs: Int?,
                        axMsMax: Double, ts: String) -> Record {
-            self
+            Record(
+                ts: ts, paste_ts: paste_ts, dictation_ts: dictation_ts, dictation_emission: dictation_emission,
+                bundle_id: bundle_id, mode: mode, pasted_words: pasted_words, outcome: result.outcome,
+                reason: result.reason, located_at_paste: located_at_paste, match_kind: match_kind, end: end.rawValue,
+                polls: polls, located_polls: locatedPolls, observed_ms: observedMs, last_located_ms: lastLocatedMs,
+                ax_ms_max: axMsMax, role: role, subrole: subrole, field_utf16: field_utf16,
+                secure_input_enabled: secure_input_enabled, changes: result.changes,
+                changes_truncated: result.truncated, word_edits: result.wordEdits,
+                observable_edit: result.outcome == .edited)
         }
     }
 
+    /// Semi-global token alignment of the pasted span against the field: free leading and trailing
+    /// field tokens, unit cost for substitution, insertion and deletion. Nil beyond the tolerance.
     static func relocate(pasted: [String], fieldTokens: [Token], caretUTF16: Int?) -> Range<Int>? {
-        nil
+        let n = pasted.count
+        guard n > 0, !fieldTokens.isEmpty else { return nil }
+        let maxDist = max(1, (2 * n) / 5)
+        let total = fieldTokens.count
+        let caretIdx = caretUTF16.map { c in fieldTokens.filter { $0.utf16End <= c }.count } ?? total
+        var lo = 0
+        var hi = total
+        if n * total > alignmentCellCap {
+            lo = max(0, caretIdx - (2 * n + 100))
+            hi = min(total, caretIdx + 2 * n + 100)
+        }
+        let window = fieldTokens[lo..<hi].map(\.text)
+        var prev = [Int](repeating: 0, count: window.count + 1)
+        for i in 1...n {
+            var cur = [Int](repeating: 0, count: window.count + 1)
+            cur[0] = i
+            for j in stride(from: 1, through: window.count, by: 1) {
+                let sub = prev[j - 1] + (pasted[i - 1] == window[j - 1] ? 0 : 1)
+                cur[j] = min(sub, prev[j] + 1, cur[j - 1] + 1)
+            }
+            prev = cur
+        }
+        var best: (cost: Int, dist: Int, end: Int)?
+        for j in stride(from: 1, through: window.count, by: 1) {
+            let end = lo + j
+            let cand = (cost: prev[j], dist: abs(end - caretIdx), end: end)
+            if let b = best {
+                if (cand.cost, cand.dist, -cand.end) < (b.cost, b.dist, -b.end) { best = cand }
+            } else {
+                best = cand
+            }
+        }
+        guard let best, best.cost <= maxDist else { return nil }
+
+        let sliceStart = max(0, best.end - n - maxDist)
+        let slice = fieldTokens[sliceStart..<best.end].map(\.text)
+        let m = slice.count
+        var d = [[Int]](repeating: [Int](repeating: 0, count: m + 1), count: n + 1)
+        for i in 0...n { d[i][0] = i }
+        for i in 1...n {
+            for j in stride(from: 1, through: m, by: 1) {
+                let sub = d[i - 1][j - 1] + (pasted[i - 1] == slice[j - 1] ? 0 : 1)
+                d[i][j] = min(sub, d[i - 1][j] + 1, d[i][j - 1] + 1)
+            }
+        }
+        var i = n
+        var j = m
+        while i > 0 {
+            if j > 0, d[i][j] == d[i - 1][j - 1] + (pasted[i - 1] == slice[j - 1] ? 0 : 1) {
+                i -= 1; j -= 1
+            } else if d[i][j] == d[i - 1][j] + 1 {
+                i -= 1
+            } else {
+                j -= 1
+            }
+        }
+        let start = sliceStart + j
+        return start < best.end ? start..<best.end : nil
     }
 
+    private static func reduced(_ tokens: [String]) -> String {
+        String(String.UnicodeScalarView(
+            tokens.joined(separator: " ").lowercased().unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }))
+    }
+
+    /// Token LCS between the pasted span and its current text, grouped into maximal hunks.
+    /// Context is drawn from the pasted array only, so field text outside the span cannot leak.
     static func diff(pasted: [String], current: [String]) -> (changes: [Change], truncated: Int) {
-        ([], 0)
+        let n = pasted.count
+        let m = current.count
+        var l = [[Int]](repeating: [Int](repeating: 0, count: m + 1), count: n + 1)
+        for i in stride(from: 1, through: n, by: 1) {
+            for j in stride(from: 1, through: m, by: 1) {
+                l[i][j] = pasted[i - 1] == current[j - 1] ? l[i - 1][j - 1] + 1 : max(l[i - 1][j], l[i][j - 1])
+            }
+        }
+        var matches: [(Int, Int)] = []
+        var i = n
+        var j = m
+        while i > 0 && j > 0 {
+            if pasted[i - 1] == current[j - 1] {
+                matches.append((i - 1, j - 1)); i -= 1; j -= 1
+            } else if l[i - 1][j] >= l[i][j - 1] {
+                i -= 1
+            } else {
+                j -= 1
+            }
+        }
+        matches.reverse()
+        matches.append((n, m))
+
+        var changes: [Change] = []
+        var prevP = 0
+        var prevC = 0
+        for (a, b) in matches {
+            if a > prevP || b > prevC {
+                let from = Array(pasted[prevP..<a])
+                let to = Array(current[prevC..<b])
+                if from.count > hunkSideCap || to.count > hunkSideCap {
+                    changes.append(Change(kind: "rewrite", from: nil, to: nil, before: nil, after: nil,
+                                          from_n: from.count, to_n: to.count))
+                } else {
+                    let kind = reduced(from) == reduced(to) ? "case_punct" : "word"
+                    changes.append(Change(
+                        kind: kind, from: from, to: to,
+                        before: Array(pasted[max(0, prevP - contextTokens)..<prevP]),
+                        after: Array(pasted[a..<min(n, a + contextTokens)]),
+                        from_n: from.count, to_n: to.count))
+                }
+            }
+            prevP = a + 1
+            prevC = b + 1
+        }
+        let kept = Array(changes.prefix(hunkCountCap))
+        return (kept, changes.count - kept.count)
     }
 
     enum EndReason: String {
@@ -186,11 +306,33 @@ enum PostEditDiff {
         }
 
         mutating func ingest(_ read: FieldRead, elapsedMs: Int) -> EndReason? {
-            nil
+            polls += 1
+            switch read {
+            case .gone:
+                sawGone = true
+                return .elementGone
+            case .read(let tokens, let caretUTF16, let stillFocused):
+                if let range = PostEditDiff.relocate(pasted: pasted, fieldTokens: tokens, caretUTF16: caretUTF16) {
+                    lastLocated = tokens[range].map(\.text)
+                    locatedPolls += 1
+                    consecutiveLost = 0
+                } else {
+                    consecutiveLost += 1
+                }
+                if !stillFocused { return .focusLeft }
+                if consecutiveLost >= PostEditDiff.consecutiveLostToFinalize { return .spanLost }
+                return nil
+            }
         }
 
         func result() -> (outcome: Outcome, reason: String?, changes: [Change]?, truncated: Int?, wordEdits: Int) {
-            (.unchanged, nil, nil, nil, 0)
+            guard locatedPolls > 0, let lastLocated else {
+                return sawGone ? (.fieldGone, nil, nil, nil, 0) : (.spanNotFound, "lost", nil, nil, 0)
+            }
+            let d = PostEditDiff.diff(pasted: pasted, current: lastLocated)
+            if d.changes.isEmpty { return (.unchanged, nil, nil, nil, 0) }
+            return (.edited, nil, d.changes, d.truncated > 0 ? d.truncated : nil,
+                    d.changes.filter { $0.kind == "word" }.count)
         }
     }
 

@@ -15,6 +15,21 @@ public actor PostEditProbe {
     private let retentionDays: Int = 14
     private var hasPurgedThisLaunch = false
 
+    private struct Pending {
+        let app: AXUIElement
+        let element: AXUIElement
+        var session: PostEditDiff.Session
+        let partial: PostEditDiff.Record
+        let pasteInstant: Date
+        let generation: Int
+        var axMsMax: Double
+        var lastLocatedMs: Int?
+        var pollTask: Task<Void, Never>?
+    }
+
+    private var pending: Pending?
+    private var generationCounter = 0
+
     private init() {
         let fm = FileManager.default
         let appSupport = (try? fm.url(
@@ -46,6 +61,7 @@ public actor PostEditProbe {
              secureInputEnabled: Bool, pasteDate: Date) async {
         ensureDirectory()
         purgeIfNeeded()
+        if pending != nil { await finalizePending(end: .nextDictation, readFirst: true) }
 
         var dictationTs: String?
         var dictationEmission: Int?
@@ -68,7 +84,12 @@ public actor PostEditProbe {
         let t0 = Date()
         func elapsed() -> Double { Date().timeIntervalSince(t0) * 1000 }
 
-        guard let pid, let focused = Self.focusedElement(pid: pid).element else {
+        guard let pid else {
+            write(base, outcome: .noFocusedElement, axMs: elapsed())
+            return
+        }
+        let (focusedOrNil, app) = Self.focusedElement(pid: pid)
+        guard let focused = focusedOrNil else {
             write(base, outcome: .noFocusedElement, axMs: elapsed())
             return
         }
@@ -107,9 +128,73 @@ public actor PostEditProbe {
             write(base, outcome: .spanNotFound, reason: failure.rawValue, role: role, subrole: subrole,
                   fieldUTF16: fieldUTF16, axMs: axMs)
         case .success(let located):
-            write(base, outcome: .unchanged, located: true, matchKind: located.matchKind, end: "paste",
-                  role: role, subrole: subrole, fieldUTF16: fieldUTF16, axMs: axMs)
+            if pending != nil { finish(end: .nextDictation) }
+            generationCounter += 1
+            let generation = generationCounter
+            var p = Pending(
+                app: app, element: focused, session: PostEditDiff.Session(pasted: pastedTokens.map(\.text)),
+                partial: makeRecord(base, outcome: .unchanged, located: true, matchKind: located.matchKind,
+                                    end: "paste", role: role, subrole: subrole, fieldUTF16: fieldUTF16, axMs: axMs),
+                pasteInstant: pasteDate, generation: generation, axMsMax: axMs, lastLocatedMs: nil, pollTask: nil)
+            p.pollTask = Task { [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .milliseconds(PostEditDiff.pollIntervalMs))
+                    if Task.isCancelled { return }
+                    guard let self, await self.poll(generation: generation) else { return }
+                }
+            }
+            pending = p
         }
+    }
+
+    // MARK: - Observation
+
+    /// Finalizes the pending observation, if any. `readFirst` takes one last read of the field;
+    /// Revert to Raw passes false so no Accessibility call precedes its paste.
+    func finalizePending(end: PostEditDiff.EndReason, readFirst: Bool) async {
+        guard let p = pending else { return }
+        if readFirst { ingestRead(generation: p.generation) }
+        finish(end: end)
+    }
+
+    /// One poll; returns whether the loop should continue.
+    private func poll(generation: Int) -> Bool {
+        guard let p = pending, p.generation == generation else { return false }
+        if let end = ingestRead(generation: generation) {
+            finish(end: end)
+            return false
+        }
+        if Date().timeIntervalSince(p.pasteInstant) >= Double(PostEditDiff.observationLimitSeconds) {
+            finish(end: .timeout)
+            return false
+        }
+        return true
+    }
+
+    @discardableResult
+    private func ingestRead(generation: Int) -> PostEditDiff.EndReason? {
+        guard var p = pending, p.generation == generation else { return nil }
+        let t0 = Date()
+        let read = Self.readField(app: p.app, element: p.element)
+        let axMs = Date().timeIntervalSince(t0) * 1000
+        let elapsedMs = Int(t0.timeIntervalSince(p.pasteInstant) * 1000)
+        let before = p.session.locatedPolls
+        let end = p.session.ingest(read, elapsedMs: elapsedMs)
+        if p.session.locatedPolls > before { p.lastLocatedMs = elapsedMs }
+        p.axMsMax = max(p.axMsMax, axMs)
+        pending = p
+        return end
+    }
+
+    private func finish(end: PostEditDiff.EndReason) {
+        guard let p = pending else { return }
+        pending = nil
+        p.pollTask?.cancel()
+        let record = p.partial.finalized(
+            result: p.session.result(), end: end, polls: p.session.polls, locatedPolls: p.session.locatedPolls,
+            observedMs: Int(Date().timeIntervalSince(p.pasteInstant) * 1000), lastLocatedMs: p.lastLocatedMs,
+            axMsMax: p.axMsMax, ts: DebugRecorder.iso8601Timestamp())
+        if let data = PostEditDiff.encodeLine(record) { appendData(data) }
     }
 
     // MARK: - Accessibility reads (read-only; no attribute is ever set)
@@ -144,12 +229,32 @@ public actor PostEditProbe {
         return AXValueGetValue(v as! AXValue, .cfRange, &r) ? r.location : nil
     }
 
+    /// Reads the stored element. Only the stored app element and its stored focused element are queried;
+    /// the element returned by the focus check is compared, never queried.
+    private static func readField(app: AXUIElement, element: AXUIElement) -> PostEditDiff.FieldRead {
+        var v: CFTypeRef?
+        let err = AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &v)
+        if err == .invalidUIElement { return .gone }
+        var tokens: [PostEditDiff.Token] = []
+        if err == .success, let s = v as? String, s.utf16.count <= PostEditDiff.fieldCapUTF16 {
+            tokens = PostEditDiff.tokenize(s)
+        }
+        let caret = caretLocation(element)
+        let frontmost = (copy(app, kAXFrontmostAttribute) as? Bool) ?? false
+        var stillFocused = false
+        if frontmost, let f = copy(app, kAXFocusedUIElementAttribute) {
+            stillFocused = CFEqual(f, element)
+        }
+        return .read(tokens: tokens, caretUTF16: caret, stillFocused: stillFocused)
+    }
+
     // MARK: - Record writing
 
-    private func write(_ base: Base, outcome: PostEditDiff.Outcome, reason: String? = nil,
-                       located: Bool = false, matchKind: PostEditDiff.MatchKind? = nil, end: String? = nil,
-                       role: String? = nil, subrole: String? = nil, fieldUTF16: Int? = nil, axMs: Double = 0) {
-        let record = PostEditDiff.Record(
+    private func makeRecord(_ base: Base, outcome: PostEditDiff.Outcome, reason: String? = nil,
+                            located: Bool = false, matchKind: PostEditDiff.MatchKind? = nil, end: String? = nil,
+                            role: String? = nil, subrole: String? = nil, fieldUTF16: Int? = nil,
+                            axMs: Double = 0) -> PostEditDiff.Record {
+        PostEditDiff.Record(
             ts: DebugRecorder.iso8601Timestamp(), paste_ts: base.pasteTs,
             dictation_ts: base.dictationTs, dictation_emission: base.dictationEmission,
             bundle_id: base.bundleID, mode: base.mode, pasted_words: base.pastedWords,
@@ -158,8 +263,13 @@ public actor PostEditProbe {
             role: role, subrole: subrole, field_utf16: fieldUTF16,
             secure_input_enabled: base.secureInputEnabled, changes: nil, changes_truncated: nil,
             word_edits: 0, observable_edit: false)
-        guard let data = PostEditDiff.encodeLine(record) else { return }
-        appendData(data)
+    }
+
+    private func write(_ base: Base, outcome: PostEditDiff.Outcome, reason: String? = nil,
+                       role: String? = nil, subrole: String? = nil, fieldUTF16: Int? = nil, axMs: Double = 0) {
+        let record = makeRecord(base, outcome: outcome, reason: reason, role: role, subrole: subrole,
+                                fieldUTF16: fieldUTF16, axMs: axMs)
+        if let data = PostEditDiff.encodeLine(record) { appendData(data) }
     }
 
     // MARK: - Plumbing (mirrors PasteProbe)
