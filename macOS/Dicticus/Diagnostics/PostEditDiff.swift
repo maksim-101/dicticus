@@ -353,7 +353,9 @@ enum PostEditDiff {
             case .read(let tokens, let caretUTF16, let stillFocused):
                 var window: Range<Int>?
                 if let anchor {
-                    let growth = max(0, (tokens.last?.utf16End ?? 0) - anchor.fieldUTF16)
+                    // Growth is capped at the span's own length: a user insertion cannot push a
+                    // far-away look-alike sentence into the window.
+                    let growth = min(max(0, (tokens.last?.utf16End ?? 0) - anchor.fieldUTF16), anchor.end - anchor.start)
                     window = (anchor.start - PostEditDiff.anchorSlackUTF16)
                         ..< (anchor.end + PostEditDiff.anchorSlackUTF16 + growth)
                 }
