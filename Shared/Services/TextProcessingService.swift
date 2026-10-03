@@ -523,6 +523,7 @@ class TextProcessingService: ObservableObject {
         }()
         let veryShort: Bool = processedText.count < 5 && dbgRawText.count > 30
         let emissionCounter = await DebugRecorder.shared.nextEmissionCounter()
+        let dbgAsrTokens = await DebugRecorder.shared.takeAsrTokens(rawText: dbgRawText)   // Quick task 261003-jej
 
         // Phase 28 R3 / WR-02: thread prompt_version explicitly from the
         // CleanupPrompt.currentVersion single source of truth so any future
@@ -601,7 +602,8 @@ class TextProcessingService: ObservableObject {
             // ran, changed nothing" from a historical record predating this field.
             brand_rewrites: dbgBrandRewrites.map { DebugCleanupRecord.BrandRewriteEntry(from: $0.surface, to: $0.canon, jw: $0.jw, dl: $0.dl) },
             // Quick task 260930-s1e: always an array; [] = "ran, nothing vetoed".
-            lexicon_vetoed: dbgVetoed.map { DebugCleanupRecord.DictionaryBlockedEntry(key: $0.key, from: $0.from, to: $0.to, ratio: $0.ratio) }
+            lexicon_vetoed: dbgVetoed.map { DebugCleanupRecord.DictionaryBlockedEntry(key: $0.key, from: $0.from, to: $0.to, ratio: $0.ratio) },
+            asr_tokens: dbgAsrTokens
         )
         await DebugRecorder.shared.record(record)
         #endif
