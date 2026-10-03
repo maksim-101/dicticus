@@ -30,7 +30,7 @@ class TextInjector {
     /// The string written to the pasteboard for a dictation: a trailing space so consecutive
     /// segments don't merge, except after a dictated line break (quick 261003-p7e).
     nonisolated static func pasteboardText(for text: String) -> String {
-        return text + " "
+        return text.last?.isNewline == true ? text : text + " "
     }
 
     /// Saved clipboard state — array of items, each with multiple type+data pairs.

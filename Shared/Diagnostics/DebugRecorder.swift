@@ -62,6 +62,10 @@ public struct DebugCleanupRecord: Codable, Sendable {
     /// are not comparable to segment avgLogprob; `p` is exp(mean lp) as in WhisperKit's
     /// WordTiming.probability. Absent means no trace was captured (iOS, tests, older builds).
     public let asr_tokens: AsrTokenTrace?
+    /// Quick task 261003-p7e (Step 3a.9): tracked mark kinds that the command pass added and the
+    /// AI step then cut below that count. nil: not checked (plain mode, no LLM run, no mark added);
+    /// []: checked, none short; otherwise the short kinds.
+    public let dictated_mark_shortfall: [String]?
 
     // Phase 27 WR-02: custom decoder tolerates pre-Phase-27 JSONL where the
     // dictionary_replacements / dictionary_blocked keys are absent. Both
@@ -73,7 +77,7 @@ public struct DebugCleanupRecord: Codable, Sendable {
         case ts, session_id, lang, lang_used, mode, model, sampler, steps
         case dictionary_context_keys, dictionary_replacements, dictionary_blocked
         case anomaly, emission_counter, prompt_version
-        case detected_bundle_id, resolved_context, brand_rewrites, lexicon_vetoed, asr_tokens
+        case detected_bundle_id, resolved_context, brand_rewrites, lexicon_vetoed, asr_tokens, dictated_mark_shortfall
     }
 
     public init(
@@ -95,7 +99,8 @@ public struct DebugCleanupRecord: Codable, Sendable {
         resolved_context: String? = nil,
         brand_rewrites: [BrandRewriteEntry]? = nil,
         lexicon_vetoed: [DictionaryBlockedEntry]? = nil,
-        asr_tokens: AsrTokenTrace? = nil
+        asr_tokens: AsrTokenTrace? = nil,
+        dictated_mark_shortfall: [String]? = nil
     ) {
         self.ts = ts
         self.session_id = session_id
@@ -116,6 +121,7 @@ public struct DebugCleanupRecord: Codable, Sendable {
         self.brand_rewrites = brand_rewrites
         self.lexicon_vetoed = lexicon_vetoed
         self.asr_tokens = asr_tokens
+        self.dictated_mark_shortfall = dictated_mark_shortfall
     }
 
     public init(from decoder: Decoder) throws {
@@ -144,6 +150,7 @@ public struct DebugCleanupRecord: Codable, Sendable {
         self.lexicon_vetoed = try c.decodeIfPresent([DictionaryBlockedEntry].self, forKey: .lexicon_vetoed) ?? nil
         // Quick task 261003-jej: tolerant decode for JSONL written before the ASR token trace.
         self.asr_tokens = try c.decodeIfPresent(AsrTokenTrace.self, forKey: .asr_tokens) ?? nil
+        self.dictated_mark_shortfall = try c.decodeIfPresent([String].self, forKey: .dictated_mark_shortfall) ?? nil
     }
 
     public struct ModelInfo: Codable, Sendable {

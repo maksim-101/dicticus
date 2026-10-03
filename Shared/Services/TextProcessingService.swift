@@ -183,6 +183,12 @@ class TextProcessingService: ObservableObject {
         // NumberRevert's baseline already carries the normalized decimal form (D-10).
         processedText = ITNUtility.applyNumericStructuralWords(to: processedText, language: language)
 
+        // Step 2a.6 (quick 261003-p7e): spoken punctuation commands. Runs after ITN because a bracket
+        // glued to a word before ITN breaks number conversion, and every earlier step re-joins with spaces.
+        let textBeforeCommands = processedText
+        processedText = ITNUtility.applySpokenPunctuationCommands(to: processedText)
+        let dictatedMarkThresholds = TextProcessingService.addedMarkThresholds(before: textBeforeCommands, after: processedText)
+
         #if DEBUG_RECORDER
         let dbgPostItn = processedText
         let dbgPostItnMs = Date().timeIntervalSince(dbgItnStart) * 1000.0
@@ -258,6 +264,7 @@ class TextProcessingService: ObservableObject {
         let dbgPostRulesMs = Date().timeIntervalSince(dbgRulesStart) * 1000.0
         var dbgGateEntry: DebugCleanupRecord.GateEntry? = nil
         var dbgDictKeys: [String] = []
+        var dbgMarkShortfall: [String]? = nil
         #endif
 
         // Step 3: AI Cleanup
@@ -428,6 +435,31 @@ class TextProcessingService: ObservableObject {
             // miss (e.g. a multi-token merge).
             if !FactPreservationGuard.check(baseline: rulesCleanedText, output: processedText).preserved {
                 processedText = rulesCleanedText
+            }
+
+            // Step 3a.8 (quick 261003-p7e): a dictated line break at the very start or end is
+            // token whitespace to the edit guard and does not survive it; re-attach it.
+            let leadingBreaks = String(rulesCleanedText.prefix(while: { $0 == "\n" }))
+            let trailingBreaks = String(rulesCleanedText.reversed().prefix(while: { $0 == "\n" }))
+            if !leadingBreaks.isEmpty || !trailingBreaks.isEmpty {
+                var core = Substring(processedText)
+                while core.first == "\n" { core = core.dropFirst() }
+                while core.last == "\n" { core = core.dropLast() }
+                processedText = leadingBreaks + core + trailingBreaks
+            }
+
+            // Step 3a.9 (quick 261003-p7e): the AI may drop a mark the command pass added (EditGuard
+            // accepts bracket and line-break removal as punctuation/whitespace); fall back to the
+            // rules-cleaned text, which still carries it. Only kinds the pass added are checked.
+            if !dictatedMarkThresholds.isEmpty {
+                let shortfall = TextProcessingService.dictatedMarkShortfall(
+                    thresholds: dictatedMarkThresholds, rulesCleaned: rulesCleanedText, output: processedText)
+                #if DEBUG_RECORDER
+                dbgMarkShortfall = shortfall
+                #endif
+                if !shortfall.isEmpty {
+                    processedText = rulesCleanedText
+                }
             }
         }
 
@@ -603,7 +635,8 @@ class TextProcessingService: ObservableObject {
             brand_rewrites: dbgBrandRewrites.map { DebugCleanupRecord.BrandRewriteEntry(from: $0.surface, to: $0.canon, jw: $0.jw, dl: $0.dl) },
             // Quick task 260930-s1e: always an array; [] = "ran, nothing vetoed".
             lexicon_vetoed: dbgVetoed.map { DebugCleanupRecord.DictionaryBlockedEntry(key: $0.key, from: $0.from, to: $0.to, ratio: $0.ratio) },
-            asr_tokens: dbgAsrTokens
+            asr_tokens: dbgAsrTokens,
+            dictated_mark_shortfall: dbgMarkShortfall   // Quick task 261003-p7e
         )
         await DebugRecorder.shared.record(record)
         #endif
@@ -613,8 +646,32 @@ class TextProcessingService: ObservableObject {
 
     // MARK: - Dictated-mark shortfall (quick 261003-p7e)
 
+    private nonisolated static let trackedMarkKinds = ["(", ")", "[", "]", "...", "?", "!", ";", "\n"]
+
+    private nonisolated static func markCount(_ kind: String, in text: String) -> Int {
+        text.components(separatedBy: kind).count - 1
+    }
+
+    /// For each tracked mark kind the command pass added: the count after the pass (pre-pass
+    /// count plus the count the pass added). A "?" the pass only re-attached in place of an ASR
+    /// "?" adds nothing and is not tracked.
+    nonisolated static func addedMarkThresholds(before: String, after: String) -> [String: Int] {
+        var result: [String: Int] = [:]
+        for kind in trackedMarkKinds {
+            let n = markCount(kind, in: after)
+            if n > markCount(kind, in: before) { result[kind] = n }
+        }
+        return result
+    }
+
+    /// Tracked kinds whose count in `output` is below min(threshold, count in `rulesCleaned`); the
+    /// cap stops a fallback that could not restore the mark. A kind that is both dictated and
+    /// ASR-produced cannot be told apart by counts, so losing either counts.
     nonisolated static func dictatedMarkShortfall(thresholds: [String: Int], rulesCleaned: String, output: String) -> [String] {
-        return []
+        thresholds.compactMap { kind, threshold -> String? in
+            let required = min(threshold, markCount(kind, in: rulesCleaned))
+            return markCount(kind, in: output) < required ? kind : nil
+        }.sorted()
     }
 
     // MARK: - Post-gate capitalization (42-07/MLANG-01)

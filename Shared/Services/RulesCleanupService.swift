@@ -86,10 +86,28 @@ public final class RulesCleanupService {
         if language.prefix(2).lowercased() != "en" {
             result = SwissNumberFormatter.foldCurrencyUnits(result)
         }
-        // Whitespace collapse — any run of whitespace → single space; trim.
-        let collapsed = result
-            .split(whereSeparator: { $0.isWhitespace })
-            .joined(separator: " ")
+        // Whitespace collapse — a run of whitespace → single space, except that a run holding
+        // line breaks keeps them (quick 261003-p7e: a dictated line break must survive); trim.
+        var collapsed = ""
+        var run = ""
+        func flushRun(atEdge: Bool) {
+            let breaks = run.filter { $0.isNewline }.count
+            if breaks > 0 {
+                collapsed += String(repeating: "\n", count: breaks)
+            } else if !run.isEmpty && !atEdge {
+                collapsed += " "
+            }
+            run = ""
+        }
+        for ch in result {
+            if ch.isWhitespace {
+                run.append(ch)
+            } else {
+                flushRun(atEdge: collapsed.isEmpty)
+                collapsed.append(ch)
+            }
+        }
+        flushRun(atEdge: true)
         // Trailing-artifact strip — AI mode only (clean(...) is invoked only in
         // the aiCleanup branch of TextProcessingService; plain mode is unaffected).
         let stripped = RulesCleanupService.stripTrailingArtifact(collapsed)
