@@ -61,7 +61,8 @@ final class EditGuardExactStutterTests: XCTestCase {
     func testP1_scrShapeForForTriggerSeveralKeepsBefore() {
         let baseline = "he emailed the vendor about the invoice for for the shipment and then closed the ticket by evening"
         let llm = "He emailed the seller about the invoice for the shipment, and then closed the ticket by evening."
-        let expected = "he emailed the vendor about the invoice for the shipment and then closed the ticket by evening."
+        // 261003-gp8: the lone swap stays reverted; the first-word capital and the comma now ship.
+        let expected = "He emailed the vendor about the invoice for the shipment, and then closed the ticket by evening."
         let out = guardOut(baseline, llm)
         let result = guardResult(baseline, llm)
         XCTAssertEqual(out, expected, "edits: \(result.edits)")
@@ -70,9 +71,9 @@ final class EditGuardExactStutterTests: XCTestCase {
         }
         XCTAssertTrue(stutter.accepted)
         XCTAssertEqual(stutter.acceptClass, "disfluencyCollapse")
-        // Guards against a too-broad predicate: the unrelated comma insert
-        // in the same triggered raw sentence must still revert.
-        XCTAssertTrue(result.edits.contains { $0.kind == "insert" && $0.to == "," && $0.rejectClass == "sentenceCoupledRevert" })
+        // Guards against a too-broad predicate. 261003-gp8: the unrelated comma insert is keep-separated from the lone swap
+        // and now ships as punctuationOrCasing; the stutter delete and the swap are what this test pins.
+        XCTAssertTrue(result.edits.contains { $0.kind == "insert" && $0.to == "," && $0.accepted && $0.acceptClass == "punctuationOrCasing" })
         XCTAssertTrue(result.edits.contains { $0.kind == "substitute" && $0.from == "vendor" && $0.to == "seller" && $0.rejectClass == "contentWordIdentityChange" })
         let v = EditGuardMergeAtomicityTests.neitherSourceViolations(output: out, sourceA: baseline, sourceB: llm)
         XCTAssertTrue(v.tier1.isEmpty, "tier-1 neither-source violation(s) \(v.tier1) in: \(out)")
@@ -86,7 +87,8 @@ final class EditGuardExactStutterTests: XCTestCase {
     func testP2_scrShapeCasingVariantTheThe() {
         let baseline = "we discussed the The proposal for the client and then reviewed the budget early"
         let llm = "We discussed the proposal for the buyer, and then reviewed the budget early."
-        let expected = "we discussed the proposal for the client and then reviewed the budget early."
+        // 261003-gp8: the lone swap stays reverted; the first-word capital now ships.
+        let expected = "We discussed the proposal for the client and then reviewed the budget early."
         let out = guardOut(baseline, llm)
         let result = guardResult(baseline, llm)
         XCTAssertEqual(out, expected, "edits: \(result.edits)")
@@ -161,7 +163,8 @@ final class EditGuardExactStutterTests: XCTestCase {
     func testP5_scrShapeGermanMitMit() {
         let baseline = "ich habe das protokoll mit mit dem kunden besprochen und dann die rechnung heute geprüft"
         let llm = "Ich habe das protokoll mit dem käufer besprochen und dann die rechnung heute geprüft."
-        let expected = "ich habe das protokoll mit dem kunden besprochen und dann die rechnung heute geprüft."
+        // 261003-gp8: the lone swap stays reverted; the first-word capital now ships.
+        let expected = "Ich habe das protokoll mit dem kunden besprochen und dann die rechnung heute geprüft."
         let out = guardOut(baseline, llm, "de")
         let result = guardResult(baseline, llm, "de")
         XCTAssertEqual(out, expected, "edits: \(result.edits)")
@@ -186,7 +189,8 @@ final class EditGuardExactStutterTests: XCTestCase {
     func testP6_scrShapeToToInfinitiveStutter() {
         let baseline = "the team reviewed the drawings with the architect and they will continue to to build the shed next week"
         let llm = "The team reviewed the drawings with the designer, and they will continue to build the shed next week."
-        let expected = "the team reviewed the drawings with the architect and they will continue to build the shed next week."
+        // 261003-gp8: the lone swap stays reverted; the first-word capital now ships.
+        let expected = "The team reviewed the drawings with the architect and they will continue to build the shed next week."
         let out = guardOut(baseline, llm)
         let result = guardResult(baseline, llm)
         XCTAssertEqual(out, expected, "edits: \(result.edits)")
@@ -195,7 +199,7 @@ final class EditGuardExactStutterTests: XCTestCase {
         }
         XCTAssertTrue(stutter.accepted)
         XCTAssertEqual(stutter.acceptClass, "disfluencyCollapse")
-        XCTAssertTrue(result.edits.contains { $0.kind == "substitute" && $0.from == "the" && $0.to == "The" && $0.rejectClass == "sentenceCoupledRevert" })
+        XCTAssertTrue(result.edits.contains { $0.kind == "substitute" && $0.from == "the" && $0.to == "The" && $0.accepted && $0.acceptClass == "punctuationOrCasing" })  // 261003-gp8
         XCTAssertTrue(result.edits.contains { $0.kind == "substitute" && $0.from == "architect" && $0.to == "designer" && $0.rejectClass == "contentWordIdentityChange" })
         XCTAssertFalse(result.edits.contains { $0.kind == "insert" && $0.to == "," && $0.accepted })
         let v = EditGuardMergeAtomicityTests.neitherSourceViolations(output: out, sourceA: baseline, sourceB: llm)
@@ -212,7 +216,8 @@ final class EditGuardExactStutterTests: XCTestCase {
     func testN1_germanRelativePronounDieDieExcluded() {
         let baseline = "wir brauchen eine lösung die die kosten senkt und den umsatz steigert"
         let llm = "Wir brauchen eine lösung die kosten senkt und den umsatz erhöht."
-        let expected = baseline + "."
+        // 261003-gp8: the lone swap stays reverted; the first-word capital now ships.
+        let expected = "Wir brauchen eine lösung die die kosten senkt und den umsatz steigert."
         let out = guardOut(baseline, llm, "de")
         let result = guardResult(baseline, llm, "de")
         XCTAssertEqual(out, expected, "edits: \(result.edits)")
@@ -252,7 +257,8 @@ final class EditGuardExactStutterTests: XCTestCase {
     func testN3_numberWordOneOneExcluded() {
         let baseline = "the code for the item is one one four and the price increased"
         let llm = "The code for the item is one four and the cost increased."
-        let expected = baseline + "."
+        // 261003-gp8: the lone swap stays reverted; the first-word capital now ships.
+        let expected = "The code for the item is one one four and the price increased."
         let out = guardOut(baseline, llm)
         let result = guardResult(baseline, llm)
         XCTAssertEqual(out, expected, "edits: \(result.edits)")
@@ -274,7 +280,8 @@ final class EditGuardExactStutterTests: XCTestCase {
     func testN4_inflectionNearDuplicateProductProductsNotExempt() {
         let baseline = "we delivered the product products to the client yesterday and confirmed the order today"
         let llm = "We delivered the product to the buyer yesterday and confirmed the order today."
-        let expected = baseline + "."
+        // 261003-gp8: the lone swap stays reverted; the first-word capital now ships.
+        let expected = "We delivered the product products to the client yesterday and confirmed the order today."
         let out = guardOut(baseline, llm)
         let result = guardResult(baseline, llm)
         XCTAssertEqual(out, expected, "edits: \(result.edits)")
@@ -298,7 +305,8 @@ final class EditGuardExactStutterTests: XCTestCase {
     func testN5_multiWordBlockToTheToTheNotExempt() {
         let baseline = "he walked to the to the store and bought the supplies for the office"
         let llm = "He walked to the store and bought the goods for the office."
-        let expected = baseline + "."
+        // 261003-gp8: the lone swap stays reverted; the first-word capital now ships.
+        let expected = "He walked to the to the store and bought the supplies for the office."
         let out = guardOut(baseline, llm)
         let result = guardResult(baseline, llm)
         XCTAssertEqual(out, expected, "edits: \(result.edits)")
@@ -321,7 +329,8 @@ final class EditGuardExactStutterTests: XCTestCase {
     func testN6_substituteNeighbourTheTheNotExempt() {
         let baseline = "she opened the the door and welcomed the visitors warmly today"
         let llm = "She opened a door and welcomed the guests warmly today."
-        let expected = baseline + "."
+        // 261003-gp8: the lone swap stays reverted; the first-word capital now ships.
+        let expected = "She opened the the door and welcomed the visitors warmly today."
         let out = guardOut(baseline, llm)
         let result = guardResult(baseline, llm)
         XCTAssertEqual(out, expected, "edits: \(result.edits)")
