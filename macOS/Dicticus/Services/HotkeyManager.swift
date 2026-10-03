@@ -401,6 +401,11 @@ class HotkeyManager: ObservableObject {
             overrides: overrides
         )
 
+        #if DEBUG_RECORDER
+        // 261003-jvq: close the previous paste's edit observation before a new recording starts.
+        Task { await PostEditProbe.shared.finalizePending(end: .nextDictation, readFirst: true) }
+        #endif
+
         do {
             try service.startRecording()
             isRecording = true
