@@ -147,6 +147,25 @@ public enum EditGuard {
         /// (`Schreiweise`) and whose candidate it suggests and lists
         /// (`Schreibweise`). Assigned at `classifySubstitute` step 8.5.
         case compoundRepair
+        /// Quick task 261003-au9: a `substitute` of the connector `and` (en)
+        /// or `und` (de) by `.` between two clauses, where the words on both
+        /// sides are the same kept words and the continuation was lowercase
+        /// in the baseline and capitalised by the LLM (or is an English
+        /// I-form). Assigned in `classifySubstitute` by `isConnectorSplit`.
+        /// Context-dependent: it reverts with its sentence when an
+        /// independent content rejection sits in it.
+        case connectorSplit
+        /// Quick task 261003-au9: a terminal-mark (or comma) `.move` in one of
+        /// two shapes: the utterance-final baseline mark replaced by a
+        /// different terminal mark at the candidate's end, or a terminal mark
+        /// jumping at most six baseline tokens over quiet words. Assigned by
+        /// `applyPunctuationMoveExemption` as a post-pass over moves
+        /// `classifyMove` rejected as `unclassified`. Context-dependent, and
+        /// reverted by the boundary rule in `applySentenceCoupledRevert` when
+        /// the recase of the word after it is itself reverted. Provisional:
+        /// three corpus fires, against 260831-q2r's measured blanket-accept
+        /// corruptions.
+        case punctuationMove
     }
 
     /// D-11's forensics vocabulary — the classes of edit this guard REJECTS.
@@ -758,6 +777,7 @@ public enum EditGuard {
             ))
         }
         applyHyphenCompoundJoinExemption(edits: edits, verdicts: &result, dictProtectedLower: dictProtectedLower)
+        applyPunctuationMoveExemption(edits: edits, verdicts: &result, baseline: baseline, candidate: candidate, language: language)
         return result
     }
 
@@ -845,7 +865,7 @@ public enum EditGuard {
             return a.kind == .punctuation ? (true, .punctuationOrCasing, nil) : (true, nil, nil)
 
         case .substitute:
-            return classifySubstitute(edit, baseline: baseline, language: language, dictProtectedLower: dictProtectedLower, lexicon: lexicon, disfluencyIndices: disfluencyIndices, clauseRelocationIndices: clauseRelocationIndices)
+            return classifySubstitute(edit, baseline: baseline, candidate: candidate, language: language, dictProtectedLower: dictProtectedLower, lexicon: lexicon, disfluencyIndices: disfluencyIndices, clauseRelocationIndices: clauseRelocationIndices)
 
         case .insert:
             return classifyInsert(edit, language: language, candidate: candidate)
@@ -858,11 +878,125 @@ public enum EditGuard {
         }
     }
 
+
+    /// Quick task 261003-au9: closed connector lists for `isConnectorSplit`.
+    private static let connectorSplitWords: [String: Set<String>] = ["en": ["and"], "de": ["und"]]
+    private static let connectorSplitMarks: Set<String> = ["."]
+
+    /// Quick task 261003-au9 (Rule A). Only `and`/`und` and only `.`: `;` has
+    /// no capitalisation signal ("Brot; Milch" would pass), and `but`, `or`,
+    /// `because`, `so`, `aber`, `oder`, `weil` carry meaning a period drops.
+    /// The neighbours must be the same kept words so the edit is purely the
+    /// connector; the continuation must be recased by the LLM (or an English
+    /// I-form) so an already-capitalised noun or name ("Brot und Milch") stays
+    /// a phrase coordination. The dictionary-protected and negation guards
+    /// cannot fire with this closed list; they stay as a defensive floor.
+    private static func isConnectorSplit(
+        a: Token, b: Token, baseline: [Token], candidate: [Token],
+        language: String, dictProtectedLower: Set<String>
+    ) -> Bool {
+        guard a.kind == .word, b.kind == .punctuation, connectorSplitMarks.contains(b.text) else { return false }
+        let lang = language.prefix(2).lowercased() == "en" ? "en" : "de"
+        guard connectorSplitWords[lang]?.contains(a.normalized) == true,
+              !dictProtectedLower.contains(a.normalized),
+              !FunctionWords.isNegation(a.normalized, language: language) else { return false }
+        let ai = a.index, bi = b.index
+        guard ai > 0, ai + 1 < baseline.count, bi > 0, bi + 1 < candidate.count else { return false }
+        let bp = baseline[ai - 1], bn = baseline[ai + 1], cp = candidate[bi - 1], cn = candidate[bi + 1]
+        guard bp.kind == .word, bn.kind == .word, cp.kind == .word, cn.kind == .word,
+              bp.normalized == cp.normalized, bn.normalized == cn.normalized else { return false }
+        if b.text == "." {
+            guard cn.text.first?.isUppercase == true else { return false }
+            // The LLM must have capitalised the continuation itself (lowercase in the baseline), or it is the
+            // always-capitalised English first-person pronoun family. An already-capitalised noun or name after the
+            // connector ("Brot und Milch", "the plan and Claude") is a phrase coordination, not a clause start.
+            let recased = bn.text.first?.isLowercase == true
+            let firstPerson = lang == "en" && ["i", "i'm", "i've", "i'll", "i'd"].contains(bn.normalized)
+            guard recased || firstPerson else { return false }
+        }
+        return true
+    }
+
+    /// Quick task 261003-au9: prosodic marks a rejected punctuation `.move` may be re-accepted for.
+    private static let movableMarks: Set<String> = [",", ".", "?", "!"]
+    private static let punctuationMoveJumpCap = 6
+
+    /// Quick task 261003-au9 (Rule B). Re-accepts a rejected `unclassified`
+    /// punctuation move in the two shapes named on `AcceptClass.punctuationMove`.
+    /// "Quiet" means a keep, or a substitute that only changes a word's case.
+    /// The destination's two candidate neighbours must be adjacent in `edits`
+    /// and quiet, so nothing is rendered between the mark and its neighbours;
+    /// the mark never lands after a coordinator or negator, and a terminal
+    /// mark never lands before a word the LLM left lowercase.
+    private static func applyPunctuationMoveExemption(
+        edits: [Edit], verdicts: inout [ClassifiedEdit],
+        baseline: [Token], candidate: [Token], language: String
+    ) {
+        func quiet(_ e: Edit) -> Bool {
+            if e.kind == .keep { return true }
+            if e.kind == .substitute, let f = e.from, let t = e.to, f.kind == .word, f.normalized == t.normalized { return true }
+            return false
+        }
+        var byCand: [Int: Edit] = [:]
+        var idxByCand: [Int: Int] = [:]
+        var byBase: [Int: Int] = [:]
+        for (k, e) in edits.enumerated() {
+            if let t = e.to { byCand[t.index] = e; idxByCand[t.index] = k }
+            if let f = e.from { byBase[f.index] = k }
+        }
+        for i in edits.indices {
+            guard edits[i].kind == .move, !verdicts[i].accepted,
+                  verdicts[i].rejectClass == RejectionClass.unclassified.rawValue,
+                  let a = edits[i].from, let b = edits[i].to,
+                  a.kind == .punctuation, b.kind == .punctuation, a.text == b.text,
+                  movableMarks.contains(a.text) else { continue }
+            let terminal = sentenceTerminalMarks.contains(a.text)
+            // destination: previous candidate token is a word; the next one (if any) is a word,
+            // capitalised after a terminal mark; neither a coordinator/negator before the mark.
+            guard b.index > 0, candidate[b.index - 1].kind == .word else { continue }
+            let cprev = candidate[b.index - 1]
+            if b.index + 1 < candidate.count {
+                let cnext = candidate[b.index + 1]
+                guard cnext.kind == .word else { continue }
+                if terminal, cnext.text.first?.isUppercase != true { continue }
+            }
+            if FunctionWords.isConjunctionOrNegator(cprev.normalized, language: language) { continue }
+            if terminal, FunctionWords.isSubstitutable(cprev.normalized, language: language) { continue }
+            // origin: word on the left, word (if any) on the right.
+            guard a.index > 0, baseline[a.index - 1].kind == .word else { continue }
+            if a.index + 1 < baseline.count, baseline[a.index + 1].kind != .word { continue }
+            // nothing is rendered between the destination's two candidate neighbours.
+            guard let ip = idxByCand[b.index - 1], quiet(edits[ip]) else { continue }
+            if b.index + 1 < candidate.count {
+                guard let inx = idxByCand[b.index + 1], inx == ip + 1, quiet(edits[inx]) else { continue }
+            }
+            var ok = false
+            // Shape 1: the utterance-final baseline mark replaced by a different terminal mark at the candidate's end.
+            if a.index == baseline.count - 1, let lastC = candidate.last, lastC.kind == .punctuation,
+               lastC.text != a.text, sentenceTerminalMarks.contains(lastC.text) {
+                ok = true
+            }
+            // Shape 2: a short jump over kept words only.
+            if !ok, terminal, i > 0, quiet(edits[i - 1]), i + 1 < edits.count, quiet(edits[i + 1]),
+               let pf = byCand[b.index - 1]?.from {
+                let lo = min(a.index, pf.index), hi = max(a.index, pf.index)
+                if hi - lo <= punctuationMoveJumpCap,
+                   (lo...hi).allSatisfy({ $0 == a.index || (byBase[$0].map { quiet(edits[$0]) } ?? false) }) {
+                    ok = true
+                }
+            }
+            guard ok else { continue }
+            verdicts[i] = ClassifiedEdit(kind: verdicts[i].kind, from: verdicts[i].from, to: verdicts[i].to,
+                                         accepted: true, acceptClass: AcceptClass.punctuationMove.rawValue, rejectClass: nil)
+        }
+    }
+
     // MARK: - substitute
 
     private static func classifySubstitute(
         _ edit: Edit,
         baseline: [Token],
+        candidate: [Token],
         language: String,
         dictProtectedLower: Set<String>,
         lexicon: any SpellLexicon = PlatformSpellLexicon.shared,
@@ -928,6 +1062,9 @@ public enum EditGuard {
         if a.kind == .punctuation, b.kind == .punctuation,
            isProsodicPunctuation(a.text), isProsodicPunctuation(b.text) {
             return (true, .punctuationOrCasing, nil)
+        }
+        if isConnectorSplit(a: a, b: b, baseline: baseline, candidate: candidate, language: language, dictProtectedLower: dictProtectedLower) {
+            return (true, .connectorSplit, nil)
         }
         // 3. Digit lock (D-03).
         if EditGuardTokenizer.isDigitBearing(a.text) || EditGuardTokenizer.isDigitBearing(b.text) {
@@ -1309,6 +1446,8 @@ public enum EditGuard {
         // only the RENDERING of an otherwise-orphaned restored mark next to
         // a candidate mark changes.
         if a.kind == .punctuation {
+            // Quick task 261003-au9: two narrow shapes are re-accepted
+            // afterwards by `applyPunctuationMoveExemption`.
             // 260831-q2r experiment: when relaxed, fall through to the same
             // accept path an ordinary word move takes below (`.wordOrderRepair`)
             // instead of rejecting. Production behavior (`false`) is
@@ -2255,6 +2394,8 @@ public enum EditGuard {
         AcceptClass.pauseSplitMerge.rawValue,
         AcceptClass.disfluencyCollapse.rawValue,
         AcceptClass.inflectionFix.rawValue,
+        AcceptClass.connectorSplit.rawValue,
+        AcceptClass.punctuationMove.rawValue,
     ]
 
     /// Quick task 260926-bbz: is the edit at `edits[i]` the LLM's
@@ -2826,6 +2967,32 @@ public enum EditGuard {
             else { continue }
             verdicts[j] = ClassifiedEdit(
                 kind: verdicts[j].kind, from: verdicts[j].from, to: verdicts[j].to,
+                accepted: false, acceptClass: nil,
+                rejectClass: RejectionClass.sentenceCoupledRevert.rawValue
+            )
+        }
+
+        // Quick task 261003-au9: an ACCEPTED `punctuationMove` of a terminal
+        // mark reverts with the recase of the word after it. The mark sits at
+        // its baseline position in `edits`, so the next word is found through
+        // the CANDIDATE index; a rejected insert/move there occupies a slot
+        // but renders nothing, exactly as in the pass above.
+        var editByCandidate: [Int: Int] = [:]
+        for (k, e) in edits.enumerated() { if let t = e.to { editByCandidate[t.index] = k } }
+        for i in edits.indices {
+            guard edits[i].kind == .move, verdicts[i].accepted,
+                  verdicts[i].acceptClass == AcceptClass.punctuationMove.rawValue,
+                  let mark = edits[i].to, sentenceTerminalMarks.contains(mark.text)
+            else { continue }
+            var slot = mark.index + 1
+            while let j = editByCandidate[slot], (edits[j].kind == .insert || edits[j].kind == .move), !verdicts[j].accepted { slot += 1 }
+            guard let j = editByCandidate[slot], edits[j].kind == .substitute, !verdicts[j].accepted,
+                  let f = edits[j].from, let t = edits[j].to,
+                  f.kind == .word, t.kind == .word, f.normalized == t.normalized, f.text != t.text,
+                  t.text.first?.isUppercase == true
+            else { continue }
+            verdicts[i] = ClassifiedEdit(
+                kind: verdicts[i].kind, from: verdicts[i].from, to: verdicts[i].to,
                 accepted: false, acceptClass: nil,
                 rejectClass: RejectionClass.sentenceCoupledRevert.rawValue
             )
