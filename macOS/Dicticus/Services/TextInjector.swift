@@ -27,6 +27,12 @@ class TextInjector {
     /// instance and never touch this one (D-18).
     static let shared = TextInjector()
 
+    /// The string written to the pasteboard for a dictation: a trailing space so consecutive
+    /// segments don't merge, except after a dictated line break (quick 261003-p7e).
+    nonisolated static func pasteboardText(for text: String) -> String {
+        return text + " "
+    }
+
     /// Saved clipboard state — array of items, each with multiple type+data pairs.
     struct SavedClipboard {
         let items: [[(NSPasteboard.PasteboardType, Data)]]
@@ -255,7 +261,7 @@ class TextInjector {
         // Append space after injected text so consecutive dictation segments
         // don't merge into one word. A trailing space is standard for dictation
         // (cursor sits after the space, ready for the next word or segment).
-        let writtenText = text + " "
+        let writtenText = TextInjector.pasteboardText(for: text)
         let wrote = pasteboard.setString(writtenText, forType: .string)
         if !wrote {
             restoreClipboard(pasteboard, saved: saved)

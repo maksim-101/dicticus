@@ -6,6 +6,16 @@ final class TextInjectorTests: XCTestCase {
 
     private let injector = TextInjector()
 
+    // MARK: - Pasteboard text (quick 261003-p7e)
+
+    func testPasteboardText_noTrailingSpaceAfterLineBreak_RED() {
+        XCTAssertEqual(TextInjector.pasteboardText(for: "a\n"), "a\n")
+    }
+
+    func testPasteboardText_appendsTrailingSpace() {
+        XCTAssertEqual(TextInjector.pasteboardText(for: "a"), "a ")
+    }
+
     // MARK: - Clipboard save/restore
 
     func testClipboardSaveAndRestoreString() {
