@@ -57,6 +57,11 @@ public struct DebugCleanupRecord: Codable, Sendable {
     /// would have blocked it anyway. Same entry shape as dictionary_blocked.
     /// Optional so JSONL written before 260930-s1e decodes to nil.
     public let lexicon_vetoed: [DictionaryBlockedEntry]?
+    /// Quick task 261003-jej (FABLE-ADVICE §5.4): WhisperKit's per-token log-probabilities and
+    /// per-word confidence for this dictation. Prompt/special tokens are excluded, so the values
+    /// are not comparable to segment avgLogprob; `p` is exp(mean lp) as in WhisperKit's
+    /// WordTiming.probability. Absent means no trace was captured (iOS, tests, older builds).
+    public let asr_tokens: AsrTokenTrace?
 
     // Phase 27 WR-02: custom decoder tolerates pre-Phase-27 JSONL where the
     // dictionary_replacements / dictionary_blocked keys are absent. Both
@@ -68,7 +73,7 @@ public struct DebugCleanupRecord: Codable, Sendable {
         case ts, session_id, lang, lang_used, mode, model, sampler, steps
         case dictionary_context_keys, dictionary_replacements, dictionary_blocked
         case anomaly, emission_counter, prompt_version
-        case detected_bundle_id, resolved_context, brand_rewrites, lexicon_vetoed
+        case detected_bundle_id, resolved_context, brand_rewrites, lexicon_vetoed, asr_tokens
     }
 
     public init(
@@ -89,7 +94,8 @@ public struct DebugCleanupRecord: Codable, Sendable {
         detected_bundle_id: String? = nil,
         resolved_context: String? = nil,
         brand_rewrites: [BrandRewriteEntry]? = nil,
-        lexicon_vetoed: [DictionaryBlockedEntry]? = nil
+        lexicon_vetoed: [DictionaryBlockedEntry]? = nil,
+        asr_tokens: AsrTokenTrace? = nil
     ) {
         self.ts = ts
         self.session_id = session_id
@@ -109,6 +115,7 @@ public struct DebugCleanupRecord: Codable, Sendable {
         self.resolved_context = resolved_context
         self.brand_rewrites = brand_rewrites
         self.lexicon_vetoed = lexicon_vetoed
+        self.asr_tokens = asr_tokens
     }
 
     public init(from decoder: Decoder) throws {
@@ -135,6 +142,8 @@ public struct DebugCleanupRecord: Codable, Sendable {
         // Quick task 260805-qme: tolerant decode for pre-260805 JSONL — nil when absent.
         self.brand_rewrites = try c.decodeIfPresent([BrandRewriteEntry].self, forKey: .brand_rewrites) ?? nil
         self.lexicon_vetoed = try c.decodeIfPresent([DictionaryBlockedEntry].self, forKey: .lexicon_vetoed) ?? nil
+        // Quick task 261003-jej: tolerant decode for JSONL written before the ASR token trace.
+        self.asr_tokens = try c.decodeIfPresent(AsrTokenTrace.self, forKey: .asr_tokens) ?? nil
     }
 
     public struct ModelInfo: Codable, Sendable {
@@ -331,6 +340,65 @@ public struct DebugCleanupRecord: Codable, Sendable {
             self.dl = dl
         }
     }
+
+    public struct AsrToken: Codable, Sendable {
+        public let id: Int
+        public let text: String
+        public let lp: Float?
+
+        public init(id: Int, text: String, lp: Float?) {
+            self.id = id
+            self.text = text
+            self.lp = lp
+        }
+    }
+
+    public struct AsrWord: Codable, Sendable {
+        public let text: String
+        public let p: Float
+        public let n: Int
+
+        public init(text: String, p: Float, n: Int) {
+            self.text = text
+            self.p = p
+            self.n = n
+        }
+    }
+
+    public struct AsrSegment: Codable, Sendable {
+        public let temperature: Float
+        public let tokens: [AsrToken]
+        public let words: [AsrWord]?
+
+        public init(temperature: Float, tokens: [AsrToken], words: [AsrWord]?) {
+            self.temperature = temperature
+            self.tokens = tokens
+            self.words = words
+        }
+
+        /// Pure derivation from one WhisperKit segment. Ids at or above `specialTokenBegin`
+        /// (SOT, language, task, notimestamps, EOT) carry placeholder logprob 0 and are dropped.
+        public static func build(
+            tokens: [Int],
+            tokenLogProbs: [[Int: Float]],
+            temperature: Float,
+            specialTokenBegin: Int,
+            decodeToken: (Int) -> String,
+            splitWords: ([Int]) -> (words: [String], wordTokens: [[Int]])
+        ) -> AsrSegment {
+            return AsrSegment(temperature: temperature, tokens: [], words: nil)
+        }
+    }
+
+    public struct AsrTokenTrace: Codable, Sendable {
+        public let ms: Double
+        public let segments: [AsrSegment]
+
+        public init(ms: Double, segments: [AsrSegment]) {
+            self.ms = ms
+            self.segments = segments
+        }
+    }
 }
 
 // MARK: - Recorder actor
@@ -360,6 +428,16 @@ public actor DebugRecorder {
         self.directoryURL = appSupport
             .appendingPathComponent("Dicticus", isDirectory: true)
             .appendingPathComponent("DebugRecordings", isDirectory: true)
+    }
+
+    private var asrTokenStash = AsrTokenStash()
+
+    public func stageAsrTokens(_ trace: DebugCleanupRecord.AsrTokenTrace, rawText: String) {
+        asrTokenStash.stage(trace, rawText: rawText)
+    }
+
+    public func takeAsrTokens(rawText: String) -> DebugCleanupRecord.AsrTokenTrace? {
+        asrTokenStash.take(rawText: rawText)
     }
 
     public func nextEmissionCounter() -> Int {
@@ -437,6 +515,25 @@ public actor DebugRecorder {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return f.string(from: date)
+    }
+}
+
+// MARK: - ASR token hand-off TranscriptionService → TextProcessingService.
+
+/// Quick task 261003-jej: traces staged by raw text so a record only ever carries the tokens
+/// of its own dictation; a text mismatch attaches nothing.
+public struct AsrTokenStash: Sendable {
+    public static let capacity = 4
+    private var entries: [(rawText: String, trace: DebugCleanupRecord.AsrTokenTrace)] = []
+
+    public init() {}
+
+    public mutating func stage(_ trace: DebugCleanupRecord.AsrTokenTrace, rawText: String) {
+        // RED stub
+    }
+
+    public mutating func take(rawText: String) -> DebugCleanupRecord.AsrTokenTrace? {
+        return nil
     }
 }
 
