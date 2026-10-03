@@ -71,6 +71,12 @@ public enum InflectionRules {
     /// ending, so this trap does not apply to `englishInflectionalSuffixes`.
     public static let germanPersonEndings: Set<String> = ["e", "st", "test", "te"]
 
+    /// Quick 261003-au8: the only tails a backed-off split may adopt (see step
+    /// 4 of `isAllowedInflection`). Adjective-declension endings. `-e`, `-st`,
+    /// `-te` and `-test` stay out because they carry person (Trap A); `-et`
+    /// stays out because it admits `weiter`→`weitet` (further → widens).
+    static let germanBackOffEndings: Set<String> = ["en", "er", "es", "em"]
+
     // MARK: - Safe swaps (function-word gender/number agreement)
 
     /// Canonical, sorted-pair-joined (`"a|b"`, always alphabetically
@@ -202,7 +208,12 @@ public enum InflectionRules {
     /// 3. D-02a derivational-suffix change → reject (checked before the
     ///    suffix-transition path, or `-ung` would slip through as an
     ///    "ending change").
-    /// 4. Split on longest common prefix into stem + two suffixes.
+    /// 4. Split on longest common prefix into stem + two suffixes. German
+    ///    only (quick 261003-au8): when the two tails are not both legal
+    ///    endings, back the split off one letter at a time (never below the
+    ///    floor) and adopt the shifted split only if both tails are then in
+    ///    `germanBackOffEndings`, so `reiner`→`reinen` (tails `r`/`n`) is read
+    ///    as `er`/`en`. Steps 5-8 read the chosen split.
     /// 5. Trap B (strip-to-empty, directional): the CANDIDATE's suffix
     ///    stripping to nothing → reject. Blocks `Hunde`→`Hund`,
     ///    `tolles`→`toll`, `Messer`→`Messe`. Deliberately NOT symmetric —
@@ -232,6 +243,15 @@ public enum InflectionRules {
     /// requirement). Production code MUST call the 3-argument
     /// `isAllowedInflection(_:_:language:)` above, which always uses the
     /// calibrated `stemLengthFloor` constant.
+    ///
+    /// The step 4 back-off is monotone: it fires only where the greedy split
+    /// already ends in reject, so it can turn a reject into an accept and
+    /// never the reverse. The floor is enforced twice, by the back-off loop
+    /// bound and by step 7 on the chosen stem. Residual risk, not separable
+    /// without part-of-speech data (the predicate lowercases both words):
+    /// agent-noun/verb pairs with a stem of four or more letters such as
+    /// `Messer`/`messen`, `Lehrer`/`lehren`, `Fahrer`/`fahren` now pass as one
+    /// lemma, the class the greedy path already admits for `fahren`/`fahrt`.
     static func isAllowedInflection(
         _ original: String,
         _ candidate: String,
@@ -251,13 +271,32 @@ public enum InflectionRules {
         if isDerivational(o, c, language: language) { return false }
 
         // 4. Common-prefix stem/suffix split.
-        let (stem, suffO, suffC) = commonPrefixSplit(o, c)
+        var (stem, suffO, suffC) = commonPrefixSplit(o, c)
+        let isEnglish = language.prefix(2).lowercased() == "en"
+
+        // 4b. German back-off (quick 261003-au8): the greedy split leaves
+        // `r`/`n` for `reiner`/`reinen`. Shift the stem's last letter onto
+        // both tails while the tails are not both legal and the stem is
+        // longer than the floor; adopt only if both tails are then
+        // adjective-declension endings.
+        if !isEnglish,
+           !(germanInflectionalSuffixes.contains(suffO) && germanInflectionalSuffixes.contains(suffC)) {
+            var s = stem, a = suffO, b = suffC
+            while s.count > floor,
+                  !(germanInflectionalSuffixes.contains(a) && germanInflectionalSuffixes.contains(b)) {
+                let ch = s.removeLast()
+                a = String(ch) + a
+                b = String(ch) + b
+            }
+            if germanBackOffEndings.contains(a), germanBackOffEndings.contains(b) {
+                (stem, suffO, suffC) = (s, a, b)
+            }
+        }
 
         // 5. Trap B — strip-to-empty (directional, candidate side only).
         if suffC.isEmpty { return false }
 
         // 6. Trap A — German person endings, either side.
-        let isEnglish = language.prefix(2).lowercased() == "en"
         if !isEnglish, germanPersonEndings.contains(suffO) || germanPersonEndings.contains(suffC) {
             return false
         }
