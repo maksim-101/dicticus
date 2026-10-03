@@ -581,6 +581,29 @@ class TranscriptionService: ObservableObject {
             confidence: confidence
         )
 
+        #if DEBUG_RECORDER
+        // Quick task 261003-jej: per-token logprobs + word confidence for the cleanup record.
+        // Logging only; staged under the exact text process() will receive.
+        if let tokenizer = whisperKit.tokenizer {
+            let traceStart = Date()
+            let segments = allSegments.map { seg in
+                DebugCleanupRecord.AsrSegment.build(
+                    tokens: seg.tokens,
+                    tokenLogProbs: seg.tokenLogProbs,
+                    temperature: seg.temperature,
+                    specialTokenBegin: tokenizer.specialTokens.specialTokenBegin,
+                    decodeToken: { tokenizer.decode(tokens: [$0]) },
+                    splitWords: { tokenizer.splitToWordTokens(tokenIds: $0) }
+                )
+            }
+            let trace = DebugCleanupRecord.AsrTokenTrace(
+                ms: Date().timeIntervalSince(traceStart) * 1000,
+                segments: segments
+            )
+            await DebugRecorder.shared.stageAsrTokens(trace, rawText: trimmedText)
+        }
+        #endif
+
         return (transcriptionResult, avgLogprobs, allSegments.map(\.compressionRatio))
     }
 
