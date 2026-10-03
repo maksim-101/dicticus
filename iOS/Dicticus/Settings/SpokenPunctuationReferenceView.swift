@@ -9,7 +9,6 @@ struct SpokenPunctuationReferenceView: View {
                 LabeledContent("backslash", value: "\\")
                 LabeledContent("underscore / Unterstrich", value: "_")
                 LabeledContent("asterisk / Sternchen", value: "*")
-                LabeledContent("semicolon", value: ";")
                 LabeledContent("at sign / Klammeraffe", value: "@")
                 LabeledContent("hash / Raute", value: "#")
                 LabeledContent("caret", value: "^")
@@ -25,6 +24,20 @@ struct SpokenPunctuationReferenceView: View {
                 Text("Between identifier words")
             } footer: {
                 Text("Conditional symbols collapse only when flanked by identifier-shaped words (e.g. \"Claude minus ops\" → \"Claude-ops\"). \"dot\" also collapses between number-words (\"ten dot five\" → \"10.5\").")
+            }
+
+            Section {
+                LabeledContent("open / close parenthesis · Klammer auf / zu", value: "( )")
+                LabeledContent("open / close square bracket · eckige Klammer auf / zu", value: "[ ]")
+                LabeledContent("dot dot dot · Punkt Punkt Punkt", value: "...")
+                LabeledContent("question mark · Fragezeichen", value: "?")
+                LabeledContent("exclamation mark · Ausrufezeichen", value: "!")
+                LabeledContent("new line · neue Zeile / Zeilenumbruch", value: "line break")
+                LabeledContent("semicolon", value: ";")
+            } header: {
+                Text("Punctuation commands")
+            } footer: {
+                Text("Also works word-first, e.g. \"parentheses open\" and \"parentheses closed\". A command, \"semicolon\" included, stays as words after a word such as \"a\", \"the\", \"like\", \"or\" or \"and\" (\"a new line of chairs\"); question and exclamation marks only count when they close a sentence. Works with and without AI Cleanup.")
             }
 
             Section {
