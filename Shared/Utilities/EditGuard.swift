@@ -166,6 +166,15 @@ public enum EditGuard {
         /// three corpus fires, against 260831-q2r's measured blanket-accept
         /// corruptions.
         case punctuationMove
+        /// Quick task 261003-fiu: an English contraction the LLM wrote out in
+        /// full where the contraction stood (`that's` -> `that is`, `don't` -> `do not`,
+        /// `we're` -> `we are`, `can't` -> `cannot`): a rejected host
+        /// substitute plus the inserted expansion word, flipped together by
+        /// `applyContractionExpansionExemption`. Closed tables, English only.
+        /// Context-dependent: it reverts with its sentence when an
+        /// independent content rejection sits in it, so the host never renders
+        /// without its expansion word.
+        case contractionExpansion
     }
 
     /// D-11's forensics vocabulary — the classes of edit this guard REJECTS.
@@ -778,6 +787,7 @@ public enum EditGuard {
         }
         applyHyphenCompoundJoinExemption(edits: edits, verdicts: &result, dictProtectedLower: dictProtectedLower)
         applyPunctuationMoveExemption(edits: edits, verdicts: &result, baseline: baseline, candidate: candidate, language: language)
+        applyContractionExpansionExemption(edits: edits, verdicts: &result, baseline: baseline, candidate: candidate, language: language, dictProtectedLower: dictProtectedLower)
         return result
     }
 
@@ -988,6 +998,151 @@ public enum EditGuard {
             guard ok else { continue }
             verdicts[i] = ClassifiedEdit(kind: verdicts[i].kind, from: verdicts[i].from, to: verdicts[i].to,
                                          accepted: true, acceptClass: AcceptClass.punctuationMove.rawValue, rejectClass: nil)
+        }
+    }
+
+    /// Quick task 261003-fiu: negative contraction -> host; the expansion
+    /// word is always `not`. No `ain't` (no single full form). Also read by
+    /// `verbKeptBaselineOrder`, so a sentence-initial `Don't` rebuilt as
+    /// `Do not` is not mistaken for a fronted verb.
+    private static let negativeContractionHosts: [String: String] = [
+        "don't": "do", "doesn't": "does", "didn't": "did", "isn't": "is", "aren't": "are",
+        "wasn't": "was", "weren't": "were", "haven't": "have", "hasn't": "has", "hadn't": "had",
+        "won't": "will", "wouldn't": "would", "couldn't": "could", "shouldn't": "should",
+        "can't": "can", "mustn't": "must", "shan't": "shall", "needn't": "need",
+    ]
+    /// Suffix -> expansion word for the unambiguous suffix contractions. There
+    /// is no `'d` row: it is `would` or `had`, and no `let's` row: its `'s` is
+    /// `us`, so `let us` reads as "allow us".
+    private static let contractionSuffixExpansions: [String: String] = [
+        "'re": "are", "'ve": "have", "'ll": "will", "'m": "am",
+    ]
+    /// The only hosts whose `'s` is expanded to `is`: pronouns, wh-words and
+    /// `that`/`there`/`here`. A noun host (`the kiln's`) is a possessive or a
+    /// `has`, so the set is closed.
+    private static let isContractionHosts: Set<String> = [
+        "it", "that", "what", "where", "there", "here", "who", "how", "he", "she",
+    ]
+    /// Participles that make a `'s` read as `has` (`it's been`, `it's already
+    /// gone`). The window over the next two baseline words, together with the
+    /// four-letter `-ed` rule, errs toward rejection: `what's left` and `it's
+    /// done` stay as dictated although they could read as `is`.
+    private static let hasReadingParticiples: Set<String> = [
+        "been", "got", "gotten", "done", "gone", "seen", "taken", "given", "made", "had", "known", "shown",
+        "written", "come", "become", "begun", "broken", "chosen", "driven", "eaten", "fallen", "forgotten",
+        "found", "heard", "held", "kept", "left", "lost", "meant", "met", "paid", "said", "sent", "spent",
+        "stood", "told", "thought", "understood", "won", "brought", "bought", "caught", "taught", "built",
+        "felt", "led", "put", "set", "grown", "thrown", "drawn", "spoken", "stolen", "hidden", "risen",
+        "beaten", "forgiven", "proven", "shaken",
+    ]
+    private static let contractionSingleTokenExpansions: [String: String] = ["can't": "cannot"]
+
+    private static func contractionExpansionLookup(_ contraction: String) -> (host: String, word: String)? {
+        if let host = negativeContractionHosts[contraction] { return (host, "not") }
+        if contraction.hasSuffix("'s") {
+            let host = String(contraction.dropLast(2))
+            return isContractionHosts.contains(host) ? (host, "is") : nil
+        }
+        for (suffix, word) in contractionSuffixExpansions where contraction.hasSuffix(suffix) {
+            let host = String(contraction.dropLast(suffix.count))
+            guard !host.isEmpty, host.allSatisfy({ $0.isLetter }) else { return nil }
+            return (host, word)
+        }
+        return nil
+    }
+
+    /// Quick task 261003-fiu: accepts an English contraction written out in
+    /// full at its place. All six conditions together (a conjunction):
+    /// (1) a rejected `.substitute` whose prior class is
+    /// `contentWordIdentityChange` or `pronounPersonChange` (`it's` -> `it`
+    /// dies at step 4 as a pronoun change), the contraction not dictionary-
+    /// protected; (2) the contraction is in the closed tables; (3) the target
+    /// is the host and the candidate token directly after it is an `.insert`
+    /// of the expansion word (or the single `cannot`), so `it's` -> `is` and
+    /// `there's` -> `there` fail; (4) the host's case equals the contraction's,
+    /// or it is a capital at the text start or directly after a candidate
+    /// `.`/`?`/`!` (an accepted substitute renders verbatim, so a mid-sentence
+    /// capital would stay); (5) the baseline word before and after the
+    /// contraction equal the candidate word before the host and after the
+    /// span, which makes the pair the whole gap and keeps an LLM-inserted
+    /// mark out of condition 4; (6) for `'s`, none of the next two baseline
+    /// words reads as a has-participle.
+    ///
+    /// The expansion word is read at the host's CANDIDATE index plus one,
+    /// where the reader sees it: `EditDiff.pairAdjacentSubstitutes` emits
+    /// paired substitutes before surplus inserts, so an inserted comma can sit
+    /// between them in edit order. With condition 5 the insert is also the
+    /// next edit, so the lookup is correct by construction rather than a
+    /// provable guard. The prior-class gate and the dictionary check keep this
+    /// pass from overriding any other lock; no table contraction reaches
+    /// another class today, so both are defensive.
+    ///
+    /// Both verdicts flip together, and condition 5 puts both in one
+    /// keep-bounded cluster and one baseline sentence, so every coupling pass
+    /// (atomic group, sentence, mood lock attempt 1 followed by atomic
+    /// coupling) reverts them together; `do` never renders without `not`. The
+    /// multiset invariant cannot catch a split pair (it is computed from the
+    /// verdicts), which is why parity is structural and tested.
+    private static func applyContractionExpansionExemption(
+        edits: [Edit], verdicts: inout [ClassifiedEdit],
+        baseline: [Token], candidate: [Token], language: String, dictProtectedLower: Set<String>
+    ) {
+        guard language.prefix(2).lowercased() == "en" else { return }
+        var idxByCand: [Int: Int] = [:]
+        for (k, e) in edits.enumerated() {
+            if let t = e.to { idxByCand[t.index] = k }
+        }
+        for i in edits.indices {
+            guard edits[i].kind == .substitute, !verdicts[i].accepted,
+                  let prior = verdicts[i].rejectClass,
+                  prior == RejectionClass.contentWordIdentityChange.rawValue
+                    || prior == RejectionClass.pronounPersonChange.rawValue,
+                  let a = edits[i].from, let b = edits[i].to,
+                  a.kind == .word, b.kind == .word,
+                  !dictProtectedLower.contains(a.normalized),
+                  let match = contractionExpansionLookup(a.normalized) else { continue }
+
+            var insertEdit: Int?
+            let spanEnd: Int
+            if contractionSingleTokenExpansions[a.normalized] == b.normalized {
+                spanEnd = b.index
+            } else {
+                guard b.normalized == match.host,
+                      let j = idxByCand[b.index + 1],
+                      edits[j].kind == .insert, !verdicts[j].accepted,
+                      verdicts[j].rejectClass == RejectionClass.contentWordInsertion.rawValue,
+                      let t = edits[j].to, t.kind == .word, t.normalized == match.word else { continue }
+                insertEdit = j
+                spanEnd = b.index + 1
+            }
+
+            let aUpper = a.text.first?.isUppercase == true
+            let bUpper = b.text.first?.isUppercase == true
+            let caseOK = aUpper == bUpper
+                || (!aUpper && bUpper && (b.index == 0
+                    || (candidate[b.index - 1].kind == .punctuation
+                        && sentenceTerminalMarks.contains(candidate[b.index - 1].text))))
+            guard caseOK else { continue }
+
+            if a.index == 0 {
+                guard b.index == 0 else { continue }
+            } else {
+                guard b.index > 0, baseline[a.index - 1].normalized == candidate[b.index - 1].normalized else { continue }
+            }
+            guard a.index + 1 < baseline.count, spanEnd + 1 < candidate.count,
+                  baseline[a.index + 1].normalized == candidate[spanEnd + 1].normalized else { continue }
+
+            if a.normalized.hasSuffix("'s") {
+                let next = baseline[(a.index + 1)...].lazy.filter { $0.kind == .word }.prefix(2)
+                if next.contains(where: { hasReadingParticiples.contains($0.normalized) || ($0.normalized.count >= 4 && $0.normalized.hasSuffix("ed")) }) { continue }
+            }
+
+            verdicts[i] = ClassifiedEdit(kind: verdicts[i].kind, from: verdicts[i].from, to: verdicts[i].to,
+                                         accepted: true, acceptClass: AcceptClass.contractionExpansion.rawValue, rejectClass: nil)
+            if let j = insertEdit {
+                verdicts[j] = ClassifiedEdit(kind: verdicts[j].kind, from: verdicts[j].from, to: verdicts[j].to,
+                                             accepted: true, acceptClass: AcceptClass.contractionExpansion.rawValue, rejectClass: nil)
+            }
         }
     }
 
@@ -2396,6 +2551,7 @@ public enum EditGuard {
         AcceptClass.inflectionFix.rawValue,
         AcceptClass.connectorSplit.rawValue,
         AcceptClass.punctuationMove.rawValue,
+        AcceptClass.contractionExpansion.rawValue,
     ]
 
     /// Quick task 260926-bbz: is the edit at `edits[i]` the LLM's
@@ -3708,12 +3864,15 @@ public enum EditGuard {
     ///   - baseline: the original baseline token stream.
     /// - Returns: `true` when the verb is still in baseline word order (no
     ///   revert should count as a violation for this occurrence).
+    /// A baseline negative contraction matches its host (`Don't` stands where
+    /// the rebuilt `Do` stands), so an accepted `contractionExpansion` at a
+    /// sentence start is not a fronted verb.
     private static func verbKeptBaselineOrder(
         rebuiltIndex: Int, tokens: [WorkToken], baseline: [Token]
     ) -> Bool {
         let verb = tokens[rebuiltIndex]
         let outputPrev = tokens[..<rebuiltIndex].last { $0.kind != .punctuation }
-        for (idx, t) in baseline.enumerated() where t.kind != .punctuation && t.normalized == verb.normalized {
+        for (idx, t) in baseline.enumerated() where t.kind != .punctuation && (t.normalized == verb.normalized || negativeContractionHosts[t.normalized] == verb.normalized) {
             let baselinePrev = baseline[..<idx].last { $0.kind != .punctuation }
             if baselinePrev?.normalized == outputPrev?.normalized {
                 return true
