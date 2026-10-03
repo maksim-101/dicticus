@@ -1083,6 +1083,10 @@ public enum EditGuard {
     /// coupling) reverts them together; `do` never renders without `not`. The
     /// multiset invariant cannot catch a split pair (it is computed from the
     /// verdicts), which is why parity is structural and tested.
+    ///
+    /// Quick task 261003-gp8: in the two-token form the inserted expansion
+    /// word must be all lowercase (`do Not` mid-sentence was accepted and
+    /// shipped a stray capital).
     private static func applyContractionExpansionExemption(
         edits: [Edit], verdicts: inout [ClassifiedEdit],
         baseline: [Token], candidate: [Token], language: String, dictProtectedLower: Set<String>
@@ -1111,7 +1115,8 @@ public enum EditGuard {
                       let j = idxByCand[b.index + 1],
                       edits[j].kind == .insert, !verdicts[j].accepted,
                       verdicts[j].rejectClass == RejectionClass.contentWordInsertion.rawValue,
-                      let t = edits[j].to, t.kind == .word, t.normalized == match.word else { continue }
+                      let t = edits[j].to, t.kind == .word, t.normalized == match.word,
+                      t.text == t.text.lowercased() else { continue }
                 insertEdit = j
                 spanEnd = b.index + 1
             }
@@ -2520,6 +2525,10 @@ public enum EditGuard {
     /// sentence whose words were carried away (and the sentence whose end
     /// mark was coupled) returns to raw, including the commas the LLM
     /// inserted to make the relocated clause read.
+    ///
+    /// Quick task 261003-gp8: a lone word swap (`contentWordIdentityChange`)
+    /// is still a trigger; `applySentenceCoupledRevert` lets its sentence's
+    /// accepted `punctuationOrCasing` edits stand.
     private static let sentenceRevertTriggerClasses: Set<String> = [
         RejectionClass.contentWordIdentityChange.rawValue,
         RejectionClass.contentWordInsertion.rawValue,
@@ -2948,6 +2957,66 @@ public enum EditGuard {
         return true
     }
 
+    /// Quick task 261003-gp8: is the rejected edit at `edits[i]` a lone word
+    /// swap — one word replaced by one other word, rejected as
+    /// `contentWordIdentityChange`? Both tokens are `.word`, their
+    /// normalized forms differ, and neither side is a D-09 coordinator or
+    /// negator (a clause-relation or polarity change), a pronoun, a number
+    /// word or contains a digit (the last two are classified by other rules
+    /// today; the checks keep the carve-out closed if that changes). The
+    /// swap's keep-bounded cluster (the run of non-keep edits around it) may
+    /// hold punctuation edits but no other `.word` token, so the swap is
+    /// one token for one token; a swap that shares its cluster with a word
+    /// insert or delete (`wanna` -> `want to`) never qualifies.
+    private static func isLoneWordSwapTrigger(at i: Int, edits: [Edit], verdicts: [ClassifiedEdit], language: String) -> Bool {
+        guard edits[i].kind == .substitute,
+              verdicts[i].rejectClass == RejectionClass.contentWordIdentityChange.rawValue,
+              let a = edits[i].from, let b = edits[i].to,
+              a.kind == .word, b.kind == .word,
+              a.normalized != b.normalized,
+              !FunctionWords.isConjunctionOrNegator(a.normalized, language: language),
+              !FunctionWords.isConjunctionOrNegator(b.normalized, language: language),
+              !PronounPersonMap.isPronoun(a.normalized, language: language),
+              !PronounPersonMap.isPronoun(b.normalized, language: language),
+              EditGuardTokenizer.numericValue(a, language: language) == nil,
+              EditGuardTokenizer.numericValue(b, language: language) == nil,
+              !a.text.contains(where: { $0.isNumber }),
+              !b.text.contains(where: { $0.isNumber })
+        else { return false }
+        var lo = i
+        while lo > 0, edits[lo - 1].kind != .keep { lo -= 1 }
+        var hi = i
+        while hi + 1 < edits.count, edits[hi + 1].kind != .keep { hi += 1 }
+        for k in lo...hi where k != i {
+            for token in [edits[k].from, edits[k].to] {
+                if let token, token.kind == .word { return false }
+            }
+        }
+        return true
+    }
+
+    /// Quick task 261003-gp8: does raw sentence `s` hold a terminal-mark
+    /// change — any non-keep edit whose `from` or `to` is a punctuation token
+    /// made only of `.`, `?` or `!`? Such a sentence stays fully coupled: a
+    /// mood or sentence-boundary decision is never released. The one
+    /// exception is a `.` insert at the utterance-final position
+    /// (`isUtteranceFinalMarkPosition`), which 260926-bbz already spares from
+    /// both flip loops and which carries no mood. Reads `edits` only.
+    private static func sentenceHasTerminalMarkChange(_ s: Int, edits: [Edit]) -> Bool {
+        for k in edits.indices {
+            guard edits[k].kind != .keep,
+                  baselineSentenceIndex(ofEditAt: k, in: edits) == s
+            else { continue }
+            if edits[k].kind == .insert, edits[k].to?.text == ".",
+               isUtteranceFinalMarkPosition(at: k, edits: edits) { continue }
+            for token in [edits[k].from, edits[k].to] {
+                if let token, token.kind == .punctuation, !token.text.isEmpty,
+                   token.text.allSatisfy({ ".?!".contains($0) }) { return true }
+            }
+        }
+        return false
+    }
+
     /// Phase 49.6 (EDITGUARD-03, D-01..D-06): the sixth coupling pass —
     /// the raw-SENTENCE coupled revert. Audit finding 3
     /// (`.planning/research/v2.6-log-audit-2026-09-10.md`): six live
@@ -3038,10 +3107,35 @@ public enum EditGuard {
     /// Quick task 260926-dbi: the main flip loop below also exempts an
     /// exact-adjacent-stutter delete — see
     /// `isExactAdjacentStutterDelete`'s doc comment.
+    ///
+    /// Quick task 261003-gp8 (lone word swap): a triggered raw sentence whose
+    /// ONLY trigger is a lone word swap (`isLoneWordSwapTrigger`) and which
+    /// holds no terminal-mark change (`sentenceHasTerminalMarkChange`) keeps
+    /// its accepted `punctuationOrCasing` edits; the swap itself stays
+    /// rejected. Before, one rejected swapped word returned the whole raw
+    /// sentence and threw away the commas and capitals the cleanup got right.
+    /// Only `punctuationOrCasing` is released, because a function word,
+    /// inflection, word order or sentence merge can be conditioned on the
+    /// swapped word (the `08-30:16` shape: an article case that followed the
+    /// swapped verb), and a casing edit that lowers a capitalised word's first
+    /// letter is not released either (a German noun, or a sentence start
+    /// whose capital belonged to a reverted move). Nothing else changes: the
+    /// D-15 boundary loop and the au9 `punctuationMove` loop below still read
+    /// `triggered`, and mood-lock and sentence-boundary decisions stay
+    /// coupled through the terminal-mark exclusion. The six D-06 shapes are
+    /// pinned by `EditGuardCoupledRevertTests` and keep their output.
+    /// `applyAtomicGroupCoupling` runs first at every call site, so any
+    /// accepted edit in the swap's own keep-bounded cluster is already
+    /// reverted and no released mark sits next to a reverted word. The set of
+    /// qualifying sentences is recomputed from `verdicts` on each call;
+    /// rejections only accumulate, so a sentence can leave it (a second
+    /// trigger appears) but never re-enter, and the pass stays monotone
+    /// toward raw.
     private static func applySentenceCoupledRevert(edits: [Edit], verdicts: inout [ClassifiedEdit], language: String) {
         guard !edits.isEmpty else { return }
 
         var triggered = Set<Int>()
+        var triggerEdits: [Int: [Int]] = [:]
         for i in edits.indices {
             guard !verdicts[i].accepted,
                   let rejectClass = verdicts[i].rejectClass,
@@ -3049,8 +3143,17 @@ public enum EditGuard {
                   let sentenceIndex = baselineSentenceIndex(ofEditAt: i, in: edits)
             else { continue }
             triggered.insert(sentenceIndex)
+            triggerEdits[sentenceIndex, default: []].append(i)
         }
         guard !triggered.isEmpty else { return }
+
+        var loneSwapSentences = Set<Int>()
+        for (s, list) in triggerEdits where list.count == 1 {
+            if isLoneWordSwapTrigger(at: list[0], edits: edits, verdicts: verdicts, language: language),
+               !sentenceHasTerminalMarkChange(s, edits: edits) {
+                loneSwapSentences.insert(s)
+            }
+        }
 
         for i in edits.indices {
             guard edits[i].kind != .keep,
@@ -3059,6 +3162,9 @@ public enum EditGuard {
                   sentenceRevertContextDependentClasses.contains(acceptClass),
                   let sentenceIndex = baselineSentenceIndex(ofEditAt: i, in: edits),
                   triggered.contains(sentenceIndex),
+                  !(loneSwapSentences.contains(sentenceIndex) && acceptClass == AcceptClass.punctuationOrCasing.rawValue
+                    && !(edits[i].kind == .substitute && edits[i].from?.text.first?.isUppercase == true
+                         && edits[i].to?.text.first?.isLowercase == true)),
                   // Quick task 260926-bbz: the utterance-final terminal
                   // mark survives this pass too — see
                   // `isUtteranceFinalTerminalMarkInsert`'s doc comment.
