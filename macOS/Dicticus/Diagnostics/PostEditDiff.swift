@@ -209,8 +209,14 @@ enum PostEditDiff {
         }
         var i = n
         var j = m
+        var firstExact: Int?
+        var lastExact: Int?
         while i > 0 {
             if j > 0, d[i][j] == d[i - 1][j - 1] + (pasted[i - 1] == slice[j - 1] ? 0 : 1) {
+                if pasted[i - 1] == slice[j - 1] {
+                    firstExact = j - 1
+                    if lastExact == nil { lastExact = j - 1 }
+                }
                 i -= 1; j -= 1
             } else if d[i][j] == d[i - 1][j] + 1 {
                 i -= 1
@@ -218,8 +224,10 @@ enum PostEditDiff {
                 j -= 1
             }
         }
-        let start = sliceStart + j
-        return start < best.end ? start..<best.end : nil
+        // Privacy: the range starts and ends on exact token matches, so a substituted or inserted
+        // neighbour at either boundary (text the user did not dictate) is never part of the span.
+        guard let firstExact, let lastExact else { return nil }
+        return (sliceStart + firstExact)..<(sliceStart + lastExact + 1)
     }
 
     private static func reduced(_ tokens: [String]) -> String {
@@ -260,7 +268,10 @@ enum PostEditDiff {
             if a > prevP || b > prevC {
                 let from = Array(pasted[prevP..<a])
                 let to = Array(current[prevC..<b])
-                if from.count > hunkSideCap || to.count > hunkSideCap {
+                // Privacy: a hunk touching either end of the span logs counts only; its replacement
+                // text sits at the boundary, where field text outside the span could be mistaken for it.
+                let touchesEnd = prevP == 0 || prevC == 0 || a == n || b == m
+                if touchesEnd || from.count > hunkSideCap || to.count > hunkSideCap {
                     changes.append(Change(kind: "rewrite", from: nil, to: nil, before: nil, after: nil,
                                           from_n: from.count, to_n: to.count))
                 } else {
