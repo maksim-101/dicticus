@@ -143,6 +143,55 @@ enum PostEditDiff {
         let changes_truncated: Int?
         let word_edits: Int
         let observable_edit: Bool
+
+        func finalized(result: (outcome: Outcome, reason: String?, changes: [Change]?, truncated: Int?, wordEdits: Int),
+                       end: EndReason, polls: Int, locatedPolls: Int, observedMs: Int, lastLocatedMs: Int?,
+                       axMsMax: Double, ts: String) -> Record {
+            self
+        }
+    }
+
+    static func relocate(pasted: [String], fieldTokens: [Token], caretUTF16: Int?) -> Range<Int>? {
+        nil
+    }
+
+    static func diff(pasted: [String], current: [String]) -> (changes: [Change], truncated: Int) {
+        ([], 0)
+    }
+
+    enum EndReason: String {
+        case focusLeft = "focus_left"
+        case nextDictation = "next_dictation"
+        case revertToRaw = "revert_to_raw"
+        case timeout
+        case elementGone = "element_gone"
+        case spanLost = "span_lost"
+    }
+
+    enum FieldRead {
+        case gone
+        case read(tokens: [Token], caretUTF16: Int?, stillFocused: Bool)
+    }
+
+    struct Session: Sendable {
+        let pasted: [String]
+        private(set) var lastLocated: [String]?
+        private(set) var polls = 0
+        private(set) var locatedPolls = 0
+        private(set) var consecutiveLost = 0
+        private(set) var sawGone = false
+
+        init(pasted: [String]) {
+            self.pasted = pasted
+        }
+
+        mutating func ingest(_ read: FieldRead, elapsedMs: Int) -> EndReason? {
+            nil
+        }
+
+        func result() -> (outcome: Outcome, reason: String?, changes: [Change]?, truncated: Int?, wordEdits: Int) {
+            (.unchanged, nil, nil, nil, 0)
+        }
     }
 
     static func encodeLine(_ r: Record) -> Data? {
