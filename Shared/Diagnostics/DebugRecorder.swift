@@ -386,7 +386,34 @@ public struct DebugCleanupRecord: Codable, Sendable {
             decodeToken: (Int) -> String,
             splitWords: ([Int]) -> (words: [String], wordTokens: [[Int]])
         ) -> AsrSegment {
-            return AsrSegment(temperature: temperature, tokens: [], words: nil)
+            var kept: [AsrToken] = []
+            for (i, id) in tokens.enumerated() where id < specialTokenBegin {
+                let lp = i < tokenLogProbs.count ? tokenLogProbs[i][id] : nil
+                kept.append(AsrToken(id: id, text: decodeToken(id), lp: lp))
+            }
+            guard !kept.isEmpty, kept.allSatisfy({ $0.lp != nil }) else {
+                return AsrSegment(temperature: temperature, tokens: kept, words: nil)
+            }
+            let keptIds = kept.map(\.id)
+            let split = splitWords(keptIds)
+            guard split.words.count == split.wordTokens.count else {
+                return AsrSegment(temperature: temperature, tokens: kept, words: nil)
+            }
+            var words: [AsrWord] = []
+            var cursor = 0
+            for (k, group) in split.wordTokens.enumerated() {
+                let end = cursor + group.count
+                guard !group.isEmpty, end <= keptIds.count, Array(keptIds[cursor..<end]) == group else {
+                    return AsrSegment(temperature: temperature, tokens: kept, words: nil)
+                }
+                let mean = kept[cursor..<end].reduce(Float(0)) { $0 + ($1.lp ?? 0) } / Float(group.count)
+                words.append(AsrWord(text: split.words[k], p: exp(mean), n: group.count))
+                cursor = end
+            }
+            guard cursor == keptIds.count else {
+                return AsrSegment(temperature: temperature, tokens: kept, words: nil)
+            }
+            return AsrSegment(temperature: temperature, tokens: kept, words: words)
         }
     }
 
@@ -529,11 +556,13 @@ public struct AsrTokenStash: Sendable {
     public init() {}
 
     public mutating func stage(_ trace: DebugCleanupRecord.AsrTokenTrace, rawText: String) {
-        // RED stub
+        entries.append((rawText, trace))
+        while entries.count > Self.capacity { entries.removeFirst() }
     }
 
     public mutating func take(rawText: String) -> DebugCleanupRecord.AsrTokenTrace? {
-        return nil
+        guard let i = entries.firstIndex(where: { $0.rawText == rawText }) else { return nil }
+        return entries.remove(at: i).trace
     }
 }
 
