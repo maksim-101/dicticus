@@ -366,4 +366,77 @@ final class InflectionRulesTests: XCTestCase {
         )
         XCTAssertEqual(mappedIDs, actualIDs, "substitutedWordPair's coverage has drifted from EditGuardFixtures.")
     }
+
+    // MARK: - German adjective-ending back-off (quick 261003-au8)
+
+    /// The greedy longest-common-prefix split left tails such as `r`/`n` for
+    /// `reiner`/`reinen`, which are not endings, so `-er`/`-es`/`-em`/`-en`
+    /// repairs whose endings share their first letter were rejected (quick
+    /// 261003-au8, audit 2026-10-03 record #78). The fix backs the split off
+    /// one letter at a time (German only, never below the stem-length floor)
+    /// and adopts the shifted split only when both tails are in
+    /// {en, er, es, em}. Boundary rejects and the mutation each one guards:
+    /// `dancer`->`dances` (M1, German-only gate), `weiter`->`weitet` (M2,
+    /// adoption set), `gutem`->`guten` (M3, floor), `reine`->`reiner` (M4,
+    /// Trap A reads the chosen split).
+
+    func testReinerToReinenAccepts() {
+        XCTAssertTrue(
+            InflectionRules.isAllowedInflection("reiner", "reinen", language: "de"),
+            "reiner -> reinen is a declension repair of the same adjective."
+        )
+    }
+
+    func testReinemToReinenAccepts() {
+        XCTAssertTrue(
+            InflectionRules.isAllowedInflection("reinem", "reinen", language: "de"),
+            "reinem -> reinen is a declension repair of the same adjective."
+        )
+    }
+
+    func testReinenToReinerAccepts() {
+        XCTAssertTrue(
+            InflectionRules.isAllowedInflection("reinen", "reiner", language: "de"),
+            "reinen -> reiner (reverse direction) is a declension repair of the same adjective."
+        )
+    }
+
+    /// Pin: the greedy tails `s`/`n` are already legal, so this accepted
+    /// before the back-off and must keep accepting.
+    func testReinesToReinenAccepts() {
+        XCTAssertTrue(
+            InflectionRules.isAllowedInflection("reines", "reinen", language: "de"),
+            "reines -> reinen is accepted by the greedy split and must stay accepted."
+        )
+    }
+
+    func testWeiterToWeitetIsRejected() {
+        XCTAssertFalse(
+            InflectionRules.isAllowedInflection("weiter", "weitet", language: "de"),
+            "weiter (further) -> weitet (widens) changes the word; `et` is outside the back-off set."
+        )
+    }
+
+    func testDancerToDancesIsRejectedInEnglish() {
+        XCTAssertFalse(
+            InflectionRules.isAllowedInflection("dancer", "dances", language: "en"),
+            "dancer -> dances is a different word in English; the back-off is German-only."
+        )
+    }
+
+    /// EXPECTED FALSE REJECT — the stem `gut` is below the floor. A priced
+    /// miss like the lauft/singen tests; do not lower the floor.
+    func testGutemToGutenIsRejectedAsDeliberateFalseReject() {
+        XCTAssertFalse(
+            InflectionRules.isAllowedInflection("gutem", "guten", language: "de"),
+            "EXPECTED FALSE REJECT: gutem -> guten has a 3-letter stem, below the floor. Priced cost — do not fix."
+        )
+    }
+
+    func testReineToReinerIsRejected() {
+        XCTAssertFalse(
+            InflectionRules.isAllowedInflection("reine", "reiner", language: "de"),
+            "reine -> reiner: the backed-off tail `e` is a person ending outside the back-off set."
+        )
+    }
 }
