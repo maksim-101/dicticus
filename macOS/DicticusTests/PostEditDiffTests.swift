@@ -202,12 +202,22 @@ final class PostEditDiffTests: XCTestCase {
 
     // MARK: session
 
+    private func makeSession(pasteField: String = "Ask the robot to water it twice") -> PostEditDiff.Session {
+        let tokens = toks(pasteField)
+        var anchor: PostEditDiff.Anchor?
+        if case .success(let v) = PostEditDiff.locateAtPaste(pasted: sentence.joined(separator: " "), field: pasteField,
+                                                              fieldTokens: tokens, caretUTF16: nil) {
+            anchor = PostEditDiff.Anchor(range: v.range, fieldTokens: tokens)
+        }
+        return PostEditDiff.Session(pasted: sentence, anchor: anchor)
+    }
+
     private func read(_ s: String, focused: Bool = true) -> PostEditDiff.FieldRead {
         .read(tokens: toks(s), caretUTF16: nil, stillFocused: focused)
     }
 
     func testSessionSendBoxEditThenClearedFieldIsEdited() {
-        var s = PostEditDiff.Session(pasted: sentence)
+        var s = makeSession()
         XCTAssertNil(s.ingest(read("Ask the rover to water it twice"), elapsedMs: 500))
         XCTAssertNil(s.ingest(read(""), elapsedMs: 1000))
         XCTAssertEqual(s.ingest(read(""), elapsedMs: 1500), .spanLost)
@@ -220,13 +230,13 @@ final class PostEditDiffTests: XCTestCase {
     }
 
     func testSessionElementGone() {
-        var s = PostEditDiff.Session(pasted: sentence)
+        var s = makeSession()
         XCTAssertEqual(s.ingest(.gone, elapsedMs: 500), .elementGone)
         XCTAssertEqual(s.result().outcome, .fieldGone)
     }
 
     func testSessionNeverRelocated() {
-        var s = PostEditDiff.Session(pasted: sentence)
+        var s = makeSession()
         XCTAssertNil(s.ingest(read("nothing to see"), elapsedMs: 500))
         XCTAssertEqual(s.ingest(read("nothing to see"), elapsedMs: 1000), .spanLost)
         let r = s.result()
@@ -235,14 +245,14 @@ final class PostEditDiffTests: XCTestCase {
     }
 
     func testSessionFocusLeftUsesThatPollsTokens() {
-        var s = PostEditDiff.Session(pasted: sentence)
+        var s = makeSession()
         XCTAssertEqual(s.ingest(read("Ask the rover to water it twice", focused: false), elapsedMs: 500), .focusLeft)
         XCTAssertEqual(s.result().outcome, .edited)
         XCTAssertEqual(s.result().changes, [swapChange()])
     }
 
     func testSessionUnchanged() {
-        var s = PostEditDiff.Session(pasted: sentence)
+        var s = makeSession()
         XCTAssertNil(s.ingest(read("Ask the robot to water it twice"), elapsedMs: 500))
         let r = s.result()
         XCTAssertEqual(r.outcome, .unchanged)
@@ -253,6 +263,56 @@ final class PostEditDiffTests: XCTestCase {
     func testRelocateTrimsToExactBoundaryTokens() {
         XCTAssertEqual(PostEditDiff.relocate(pasted: sentence, fieldTokens: toks("MARKERPRE the robot to water it twice"), caretUTF16: nil), 1..<7)
         XCTAssertEqual(PostEditDiff.relocate(pasted: sentence, fieldTokens: toks("Ask the robot to water it MARKERPOST more stuff"), caretUTF16: nil), 0..<6)
+    }
+
+    // MARK: position anchor
+
+    private let filler = "Meeting notes for the quarterly planning review are collected in this paragraph before anything else is added here. "
+
+    func testRelocateWindowRejectsAMatchOutsideIt() {
+        let tokens = toks("Ask the robot to water it twice")
+        XCTAssertEqual(PostEditDiff.relocate(pasted: sentence, fieldTokens: tokens, caretUTF16: nil, window: 0..<40), 0..<7)
+        XCTAssertNil(PostEditDiff.relocate(pasted: sentence, fieldTokens: tokens, caretUTF16: nil, window: 100..<200))
+    }
+
+    func testAnchorSimilarSentenceBeforeOriginalPositionIsNeverLogged() throws {
+        let pasteField = "Ask the MARKERA to water it twice. " + filler + sentence.joined(separator: " ") + " Closing remarks."
+        let field = "Ask the MARKERA to water it twice. " + filler + "Closing remarks."
+        var s = makeSession(pasteField: pasteField)
+        _ = s.ingest(.read(tokens: toks(field), caretUTF16: nil, stillFocused: true), elapsedMs: 500)
+        let line = String(decoding: try XCTUnwrap(PostEditDiff.encodeLine(finalizedRecord(s))), as: UTF8.self)
+        XCTAssertFalse(line.contains("MARKERA"), line)
+        XCTAssertEqual(s.result().outcome, .spanNotFound)
+        XCTAssertEqual(s.result().reason, "lost")
+    }
+
+    func testAnchorSimilarSentenceAfterOriginalPositionIsNeverLogged() throws {
+        let pasteField = filler + sentence.joined(separator: " ") + " " + filler + "Ask the MARKERB to water it twice."
+        let field = filler + " " + filler + "Ask the MARKERB to water it twice."
+        var s = makeSession(pasteField: pasteField)
+        _ = s.ingest(.read(tokens: toks(field), caretUTF16: nil, stillFocused: true), elapsedMs: 500)
+        let line = String(decoding: try XCTUnwrap(PostEditDiff.encodeLine(finalizedRecord(s))), as: UTF8.self)
+        XCTAssertFalse(line.contains("MARKERB"), line)
+        XCTAssertEqual(s.result().outcome, .spanNotFound)
+        XCTAssertEqual(s.result().reason, "lost")
+    }
+
+    func testAnchorAllowsAUserInsertionOfFiveWordsBeforeTheSpan() {
+        var s = makeSession(pasteField: "Notes here. Ask the robot to water it twice")
+        let field = "one two three four five Notes here. Ask the rover to water it twice"
+        XCTAssertNil(s.ingest(read(field), elapsedMs: 500))
+        XCTAssertEqual(s.locatedPolls, 1)
+        XCTAssertEqual(s.result().outcome, .edited)
+        XCTAssertEqual(s.result().changes, [swapChange()])
+    }
+
+    func testWithoutAnAnchorNoTextIsLogged() {
+        var s = PostEditDiff.Session(pasted: sentence, anchor: nil)
+        _ = s.ingest(read("Ask the rover to water it twice"), elapsedMs: 500)
+        let r = s.result()
+        XCTAssertEqual(r.outcome, .edited)
+        XCTAssertEqual(r.changes, [PostEditDiff.Change(kind: "rewrite", from: nil, to: nil, before: nil, after: nil, from_n: 1, to_n: 1)])
+        XCTAssertEqual(r.wordEdits, 0)
     }
 
     // MARK: record flags and privacy
@@ -269,32 +329,32 @@ final class PostEditDiffTests: XCTestCase {
     }
 
     func testRecordFlags() {
-        var punct = PostEditDiff.Session(pasted: sentence)
+        var punct = makeSession()
         _ = punct.ingest(read("Ask the robot to water it twice."), elapsedMs: 500)
         let p = finalizedRecord(punct)
         XCTAssertEqual(p.outcome, .edited)
         XCTAssertTrue(p.observable_edit)
         XCTAssertEqual(p.word_edits, 0)
         XCTAssertEqual(p.end, "focus_left")
-        var word = PostEditDiff.Session(pasted: sentence)
+        var word = makeSession()
         _ = word.ingest(read("Ask the rover to water it twice"), elapsedMs: 500)
         XCTAssertEqual(finalizedRecord(word).word_edits, 1)
-        var same = PostEditDiff.Session(pasted: sentence)
+        var same = makeSession()
         _ = same.ingest(read("Ask the robot to water it twice"), elapsedMs: 500)
         let u = finalizedRecord(same)
         XCTAssertFalse(u.observable_edit)
         XCTAssertNil(u.changes)
     }
 
-    private func encodedLine(field: String, caret: Int?) throws -> String {
-        var s = PostEditDiff.Session(pasted: sentence)
+    private func encodedLine(pasteField: String, field: String, caret: Int?) throws -> String {
+        var s = makeSession(pasteField: pasteField)
         _ = s.ingest(.read(tokens: toks(field), caretUTF16: caret, stillFocused: true), elapsedMs: 500)
         return String(decoding: try XCTUnwrap(PostEditDiff.encodeLine(finalizedRecord(s))), as: UTF8.self)
     }
 
-    private func assertNoLeak(field: String, carets: [Int?], leaks: [String], file: StaticString = #filePath, line: UInt = #line) throws {
+    private func assertNoLeak(pasteField: String, field: String, carets: [Int?], leaks: [String], file: StaticString = #filePath, line: UInt = #line) throws {
         for caret in carets {
-            let encoded = try encodedLine(field: field, caret: caret)
+            let encoded = try encodedLine(pasteField: pasteField, field: field, caret: caret)
             for leaked in leaks {
                 XCTAssertFalse(encoded.contains(leaked), "\(leaked) leaked with caret \(String(describing: caret)) in \(encoded)", file: file, line: line)
             }
@@ -303,23 +363,23 @@ final class PostEditDiffTests: XCTestCase {
 
     func testSentinelFirstWordDeletedForeignTokenBefore() throws {
         let field = "MARKERPRE the robot to water it twice"
-        try assertNoLeak(field: field, carets: [nil, field.utf16.count, field.utf16.count - 1], leaks: ["MARKERPRE"])
+        try assertNoLeak(pasteField: "MARKERPRE Ask the robot to water it twice", field: field, carets: [nil, field.utf16.count, field.utf16.count - 1], leaks: ["MARKERPRE"])
     }
 
     func testSentinelLastWordDeletedForeignTokensAfter() throws {
         let field = "Ask the robot to water it MARKERPOST more stuff"
         let afterIt = (field as NSString).range(of: "it").upperBound
-        try assertNoLeak(field: field, carets: [nil, field.utf16.count, afterIt], leaks: ["MARKERPOST", "more", "stuff"])
+        try assertNoLeak(pasteField: "Ask the robot to water it twice MARKERPOST more stuff", field: field, carets: [nil, field.utf16.count, afterIt], leaks: ["MARKERPOST", "more", "stuff"])
     }
 
     func testSentinelBothBoundariesDeleted() throws {
         let field = "MARKERPRE the robot to water it MARKERPOST"
-        try assertNoLeak(field: field, carets: [nil, field.utf16.count], leaks: ["MARKERPRE", "MARKERPOST"])
+        try assertNoLeak(pasteField: "MARKERPRE Ask the robot to water it twice MARKERPOST", field: field, carets: [nil, field.utf16.count], leaks: ["MARKERPRE", "MARKERPOST"])
     }
 
     func testSentinelSpanDeletedSimilarSentenceElsewhere() throws {
         let field = "intro words MARKERA the robot to water plants twice MARKERB outro words"
-        try assertNoLeak(field: field, carets: [nil, field.utf16.count], leaks: ["MARKERA", "MARKERB", "intro", "outro"])
+        try assertNoLeak(pasteField: "intro words Ask the robot to water it twice outro words", field: field, carets: [nil, field.utf16.count], leaks: ["MARKERA", "MARKERB", "intro", "outro"])
     }
 
     func testPrivacySentinelFieldTextOutsideTheSpanNeverReachesTheRecord() throws {
@@ -327,7 +387,7 @@ final class PostEditDiffTests: XCTestCase {
         let tokens = toks(field)
         let range = try XCTUnwrap(PostEditDiff.relocate(pasted: sentence, fieldTokens: tokens, caretUTF16: nil))
         let d = PostEditDiff.diff(pasted: sentence, current: tokens[range].map(\.text))
-        var s = PostEditDiff.Session(pasted: sentence)
+        var s = makeSession(pasteField: "ZEBRAQUARTZ said hello. Ask the robot to water it twice")
         _ = s.ingest(.read(tokens: tokens, caretUTF16: nil, stillFocused: true), elapsedMs: 500)
         let line = String(decoding: try XCTUnwrap(PostEditDiff.encodeLine(finalizedRecord(s))), as: UTF8.self)
         XCTAssertEqual(d.changes, [swapChange()])
