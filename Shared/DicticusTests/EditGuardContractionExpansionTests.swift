@@ -99,6 +99,7 @@ final class EditGuardContractionExpansionTests: XCTestCase {
         static let commaBeforeHost = Pair("en", "Maybe it's ready for the glaze.", "Maybe, it is ready for the glaze.")
         static let commaAfterVerb = Pair("en", "Maybe it's ready for the glaze.", "Maybe it is, ready for the glaze.")
         static let german = Pair("de", "Sag mal wie geht's dem Ton heute Morgen.", "Sag mal wie geht es dem Ton heute Morgen.")
+        static let capitalizedExpansionWord = Pair("en", "The studio says we don't need the kiln today.", "The studio says we do Not need the kiln today.")
     }
 
     // MARK: - Helpers
@@ -291,6 +292,15 @@ final class EditGuardContractionExpansionTests: XCTestCase {
     func testGermanStaysRejected() {
         let r = run(Fx.german)
         XCTAssertEqual(r.text, Fx.german.baseline)
+        XCTAssertTrue(expansionLines(r).isEmpty, "\(r.edits)")
+    }
+
+    /// Quick task 261003-gp8 (M7): the inserted expansion word must be lowercase. "do Not" mid-sentence was accepted and
+    /// shipped a stray capital.
+    func testCapitalizedExpansionWordStaysRejected_RED() {
+        let r = run(Fx.capitalizedExpansionWord)
+        XCTAssertEqual(r.text, Fx.capitalizedExpansionWord.baseline)
+        XCTAssertFalse(r.text.contains("do Not"))
         XCTAssertTrue(expansionLines(r).isEmpty, "\(r.edits)")
     }
 }
