@@ -487,6 +487,10 @@ class HotkeyManager: ObservableObject {
         // hold is honoured, while a switch during the ASR/LLM wait (the window that actually
         // matters for delivery) is caught. Consumed by TextInjector's delivery pre-check below.
         let releaseFrontmostBundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        #if DEBUG_RECORDER
+        // 261003-jvq: pid of the paste target, captured with the release-time bundle id.
+        let postEditTargetPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        #endif
 
         // Task inherits @MainActor isolation from the enclosing @MainActor class,
         // so self.textInjector access is safe without crossing isolation boundaries.
@@ -529,6 +533,18 @@ class HotkeyManager: ObservableObject {
                 // Phase 50 D-02: Inject final processed text into the active app; consume the
                 // outcome instead of discarding it (was: Bool result thrown away, HotkeyManager:438).
                 let outcome = await self.textInjector.injectText(finalOutput, expectedFrontmostBundleID: releaseFrontmostBundleID)
+                #if DEBUG_RECORDER
+                // 261003-jvq: observe post-paste edits; unstructured, never awaited by this dictation Task.
+                if outcome == .delivered {
+                    let pasteDate = Date()
+                    let secureInput = PasteProbe.secureInputEnabled()
+                    Task {
+                        await PostEditProbe.shared.arm(
+                            pasted: finalOutput, mode: mode.rawValue, pid: postEditTargetPID,
+                            bundleID: releaseFrontmostBundleID, secureInputEnabled: secureInput, pasteDate: pasteDate)
+                    }
+                }
+                #endif
                 if let notification = Self.notification(for: outcome) {
                     self.lastPostedNotification = notification
                     NotificationService.shared.post(notification)
