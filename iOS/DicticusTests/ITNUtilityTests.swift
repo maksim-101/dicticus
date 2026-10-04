@@ -540,12 +540,12 @@ final class ITNUtilitySpokenPunctuationTests: XCTestCase {
 
     // MARK: - German seeds
 
-    func testBindestrich_collapses() {
-        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "Bindestrich"), "-")
+    func testBindestrich_aloneStaysWord_RED() {
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "Bindestrich"), "Bindestrich")
     }
 
-    func testSchrägstrich_collapses() {
-        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "Schrägstrich"), "/")
+    func testSchrägstrich_aloneStaysWord_RED() {
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "Schrägstrich"), "Schrägstrich")
     }
 
     func testUnterstrich_collapses() {
@@ -731,6 +731,72 @@ final class ITNUtilitySpokenPunctuationTests: XCTestCase {
         XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "on slash off"), "on/off")
         XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "his slash her"), "his/her")
         XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "to hyphen do list"), "to-do list")
+    }
+
+    func testConnector_atTextStart_staysWord_RED() {
+        XCTAssertEqual(
+            ITNUtility.collapseSpokenPunctuation(to: "Hyphen marks join compound words"),
+            "Hyphen marks join compound words"
+        )
+        XCTAssertEqual(
+            ITNUtility.collapseSpokenPunctuation(to: "Underscore characters separate tokens here"),
+            "Underscore characters separate tokens here"
+        )
+        XCTAssertEqual(
+            ITNUtility.collapseSpokenPunctuation(to: "Schrägstrich trennt die Pfadteile"),
+            "Schrägstrich trennt die Pfadteile"
+        )
+    }
+
+    func testConnector_atTextEnd_staysWord_RED() {
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "he typed in backslash"), "he typed in backslash")
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "the key marked with hyphen"), "the key marked with hyphen")
+        XCTAssertEqual(
+            ITNUtility.collapseSpokenPunctuation(to: "Der Lehrer buchstabiert Bindestrich"),
+            "Der Lehrer buchstabiert Bindestrich"
+        )
+    }
+
+    func testConnector_afterComma_staysWord_RED() {
+        XCTAssertEqual(
+            ITNUtility.collapseSpokenPunctuation(to: "after apples, hyphen bananas ripen"),
+            "after apples, hyphen bananas ripen"
+        )
+        XCTAssertEqual(
+            ITNUtility.collapseSpokenPunctuation(to: "Äpfel, Bindestrich Birnen reifen"),
+            "Äpfel, Bindestrich Birnen reifen"
+        )
+    }
+
+    func testConnector_afterSentenceEnd_staysWord_RED() {
+        XCTAssertEqual(
+            ITNUtility.collapseSpokenPunctuation(to: "Apples ripen. Slash bananas wait"),
+            "Apples ripen. Slash bananas wait"
+        )
+    }
+
+    func testConnector_beforeBracket_staysWord_RED() {
+        XCTAssertEqual(
+            ITNUtility.collapseSpokenPunctuation(to: "pear hyphen (plum) tree"),
+            "pear hyphen (plum) tree"
+        )
+    }
+
+    func testConnector_afterColon_staysWord_RED() {
+        XCTAssertEqual(
+            ITNUtility.collapseSpokenPunctuation(to: "Note: underscore leads the name"),
+            "Note: underscore leads the name"
+        )
+    }
+
+    func testConnector_boundaryNets_stillMerge() {
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "src slash main slash app"), "src/main/app")
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "open (src slash main) now"), "open (src/main) now")
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "step hyphen 2."), "step-2.")
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "tilde slash home"), "~/home")
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "a two hyphen hour meeting"), "a two-hour meeting")
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "foo Bindestrich bar"), "foo-bar")
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "src Schrägstrich main"), "src/main")
     }
 
     func testConnector_articleTwoWordsBefore_stillMerges() {
