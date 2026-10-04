@@ -3,7 +3,7 @@ import SwiftUI
 struct SpokenPunctuationReferenceView: View {
     var body: some View {
         List {
-            Section("Always") {
+            Section {
                 LabeledContent("hyphen / Bindestrich", value: "-")
                 LabeledContent("slash / Schrägstrich", value: "/")
                 LabeledContent("backslash", value: "\\")
@@ -13,6 +13,10 @@ struct SpokenPunctuationReferenceView: View {
                 LabeledContent("hash / Raute", value: "#")
                 LabeledContent("caret", value: "^")
                 LabeledContent("tilde", value: "~")
+            } header: {
+                Text("Always")
+            } footer: {
+                Text("Hyphen, slash, backslash and underscore stay words after \"a\", \"the\", \"this\", \"that\" or \"use\", or a German article, e.g. \"the hyphen key\" or \"der Bindestrich\".")
             }
 
             Section {

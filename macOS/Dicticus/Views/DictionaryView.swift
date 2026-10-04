@@ -295,6 +295,11 @@ struct DictionaryView: View {
                     }
                     .font(.system(size: 12))
 
+                    Text("Hyphen, slash, backslash and underscore stay words after \"a\", \"the\", \"this\", \"that\" or \"use\", or a German article, e.g. \"the hyphen key\" or \"der Bindestrich\".")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
                     Text("Between identifier words")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.secondary)
