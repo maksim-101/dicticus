@@ -16,7 +16,7 @@ struct SpokenPunctuationReferenceView: View {
             } header: {
                 Text("Always")
             } footer: {
-                Text("Hyphen, slash, backslash and underscore stay words after \"a\", \"the\", \"this\", \"that\" or \"use\", or a German article, e.g. \"the hyphen key\" or \"der Bindestrich\".")
+                Text("Hyphen, slash, backslash and underscore become a symbol only between two words, e.g. \"file hyphen name\". They stay words at the start or end of a dictation, next to a comma or other punctuation, and after \"a\", \"the\", \"this\", \"that\" or \"use\" or a German article, e.g. \"the hyphen key\" or \"der Bindestrich\".")
             }
 
             Section {
