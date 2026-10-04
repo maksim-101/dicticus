@@ -714,13 +714,16 @@ struct ITNUtility {
                 continue
             }
 
-            // A connector word after an article, demonstrative or "use" is a noun, not a symbol.
-            if connectorPunctuation[lower] != nil,
-               let previous = result.last,
-               connectorMentionMarkers.contains(stripTrailingPunctuation(previous).lowercased()) {
-                result.append(tokens[i])
-                i += 1
-                continue
+            // A connector word after an article, demonstrative or "use", or next to a function word, is a word, not a symbol.
+            if connectorPunctuation[lower] != nil {
+                let leftKey = result.last.map { stripTrailingPunctuation($0).lowercased() }
+                let rightKey = i + 1 < tokens.count ? stripTrailingPunctuation(tokens[i + 1]).lowercased() : nil
+                if leftKey.map({ connectorMentionMarkers.contains($0) || connectorFunctionWords.contains($0) }) == true
+                    || rightKey.map({ connectorFunctionWords.contains($0) }) == true {
+                    result.append(tokens[i])
+                    i += 1
+                    continue
+                }
             }
 
             // A connector becomes a symbol only between two words; otherwise it stays the spoken word.
@@ -873,6 +876,37 @@ struct ITNUtility {
         "a", "an", "the", "this", "that", "these", "those", "use",
         "der", "die", "das", "den", "dem", "des", "ein", "eine", "einen", "einem", "einer", "eines",
         "dieser", "diese", "dieses", "diesen",
+    ]
+
+    // Closed-class words: pronouns, auxiliaries, modals, negation, articles, conjunctions, prepositions and common adverbs (EN, DE).
+    // Determiner-only possessives (my, your, mein-, unser-) and bin, dir, man, war, hat are left out on purpose. Separate from FunctionWords, whose EditGuard allowlists exclude pronouns and adverbs.
+    private static let connectorFunctionWords: Set<String> = [
+        "i", "me", "mine", "myself", "you", "yours", "yourself", "yourselves", "he", "him", "his",
+        "himself", "she", "her", "hers", "herself", "it", "itself", "we", "us", "ours", "ourselves",
+        "they", "them", "theirs", "themselves", "who", "whom", "whose", "which", "what",
+        "am", "is", "are", "was", "were", "be", "been", "being", "do", "does", "did", "have", "has",
+        "had", "will", "would", "shall", "should", "can", "could", "may", "might", "must", "not", "no",
+        "never",
+        "a", "an", "the", "this", "that", "these", "those", "and", "or", "but", "nor", "so", "yet",
+        "because", "if", "when", "while", "although", "though", "unless", "since", "than", "whether",
+        "as", "in", "on", "at", "to", "of", "for", "with", "from", "by", "about", "into", "onto",
+        "over", "under", "through", "between", "after", "before", "during", "without", "within",
+        "against", "among", "around", "across", "behind", "toward", "towards", "upon", "via", "per",
+        "off", "out", "up", "down", "like", "also", "too", "just", "still", "even", "only", "then",
+        "now", "already", "again", "here", "there",
+        "ich", "mich", "mir", "du", "dich", "er", "ihn", "ihm", "sie", "es", "wir", "uns", "ihr",
+        "euch", "ihnen", "sich", "sein",
+        "bist", "ist", "sind", "seid", "waren", "wird", "werden", "wurde", "wurden", "habe", "hast",
+        "haben", "hatte", "hatten", "kann", "kannst", "können", "könnte", "muss", "musst", "müssen",
+        "soll", "sollst", "sollen", "sollte", "willst", "wollen", "darf", "dürfen", "mag", "möchte",
+        "nicht",
+        "und", "oder", "aber", "sondern", "denn", "dass", "weil", "wenn", "ob", "als", "wie",
+        "während", "obwohl", "damit", "auf", "aus", "bei", "mit", "nach", "von", "zu", "für", "über",
+        "unter", "vor", "durch", "um", "gegen", "ohne", "bis", "seit", "zwischen", "im", "zum", "zur",
+        "ins", "ans", "beim", "vom", "der", "die", "das", "den", "dem", "des", "ein", "eine", "einen",
+        "einem", "einer", "eines", "dieser", "diese", "dieses", "diesen", "kein", "keine", "keinen",
+        "keinem", "keiner", "auch", "noch", "nur", "schon", "doch", "ja", "mal", "dann", "jetzt",
+        "hier", "da", "sehr",
     ]
 
     // Standalone tokens replace themselves with a symbol, preserving surrounding spaces
