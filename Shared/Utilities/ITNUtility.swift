@@ -320,7 +320,7 @@ struct ITNUtility {
     /// Operates before ITN so spaced single/short uppercase letter runs become a
     /// single token. Spoken letter names inside a run resolve to their letter.
     static func collapseAcronymRun(to text: String) -> String {
-        let tokens = text.components(separatedBy: .whitespacesAndNewlines)
+        let tokens = text.components(separatedBy: .whitespacesAndNewlines).map(joinHyphenSpelledLetters)
         var resultTokens: [String] = []
         var i = 0
 
@@ -368,6 +368,16 @@ struct ITNUtility {
             }
         }
         return String(token[token.startIndex..<end])
+    }
+
+    /// "Q-X-T." -> "QXT.": three or more single capital letters joined by single hyphens.
+    private static func joinHyphenSpelledLetters(_ token: String) -> String {
+        let core = stripTrailingPunctuation(token)
+        let pieces = core.split(separator: "-", omittingEmptySubsequences: false)
+        guard pieces.count >= 3,
+              pieces.allSatisfy({ $0.count == 1 && $0.first!.isLetter && $0.first!.isUppercase })
+        else { return token }
+        return pieces.joined() + token.dropFirst(core.count)
     }
 
     private static func isAcronymFragment(_ token: String) -> Bool {
@@ -700,6 +710,15 @@ struct ITNUtility {
                 continue
             }
 
+            // A connector word after an article, demonstrative or "use" is a noun, not a symbol.
+            if connectorPunctuation[lower] != nil,
+               let previous = result.last,
+               connectorMentionMarkers.contains(stripTrailingPunctuation(previous).lowercased()) {
+                result.append(tokens[i])
+                i += 1
+                continue
+            }
+
             // Unambiguous connector: merges with left and right neighbors (hyphen, slash, backslash, underscore)
             if let symbol = connectorPunctuation[lower], i > 0, i < tokens.count - 1 {
                 let left = result.removeLast()
@@ -845,6 +864,12 @@ struct ITNUtility {
         "bindestrich": "-",
         "schrägstrich": "/",
         "unterstrich": "_",
+    ]
+
+    private static let connectorMentionMarkers: Set<String> = [
+        "a", "an", "the", "this", "that", "these", "those", "use",
+        "der", "die", "das", "den", "dem", "des", "ein", "eine", "einen", "einem", "einer", "eines",
+        "dieser", "diese", "dieses", "diesen",
     ]
 
     // Standalone tokens replace themselves with a symbol, preserving surrounding spaces
