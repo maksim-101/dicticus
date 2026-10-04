@@ -700,6 +700,15 @@ struct ITNUtility {
                 continue
             }
 
+            // A connector word after an article, demonstrative or "use" is a noun, not a symbol.
+            if connectorPunctuation[lower] != nil,
+               let previous = result.last,
+               connectorMentionMarkers.contains(stripTrailingPunctuation(previous).lowercased()) {
+                result.append(tokens[i])
+                i += 1
+                continue
+            }
+
             // Unambiguous connector: merges with left and right neighbors (hyphen, slash, backslash, underscore)
             if let symbol = connectorPunctuation[lower], i > 0, i < tokens.count - 1 {
                 let left = result.removeLast()
@@ -845,6 +854,12 @@ struct ITNUtility {
         "bindestrich": "-",
         "schrägstrich": "/",
         "unterstrich": "_",
+    ]
+
+    private static let connectorMentionMarkers: Set<String> = [
+        "a", "an", "the", "this", "that", "these", "those", "use",
+        "der", "die", "das", "den", "dem", "des", "ein", "eine", "einen", "einem", "einer", "eines",
+        "dieser", "diese", "dieses", "diesen",
     ]
 
     // Standalone tokens replace themselves with a symbol, preserving surrounding spaces
