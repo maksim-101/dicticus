@@ -459,6 +459,37 @@ final class ITNUtilityAcronymCollapseTests: XCTestCase {
     func testZee_standalone_notSubstituted() {
         XCTAssertEqual(ITNUtility.collapseAcronymRun(to: "on zee street"), "on zee street")
     }
+
+    // MARK: - Quick 261004-9sv: capital letters spelled with hyphens
+
+    func testHyphenSpelledLetters_midSentence_joins_RED() {
+        XCTAssertEqual(ITNUtility.collapseAcronymRun(to: "The code is Q-X-T today"), "The code is QXT today")
+    }
+
+    func testHyphenSpelledLetters_fourLetters_trailingPeriod_joins_RED() {
+        XCTAssertEqual(ITNUtility.collapseAcronymRun(to: "Spell it J-V-W-P."), "Spell it JVWP.")
+    }
+
+    func testHyphenSpelledLetters_trailingComma_reattaches_RED() {
+        XCTAssertEqual(ITNUtility.collapseAcronymRun(to: "It was Q-X-T, honestly"), "It was QXT, honestly")
+    }
+
+    func testHyphenSpelledLetters_negatives_unchanged() {
+        for sentence in [
+            "Send an E-Mail today",
+            "Wear a T-Shirt tomorrow",
+            "Take the U-Bahn home",
+            "Read the X-Ray report",
+            "Compare A-B directly",
+            "Use A-1 for now",
+            "Try a-b-c first",
+            "Mixed Q-x-T stays",
+            "The A-B-C-Analyse is long",
+            "Buy a S-Bahn-Ticket",
+        ] {
+            XCTAssertEqual(ITNUtility.collapseAcronymRun(to: sentence), sentence)
+        }
+    }
 }
 
 // MARK: - Phase 32 PUNCT-01/PUNCT-02: Spoken punctuation collapse tests
