@@ -357,11 +357,15 @@ struct ITNUtility {
         return resultTokens.joined(separator: " ")
     }
 
+    private static func isPunctuationCharacter(_ character: Character) -> Bool {
+        character.unicodeScalars.allSatisfy { CharacterSet.punctuationCharacters.contains($0) }
+    }
+
     private static func stripTrailingPunctuation(_ token: String) -> String {
         var end = token.endIndex
         while end > token.startIndex {
             let prev = token.index(before: end)
-            if token[prev].unicodeScalars.allSatisfy({ CharacterSet.punctuationCharacters.contains($0) }) {
+            if isPunctuationCharacter(token[prev]) {
                 end = prev
             } else {
                 break
@@ -719,19 +723,18 @@ struct ITNUtility {
                 continue
             }
 
-            // Unambiguous connector: merges with left and right neighbors (hyphen, slash, backslash, underscore)
-            if let symbol = connectorPunctuation[lower], i > 0, i < tokens.count - 1 {
-                let left = result.removeLast()
-                let right = tokens[i + 1]
-                result.append("\(left)\(symbol)\(right)")
-                i += 2
-                continue
-            }
-
-            // Unambiguous connector at edge (no both-side neighbors): emit standalone symbol
+            // A connector becomes a symbol only between two words; otherwise it stays the spoken word.
             if let symbol = connectorPunctuation[lower] {
-                result.append(symbol)
-                i += 1
+                guard let left = result.last, let leftEnd = left.last, !isPunctuationCharacter(leftEnd),
+                      i + 1 < tokens.count, let rightStart = tokens[i + 1].first, !isPunctuationCharacter(rightStart)
+                else {
+                    result.append(tokens[i])
+                    i += 1
+                    continue
+                }
+                result.removeLast()
+                result.append("\(left)\(symbol)\(tokens[i + 1])")
+                i += 2
                 continue
             }
 
