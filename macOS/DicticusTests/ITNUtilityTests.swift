@@ -634,6 +634,80 @@ final class ITNUtilitySpokenPunctuationTests: XCTestCase {
     func testPipe_neverCollapses() {
         XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "cat pipe grep"), "cat pipe grep")
     }
+
+    // MARK: - Quick 261004-9sv: a connector word after an article, demonstrative or "use" is a noun
+
+    func testConnector_afterEnglishArticle_staysWord_RED() {
+        XCTAssertEqual(
+            ITNUtility.collapseSpokenPunctuation(to: "Please move the hyphen key to the left"),
+            "Please move the hyphen key to the left"
+        )
+        XCTAssertEqual(
+            ITNUtility.collapseSpokenPunctuation(to: "Insert a slash before the filename"),
+            "Insert a slash before the filename"
+        )
+        XCTAssertEqual(
+            ITNUtility.collapseSpokenPunctuation(to: "An underscore looks odd here"),
+            "An underscore looks odd here"
+        )
+    }
+
+    func testConnector_afterDemonstrative_staysWord_RED() {
+        XCTAssertEqual(
+            ITNUtility.collapseSpokenPunctuation(to: "I dislike this backslash character"),
+            "I dislike this backslash character"
+        )
+        XCTAssertEqual(
+            ITNUtility.collapseSpokenPunctuation(to: "Those slash keys are worn"),
+            "Those slash keys are worn"
+        )
+    }
+
+    func testConnector_afterUse_staysWord_RED() {
+        XCTAssertEqual(
+            ITNUtility.collapseSpokenPunctuation(to: "we should use slash commands sparingly"),
+            "we should use slash commands sparingly"
+        )
+    }
+
+    func testConnector_afterGermanArticle_staysWord_RED() {
+        XCTAssertEqual(
+            ITNUtility.collapseSpokenPunctuation(to: "Ich suche ein Bindestrich Zeichen"),
+            "Ich suche ein Bindestrich Zeichen"
+        )
+        XCTAssertEqual(
+            ITNUtility.collapseSpokenPunctuation(to: "Der Schrägstrich fehlt hier"),
+            "Der Schrägstrich fehlt hier"
+        )
+        XCTAssertEqual(
+            ITNUtility.collapseSpokenPunctuation(to: "Er tippt den Unterstrich zweimal"),
+            "Er tippt den Unterstrich zweimal"
+        )
+    }
+
+    func testConnector_afterArticle_atEndOfText_staysWord_RED() {
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "that was a hyphen"), "that was a hyphen")
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "Das war ein Bindestrich"), "Das war ein Bindestrich")
+    }
+
+    func testConnector_regressionNets_stillMerge() {
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "file hyphen name"), "file-name")
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "src slash main"), "src/main")
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "snake underscore case"), "snake_case")
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "phase hyphen 5"), "phase-5")
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "in hyphen house"), "in-house")
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "and slash or"), "and/or")
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "on slash off"), "on/off")
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "his slash her"), "his/her")
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "to hyphen do list"), "to-do list")
+    }
+
+    func testConnector_articleTwoWordsBefore_stillMerges() {
+        XCTAssertEqual(
+            ITNUtility.collapseSpokenPunctuation(to: "check the build slash test step"),
+            "check the build/test step"
+        )
+    }
 }
 
 // MARK: - Phase 32 PUNCT-02 extension: identifier–number collapse (post-ITN model names)
