@@ -726,11 +726,6 @@ final class ITNUtilitySpokenPunctuationTests: XCTestCase {
         XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "src slash main"), "src/main")
         XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "snake underscore case"), "snake_case")
         XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "phase hyphen 5"), "phase-5")
-        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "in hyphen house"), "in-house")
-        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "and slash or"), "and/or")
-        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "on slash off"), "on/off")
-        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "his slash her"), "his/her")
-        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "to hyphen do list"), "to-do list")
     }
 
     func testConnector_atTextStart_staysWord_RED() {
@@ -804,6 +799,51 @@ final class ITNUtilitySpokenPunctuationTests: XCTestCase {
             ITNUtility.collapseSpokenPunctuation(to: "check the build slash test step"),
             "check the build/test step"
         )
+    }
+
+    // MARK: - Quick 261004-h09: a connector next to a function word stays a word
+
+    private func assertStaysWord(_ text: String, file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: text), text, file: file, line: line)
+    }
+
+    func testConnector_nextToEnglishFunctionWord_staysWord_RED() {
+        assertStaysWord("we also hyphen label the boxes")
+        assertStaysWord("they just slash split the pile")
+        assertStaysWord("I hyphen sized the font")
+        assertStaysWord("paths backslash is rarely typed")
+        assertStaysWord("report slash should help")
+        assertStaysWord("kernel hyphen it works")
+        assertStaysWord("wheels slash they spin")
+        assertStaysWord("with hyphen drawn lines")
+        assertStaysWord("via slash commands run")
+        assertStaysWord("tea hyphen and coffee")
+        assertStaysWord("milk slash or cream")
+    }
+
+    func testConnector_nextToGermanFunctionWord_staysWord_RED() {
+        assertStaysWord("Sie tippt auch Bindestrich Zeichen")
+        assertStaysWord("Er tippt noch Schrägstrich Zeichen")
+        assertStaysWord("Pfad Schrägstrich ist leer")
+        assertStaysWord("Ordner Unterstrich wir lesen sie")
+        assertStaysWord("Dateien Bindestrich ist ordentlich")
+    }
+
+    func testConnector_functionWordCompounds_stayWords_RED() {
+        assertStaysWord("in hyphen house")
+        assertStaysWord("and slash or")
+        assertStaysWord("on slash off")
+        assertStaysWord("his slash her")
+        assertStaysWord("to hyphen do list")
+    }
+
+    func testConnector_functionWordNets_stillMerge() {
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "open my hyphen garden folder"), "open my-garden folder")
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "öffne mein Unterstrich Ordner"), "öffne mein_Ordner")
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "usr slash bin slash tool"), "usr/bin/tool")
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "home slash dir slash notes"), "home/dir/notes")
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "man hyphen page"), "man-page")
+        XCTAssertEqual(ITNUtility.collapseSpokenPunctuation(to: "we build hyphen time checks"), "we build-time checks")
     }
 }
 
