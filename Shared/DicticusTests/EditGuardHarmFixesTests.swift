@@ -22,7 +22,8 @@ import XCTest
 /// set), MF2 (drop the `applySeamMarkCoupling` call), MF2r (drop its recase
 /// flip), MF3 (drop the quote clause of the survivors filter), MF3b (drop the
 /// even-count check), MF5 (drop the
-/// `dictProtectedCasing` arm), MNWRa (drop the `isListedWord` conjunct),
+/// `dictProtectedCasing` arm), MF5a (reject first-letter capitals too), MF5b (let the
+/// rejection trigger atomic-group coupling), MNWRa (drop the `isListedWord` conjunct),
 /// MNWRb (make `PlatformSpellLexicon.isListedWord` return false).
 ///
 /// Every fixture is an invented sentence about a bicycle repair workshop.
@@ -158,10 +159,31 @@ final class EditGuardHarmFixesTests: XCTestCase {
         XCTAssertTrue(hasReject(r, "dictProtectedCasing"), "\(r.edits)")
     }
 
-    func testF5_dictionaryTermCapitalisedMidSentenceReverted_RED() {
+    /// 261008-gb4 follow-up: a plain first-letter capital of the dictionary
+    /// spelling is not rejected (a German noun, a sentence start). Mutation MF5a.
+    func testF5_dictionaryTermFirstLetterCapitalAccepted_RED() {
+        let llm = "We cleaned the chain with Zorbex before the ride today."
+        let r = run("en", "We cleaned the chain with zorbex before the ride today.", llm, dictProtected: ["zorbex"])
+        XCTAssertEqual(r.text, llm)
+        XCTAssertFalse(hasReject(r, "dictProtectedCasing"), "\(r.edits)")
+    }
+
+    func testF5_dictionaryTermMixedCaseReverted() {
         let baseline = "We cleaned the chain with zorbex before the ride today."
-        let r = run("en", baseline, "We cleaned the chain with Zorbex before the ride today.", dictProtected: ["zorbex"])
+        let r = run("en", baseline, "We cleaned the chain with ZorBex before the ride today.", dictProtected: ["zorbex"])
         XCTAssertEqual(r.text, baseline)
+        XCTAssertTrue(hasReject(r, "dictProtectedCasing"), "\(r.edits)")
+    }
+
+    /// 261008-gb4 follow-up: the casing rejection reverts only the casing
+    /// token; the article inserted beside it, within one edit cluster,
+    /// still ships. Mutation MF5b.
+    func testF5_dictCasingRejectionKeepsAdjacentInsert_RED() {
+        let r = run(
+            "en", "Next regarding zorbex lubricant the shop keeps two spare tins.",
+            "Next, regarding the ZORBEX lubricant, the shop keeps two spare tins.", dictProtected: ["zorbex"])
+        XCTAssertEqual(r.text, "Next, regarding the zorbex lubricant, the shop keeps two spare tins.")
+        XCTAssertTrue(hasReject(r, "dictProtectedCasing"), "\(r.edits)")
     }
 
     /// The new class is not a sentence-revert trigger: the comma ships.
