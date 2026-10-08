@@ -37,10 +37,16 @@ public protocol SpellLexicon: Sendable {
     /// `candidate` among its guesses, and lists `candidate` itself. Callers
     /// apply their own string guards first.
     func isCompoundAcceptedRepair(source: String, candidate: String, language: String) -> Bool
+
+    /// Quick task 261008-gb4: true iff `text` is listed in the bundled EN+DE
+    /// frequency lexicon, whatever the language. Used only to keep
+    /// `nonWordRepair` off real words the platform checker lacks.
+    func isListedWord(_ text: String, language: String) -> Bool
 }
 
 public extension SpellLexicon {
     func isCompoundAcceptedRepair(source: String, candidate: String, language: String) -> Bool { false }
+    func isListedWord(_ text: String, language: String) -> Bool { false }
 }
 
 /// The production implementation: `NSSpellChecker` (macOS) / `UITextChecker`
@@ -152,6 +158,17 @@ public final class PlatformSpellLexicon: SpellLexicon, @unchecked Sendable {
         cache[key] = result
         lock.unlock()
         return result
+    }
+
+    /// Quick task 261008-gb4: membership in the one resident bundled EN+DE set
+    /// (`BrandMatcher.shared.combinedLexicon`, NFC-lowercased), language
+    /// agnostic. The set lives on the main actor; off the main thread this
+    /// returns `true`, which fails closed: no repair is attempted.
+    public func isListedWord(_ text: String, language: String) -> Bool {
+        guard Thread.isMainThread else { return true }
+        return MainActor.assumeIsolated {
+            BrandMatcher.shared.combinedLexicon.contains(text.lowercased().precomposedStringWithCanonicalMapping)
+        }
     }
 
     /// Follow-up (260723-sx1, R6 compound-constituent closure): a
