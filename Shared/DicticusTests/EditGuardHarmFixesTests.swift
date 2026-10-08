@@ -99,6 +99,10 @@ final class EditGuardHarmFixesTests: XCTestCase {
             "Replace the spoke on wheel 4, next oil the chain; then adjust the saddle.")
         XCTAssertEqual(r.text, "Replace the spoke on wheel 4. Next oil the chain; then adjust the saddle.")
         XCTAssertTrue(hasReject(r, "punctuationSeamCoupling"), "\(r.edits)")
+        // `applyAtomicGroupCoupling` would revert the recase anyway; the flip keeps its attribution (MF2r).
+        XCTAssertTrue(
+            r.edits.contains { $0.from == "Next" && $0.to == "next" && $0.rejectClass == "punctuationSeamCoupling" },
+            "\(r.edits)")
     }
 
     func testF2_rejectedPeriodMoveKeepsSeamComma_RED() {
@@ -108,6 +112,9 @@ final class EditGuardHarmFixesTests: XCTestCase {
             "The frame was clean. A brief test lap followed and the brake held fine for everyone today")
         XCTAssertEqual(r.text, "The frame was clean, a brief test lap followed and the brake held fine for everyone today.")
         XCTAssertTrue(hasReject(r, "punctuationSeamCoupling"), "\(r.edits)")
+        XCTAssertTrue(
+            r.edits.contains { $0.from == "a" && $0.to == "A" && $0.rejectClass == "punctuationSeamCoupling" },
+            "\(r.edits)")
     }
 
     func testF2_plainPeriodToCommaSubstituteUnchanged() {

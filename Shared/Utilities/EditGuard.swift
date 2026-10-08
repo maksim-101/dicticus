@@ -1050,7 +1050,9 @@ public enum EditGuard {
     /// deleted mark is gone and the delete stands alone. The delete is then
     /// rejected (`punctuationSeamCoupling`), and so is the casing-only
     /// substitute of the word after it, so the dictated mark and the casing
-    /// after it come back together.
+    /// after it come back together. (`applyAtomicGroupCoupling` would revert
+    /// that substitute anyway, as it shares a cluster with the delete; the
+    /// flip keeps the log attribution on `punctuationSeamCoupling`.)
     ///
     /// Why at classify time: `applyPunctuationMoveExemption` requires the two
     /// neighbour edits of an accepted move to be adjacent (`inx == ip + 1`),
