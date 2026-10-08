@@ -3935,17 +3935,55 @@ public enum EditGuard {
         moodMarks.contains(from) != moodMarks.contains(to)
     }
 
-    private static func firstWordToken(_ tokens: [Token], sentenceIndex: Int) -> Token? {
-        tokens.first { $0.sentenceIndex == sentenceIndex && $0.kind == .word }
+    /// Quick task 261008-gb4 (F1): the closed set of interjections the mood
+    /// lock reads past. A baseline sentence that opens with one of these and a
+    /// comma (`Ja, wir müssen ...`) is compared by the first word AFTER the
+    /// comma; without the comma there is no skip (`So if ...` keeps `So`).
+    private static let moodLockLeadingInterjections: Set<String> = [
+        "ja", "nein", "okay", "ok", "also", "gut", "so", "yes", "no", "well"
+    ]
+
+    /// The baseline word the mood lock compares for `sentenceIndex`: the
+    /// sentence's first word, or, behind a leading interjection plus comma,
+    /// the first word after that comma together with the skipped interjection.
+    private static func moodLockBaselineFirst(
+        _ baseline: [Token], sentenceIndex: Int
+    ) -> (word: Token, skippedInterjection: String?)? {
+        guard let firstIndex = baseline.firstIndex(where: { $0.sentenceIndex == sentenceIndex && $0.kind == .word }) else { return nil }
+        let first = baseline[firstIndex]
+        let commaIndex = firstIndex + 1
+        if moodLockLeadingInterjections.contains(first.normalized),
+           baseline.indices.contains(commaIndex),
+           baseline[commaIndex].sentenceIndex == sentenceIndex,
+           baseline[commaIndex].kind == .punctuation, baseline[commaIndex].text == ",",
+           let after = baseline[(commaIndex + 1)...].first(where: { $0.sentenceIndex == sentenceIndex && $0.kind == .word }) {
+            return (after, first.normalized)
+        }
+        return (first, nil)
     }
 
-    private static func firstWordToken(_ tokens: [WorkToken], sentenceIndex: Int) -> WorkToken? {
-        tokens.first { $0.sentenceIndex == sentenceIndex && $0.kind == .word }
+    /// The index in the rebuilt stream the mood lock compares for
+    /// `sentenceIndex`. When the baseline skipped an interjection and the
+    /// rebuilt sentence still opens with it, that word and a directly
+    /// following comma are skipped too (the LLM may have deleted the comma);
+    /// otherwise, and when nothing follows, the first word's index.
+    private static func moodLockRebuiltFirstIndex(
+        _ tokens: [WorkToken], sentenceIndex: Int, skippedInterjection: String?
+    ) -> Int? {
+        guard let first = tokens.firstIndex(where: { $0.sentenceIndex == sentenceIndex && $0.kind == .word }) else { return nil }
+        guard let skipped = skippedInterjection, tokens[first].normalized == skipped else { return first }
+        var next = first + 1
+        if tokens.indices.contains(next), tokens[next].sentenceIndex == sentenceIndex,
+           tokens[next].kind == .punctuation, tokens[next].text == "," {
+            next += 1
+        }
+        guard next < tokens.count else { return first }
+        return tokens[next...].firstIndex(where: { $0.sentenceIndex == sentenceIndex && $0.kind == .word }) ?? first
     }
 
     /// Quick task 260825-q1w (D-C, landmine 5): the mood lock's `violates`
-    /// check compares `firstWordToken(baseline, sentenceIndex:)` against
-    /// `firstWordToken(tokens, sentenceIndex:)` BY SENTENCE INDEX. A
+    /// check compares `moodLockBaselineFirst(baseline, sentenceIndex:)` against
+    /// the rebuilt stream's `moodLockRebuiltFirstIndex` BY SENTENCE INDEX. A
     /// candidate-side sentence SPLIT shifts every later candidate sentence
     /// index by one, so the check can silently compare two DIFFERENT
     /// sentences — the root cause of the 2026-08-23 false positive
@@ -4041,12 +4079,19 @@ public enum EditGuard {
         // reorder corruptions.
         let sentenceIndices = Set(baseline.map(\.sentenceIndex)).union(candidate.map(\.sentenceIndex))
         for sentenceIndex in sentenceIndices.sorted() {
-            guard let baselineFirst = firstWordToken(baseline, sentenceIndex: sentenceIndex) else { continue }
+            // Quick task 261008-gb4 (F1): a baseline sentence opening with an
+            // interjection and a comma (`Ja, ...`) is compared by the word
+            // after the comma, so a fronted verb behind `Ja,` no longer
+            // slips past a lock that only saw `Ja`. The skip is keyed to the
+            // baseline; the rebuilt stream skips the same interjection (and
+            // its comma, if the LLM kept it). Residue: a baseline without
+            // the comma gets no skip.
+            guard let (baselineFirst, skippedInterjection) = moodLockBaselineFirst(baseline, sentenceIndex: sentenceIndex) else { continue }
             let baselineIsFiniteOrModal = FiniteVerbCues.isFiniteOrModal(baselineFirst.normalized, language: language)
             var moodLockFiredForSentence = false
 
             for attempt in 0..<2 {
-                guard let rebuiltIndex = tokens.firstIndex(where: { $0.sentenceIndex == sentenceIndex && $0.kind == .word }) else { break }
+                guard let rebuiltIndex = moodLockRebuiltFirstIndex(tokens, sentenceIndex: sentenceIndex, skippedInterjection: skippedInterjection) else { break }
                 let rebuiltFirst = tokens[rebuiltIndex]
                 let violates = FiniteVerbCues.isFiniteOrModal(rebuiltFirst.normalized, language: language) && !baselineIsFiniteOrModal
                 guard violates else { break }
