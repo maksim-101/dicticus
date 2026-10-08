@@ -443,6 +443,7 @@ final class BrandMatcher {
         }
 
         let tmeta = encode(token, language: language)
+        let vowelOnsetCode: Character = language.lowercased().hasPrefix("de") ? "0" : "A"
         var best: (canon: String, score: Double, jw: Double, dl: Int)? = nil
         for entry in canonEncoded {
             let na = tnorm
@@ -451,6 +452,31 @@ final class BrandMatcher {
             let jw = BrandStringMetrics.jaroWinkler(na, nb)
             let dl = BrandStringMetrics.damerauLevenshtein(na, nb)
             let phon = !tmeta.isEmpty && tmeta == entry.meta
+            // Quick task 261008-gb3, guard G1: a phonetic match at dl >= 3
+            // whose shared key begins with the encoders' vowel-onset code,
+            // while the two words begin with different letters, is a
+            // collision, not evidence. Double Metaphone gives one code ("A")
+            // to every initial vowel, to W+vowel and to Y, and Kölner Phonetik
+            // gives "0" to every initial vowel, so "WebUI" and "eBay" share
+            // AP and "YAML" and "email" share AML (de 065). Anchors: records
+            // #412/#461 (WebUI -> eBay) and #505/#507 (YAML -> email) in the
+            // 2026-10-08 audit. dl <= 2 never reaches this (the ortho channel
+            // and the phonOk bound handle it as before), and matches whose
+            // key starts on a consonant or whose first letters agree are
+            // untouched: Towry -> Tauri (TR), Tiktikus -> Dicticus, CLAWT ->
+            // Claude, versile -> Vercel, "Atacard home" -> AdGuardHome (key
+            // starts with A but both words start with "a") and ClotCode ->
+            // Claude Code all keep firing.
+            // Rejected alternatives: a blanket dl >= 3 ban loses seven logged
+            // correct repairs and the Towry control; blocking rescue-clause
+            // matches onto lexicon-word canonicals loses Towry too ("tauri"
+            // is in the bundled lexicon); a jw floor needs an arbitrary cut
+            // between 0.64 (Towry) and 0.683 (Tiktikus).
+            if dl > BrandMatcher.maxEditDistance, phon,
+               tmeta.first == vowelOnsetCode,
+               na.first != nb.first {
+                continue
+            }
             let orthoOk = jw >= BrandMatcher.jwThreshold && dl <= BrandMatcher.maxEditDistance
             // Defect A2 (260809-g7h): a phonetic key for a SHORT canonical
             // collides with far too much ordinary text — a 4-letter token
@@ -460,7 +486,8 @@ final class BrandMatcher {
             // — that bound is load-bearing for a real true positive
             // ("Towry" -> "Tauri", jw 0.64, dl 3 on a 5-char token). Leave
             // the orthographic channel untouched so short canonicals stay
-            // reachable by a genuine near-exact spelling.
+            // reachable by a genuine near-exact spelling. G1 (above) narrows
+            // this clause by onset, not by distance.
             let phonOk = phon && nb.count >= BrandMatcher.minDistinctiveChars
                                 && (jw >= BrandMatcher.phoneticJWFloor
                                     || dl <= max(3, tnorm.count / 2))
