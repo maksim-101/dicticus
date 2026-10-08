@@ -3660,7 +3660,35 @@ public enum EditGuard {
     /// punctuation token standing between the run's word/numeric neighbours
     /// (a mixed run has 2+ tokens and at least one candidate-sourced token
     /// always survives), so it can never trip that check either.
+    ///
+    /// Quick task 261008-gb4 (F3): a restored DOUBLE quotation mark is not
+    /// dropped from a mixed run unless a candidate-sourced double quotation
+    /// mark sits in the same run. A coupled revert restores both marks of a
+    /// quoted word; the closing one lands in a run with the kept comma or
+    /// period and was dropped as "restored", so the pasted text carried an
+    /// unbalanced quote (2026-10-05T18:22 and 2026-10-08T04:39 by ts). A
+    /// quote is not a competing mark, so keeping it makes no form that
+    /// exists in neither input; a candidate quote in the run still wins, so
+    /// no doubled quote is synthesised. Single quotes and apostrophes are
+    /// unchanged. The invariant argument above still holds: a mixed run
+    /// keeps at least one candidate-sourced token.
+    ///
+    /// The exemption applies only when it leaves an even number of double
+    /// quotation marks in the output. A quoted span whose opening mark was
+    /// legitimately deleted while its closing mark was restored (the two
+    /// delete verdicts diverged across a sentence boundary,
+    /// 2026-09-08T04:20 by ts) would otherwise ship an orphan closing quote
+    /// that the old collapse dropped; there the old behaviour stands.
     private static func collapseMixedProvenancePunctuationRuns(_ tokens: [WorkToken]) -> [WorkToken] {
+        func quoteCount(_ t: [WorkToken]) -> Int { t.filter { doubleQuotationMarks.contains($0.text) }.count }
+        let keeping = collapseMixedProvenancePunctuationRuns(tokens, keepRestoredDoubleQuotes: true)
+        if quoteCount(keeping) % 2 == 0 { return keeping }
+        return collapseMixedProvenancePunctuationRuns(tokens, keepRestoredDoubleQuotes: false)
+    }
+
+    private static func collapseMixedProvenancePunctuationRuns(
+        _ tokens: [WorkToken], keepRestoredDoubleQuotes: Bool
+    ) -> [WorkToken] {
         guard tokens.count > 1 else { return tokens }
         var result: [WorkToken] = []
         var i = 0
@@ -3678,7 +3706,11 @@ public enum EditGuard {
             if run.count < 2 || run.allSatisfy({ $0.source == run[0].source }) {
                 result.append(contentsOf: run)
             } else {
-                var survivors = run.filter { $0.source == .candidate }
+                let candidateHasDoubleQuote = run.contains { $0.source == .candidate && doubleQuotationMarks.contains($0.text) }
+                var survivors = run.filter {
+                    $0.source == .candidate
+                        || (keepRestoredDoubleQuotes && !candidateHasDoubleQuote && doubleQuotationMarks.contains($0.text))
+                }
                 if let originalLastTrailing = run.last?.trailing, let last = survivors.last {
                     survivors[survivors.count - 1] = WorkToken(
                         text: last.text, normalized: last.normalized, kind: last.kind,
@@ -3692,6 +3724,9 @@ public enum EditGuard {
         }
         return result
     }
+
+    /// The six double quotation mark characters (F3 of 261008-gb4).
+    private static let doubleQuotationMarks: Set<String> = ["\"", "\u{201C}", "\u{201D}", "\u{201E}", "\u{00AB}", "\u{00BB}"]
 
     /// Opening or closing role of a straight quotation mark (261001-opz).
     enum QuoteRole { case opening, closing }
