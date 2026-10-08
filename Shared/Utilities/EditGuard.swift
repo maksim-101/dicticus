@@ -281,11 +281,13 @@ public enum EditGuard {
         /// capitals, and step 1's casing-only accept ran before step 5's
         /// dictProtect check and shipped it.
         ///
-        /// Strict: the dictionary spelling survives verbatim, with no
-        /// exception. Sentence-initial capitals come back after the gate from
-        /// `applyFinalCapitalization`. The cost is also paid by a German noun
-        /// capital the LLM adds to a lowercase dictionary term
-        /// (`2026-10-03T05:07:48.000Z`), reported as a judgment row.
+        /// The first version rejected every casing change and was measured to
+        /// cost correct fixes (a German noun capital `2026-10-03T05:07:48.000Z`,
+        /// a colon and an article dragged out of the same edit cluster), so it
+        /// now fires only when the new casing is neither the dictionary
+        /// spelling nor a plain first-letter capital of it (ALL CAPS, mixed
+        /// case), and the rejection does not make `applyAtomicGroupCoupling`
+        /// revert the rest of its cluster.
         /// NOT a member of `sentenceRevertTriggerClasses` (the
         /// `acronymLoweredAfterDot` precedent): a casing-only restore carries
         /// no content signal, and triggering would revert the sentence's
@@ -1282,9 +1284,11 @@ public enum EditGuard {
 
         // Quick task 261008-gb4 (F5): a dictionary term keeps its exact
         // spelling; the casing-only accept below must not reach it (see
-        // `RejectionClass.dictProtectedCasing`).
+        // `RejectionClass.dictProtectedCasing`). A plain first-letter capital
+        // of the dictionary spelling is not rejected.
         if a.kind == .word, a.normalized == b.normalized, a.text != b.text,
-           dictProtectedLower.contains(a.normalized) {
+           dictProtectedLower.contains(a.normalized),
+           b.text != a.text.prefix(1).uppercased() + a.text.dropFirst() {
             return (false, nil, .dictProtectedCasing)
         }
 
@@ -2541,7 +2545,11 @@ public enum EditGuard {
         var groupHasContentMember = Set<Int>()
         for i in edits.indices where clusterID[i] != -1 {
             let root = find(clusterID[i])
-            if !verdicts[i].accepted { groupHasRejection.insert(root) }
+            // Quick task 261008-gb4 (F5 refinement): a `dictProtectedCasing`
+            // rejection reverts only its own casing token, not its cluster.
+            if !verdicts[i].accepted, verdicts[i].rejectClass != RejectionClass.dictProtectedCasing.rawValue {
+                groupHasRejection.insert(root)
+            }
             if !isPunctuationOnly(edits[i]) { groupHasContentMember.insert(root) }
         }
         let groupsToRevert = groupHasRejection.intersection(groupHasContentMember)
