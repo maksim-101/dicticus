@@ -275,4 +275,28 @@ final class BoilerplateHallucinationTests: XCTestCase {
     func testChunkDropEmptyListGivesEmptyArray() {
         XCTAssertEqual(drops([]).count, 0)
     }
+
+    // MARK: - Quick 261008-gb2: per-chunk language drop (F2)
+
+    func testChunkDropPolishLookingChunkAfterGerman_RED() {
+        let r = drops([("Wir treffen uns morgen vor dem Bahnhof", "de"), ("Zaplamy toki mase.", "pl")])
+        XCTAssertEqual(r, [nil, .nonDeEnLanguage])
+    }
+
+    func testChunkDropSoleSpanishLookingChunk_RED() {
+        XCTAssertEqual(drops([("Las mesas verdes cantan.", "es")]), [.nonDeEnLanguage])
+    }
+
+    func testChunkDropGermanAndEnglishChunksAreKept() {
+        XCTAssertEqual(drops([("Das Boot liegt am Steg", "de"), ("The boat is at the pier", "en")]), [nil, nil])
+    }
+
+    func testChunkDropShipListChunkTaggedOtherLanguageIsBoilerplateFirst() {
+        let r = drops([("The kettle is on the left shelf", "en"), ("Thank you.", "pl")])
+        XCTAssertEqual(r, [nil, .boilerplateSegment])
+    }
+
+    func testChunkLanguagesAreExactlyGermanAndEnglish() {
+        XCTAssertEqual(BoilerplateHallucination.chunkLanguages, ["de", "en"])
+    }
 }

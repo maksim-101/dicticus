@@ -119,3 +119,12 @@ extension AdaptiveVoiceGate.Decision {
         frameEnergies.filter { $0 > threshold }.count
     }
 }
+
+extension AdaptiveVoiceGate {
+    static let nearSilentMaxDurationSeconds: Float = 2.5
+    static let nearSilentMaxVoicedFrames = 2
+
+    static func isNearSilentShortClip(durationSeconds: Float, voicedFrames: Int) -> Bool {
+        false
+    }
+}

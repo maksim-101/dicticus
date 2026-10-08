@@ -126,4 +126,51 @@ final class AdaptiveVoiceGateTests: XCTestCase {
             "A clip on which the gate reports voice activity must have at least one frame above threshold"
         )
     }
+
+    // MARK: - Quick 261008-gb2: near-silent short clip (F3)
+
+    func testNearSilentShortClipOneVoicedFrame_RED() {
+        XCTAssertTrue(AdaptiveVoiceGate.isNearSilentShortClip(durationSeconds: 1.2, voicedFrames: 1))
+    }
+
+    func testNearSilentShortClipPassesTheGateButIsCaught_RED() {
+        // Twelve 100 ms frames, room noise plus one frame above the gate threshold:
+        // the Layer-2 gate lets the clip through, the short-clip rule discards it.
+        let frameEnergies: [Float] = [0.0012, 0.0014, 0.0011, 0.0013, 0.0090, 0.0012, 0.0015, 0.0011, 0.0013, 0.0012, 0.0014, 0.0011]
+        let decision = AdaptiveVoiceGate.evaluate(frameEnergies: frameEnergies)
+        let voiced = decision.framesAboveThreshold(in: frameEnergies)
+        XCTAssertTrue(decision.voiceDetected)
+        XCTAssertEqual(voiced, 1)
+        XCTAssertTrue(AdaptiveVoiceGate.isNearSilentShortClip(durationSeconds: 1.2, voicedFrames: voiced))
+    }
+
+    func testNearSilentShortClipUpperBoundsAreInclusiveFrames_RED() {
+        XCTAssertTrue(AdaptiveVoiceGate.isNearSilentShortClip(durationSeconds: Float(2.5).nextDown, voicedFrames: 2))
+    }
+
+    func testNearSilentShortClipZeroVoicedBelowBypassIsCaught_RED() {
+        // 2.0-2.5 s with no voiced frame used to reach Whisper through the D-01 bypass.
+        XCTAssertTrue(AdaptiveVoiceGate.isNearSilentShortClip(durationSeconds: 2.2, voicedFrames: 0))
+    }
+
+    func testNearSilentShortClipThreeVoicedFramesIsKept() {
+        XCTAssertFalse(AdaptiveVoiceGate.isNearSilentShortClip(durationSeconds: 1.2, voicedFrames: 3))
+    }
+
+    func testNearSilentShortClipLowestRealUtteranceIsKept() {
+        XCTAssertFalse(AdaptiveVoiceGate.isNearSilentShortClip(durationSeconds: 1.2, voicedFrames: 5))
+    }
+
+    func testNearSilentShortClipDurationBoundIsExclusive() {
+        XCTAssertFalse(AdaptiveVoiceGate.isNearSilentShortClip(durationSeconds: 2.5, voicedFrames: 0))
+    }
+
+    func testNearSilentShortClipFourVoicedFramesIsKept() {
+        XCTAssertFalse(AdaptiveVoiceGate.isNearSilentShortClip(durationSeconds: 0.5, voicedFrames: 4))
+    }
+
+    func testNearSilentConstantsAreLocked() {
+        XCTAssertEqual(AdaptiveVoiceGate.nearSilentMaxDurationSeconds, 2.5)
+        XCTAssertEqual(AdaptiveVoiceGate.nearSilentMaxVoicedFrames, 2)
+    }
 }
