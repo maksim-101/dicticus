@@ -1328,8 +1328,17 @@ public enum EditGuard {
         // -ig read as a derivational suffix pair) before this exemption is
         // ever consulted. Real-word pairs (both known) never reach this
         // branch — they still fall through to steps 7/8/9 unchanged.
+        //
+        // Quick task 261008-gb4 (NWR, `2026-10-07T20:12:45.233Z` by ts): the
+        // source must also be absent from the bundled EN+DE word list
+        // (`SpellLexicon.isListedWord`). The platform checker lacks some real
+        // words the bundled list holds, and a "repair" of one of those
+        // replaced a dictated word with a similar one. A listed source falls
+        // through to steps 7 to 9, where a lone word swap is rejected
+        // (gp8's carve-out keeps the sentence's punctuation).
         if a.kind == .word, b.kind == .word,
            !isKnownForRepair(a, language: language, dictProtectedLower: dictProtectedLower, lexicon: lexicon),
+           !lexicon.isListedWord(a.text, language: language),
            isKnownForRepair(b, language: language, dictProtectedLower: dictProtectedLower, lexicon: lexicon),
            isNonWordRepairClose(a.normalized, b.normalized, language: language) {
             return (true, .nonWordRepair, nil)

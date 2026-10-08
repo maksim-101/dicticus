@@ -188,4 +188,10 @@ final class EditGuardHarmFixesTests: XCTestCase {
         XCTAssertEqual(r.text, llm)
         XCTAssertTrue(r.edits.contains { $0.acceptClass == "nonWordRepair" }, "\(r.edits)")
     }
+
+    func testNWR_platformLexiconListsBundledWords() {
+        XCTAssertTrue(PlatformSpellLexicon.shared.isListedWord("bicycle", language: "en"))
+        XCTAssertTrue(PlatformSpellLexicon.shared.isListedWord("Fahrrad", language: "de"))
+        XCTAssertFalse(PlatformSpellLexicon.shared.isListedWord("zxqvbl", language: "en"))
+    }
 }
