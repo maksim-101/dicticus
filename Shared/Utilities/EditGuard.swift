@@ -175,6 +175,14 @@ public enum EditGuard {
         /// independent content rejection sits in it, so the host never renders
         /// without its expansion word.
         case contractionExpansion
+        /// Quick task 261008-gb5: a substitute of `and`/`or` (en) or `und`/`oder`
+        /// (de) by `,` whose kept neighbours are unchanged and whose list still
+        /// holds a later `and`/`or` (`und`/`oder`) within four equal words, in
+        /// both texts. A different surviving coordinator counts. Context-
+        /// dependent: it reverts with its sentence when an independent content
+        /// rejection sits in it, so a comma never ships next to a reverted
+        /// remainder of its list.
+        case listComma
     }
 
     /// D-11's forensics vocabulary — the classes of edit this guard REJECTS.
@@ -962,6 +970,55 @@ public enum EditGuard {
         return true
     }
 
+    /// Quick task 261008-gb5: list words for `isListComma`.
+    private static let listCommaWords: [String: Set<String>] = ["en": ["and", "or"], "de": ["und", "oder"]]
+    private static let listCommaWordCap = 4
+
+    /// Quick task 261008-gb5 (list comma). `and`/`or` (`und`/`oder`) replaced
+    /// by `,` is accepted only while the list still ends in a coordinator: the
+    /// kept neighbours are the same words, and scanning right from the right
+    /// neighbour (skipping commas, stopping at any other punctuation, crossing
+    /// at most `listCommaWordCap` words) reaches a later list word in the
+    /// baseline and in the candidate, with equal words in between. `A and B` ->
+    /// `A, B` has no later coordinator, so the replaced `and` still counts as
+    /// a lost word and stays rejected; so do `A and B and C` -> `A, B, C`,
+    /// `and not` and `and then`.
+    private static func isListComma(
+        a: Token, b: Token, baseline: [Token], candidate: [Token],
+        language: String, dictProtectedLower: Set<String>
+    ) -> Bool {
+        guard a.kind == .word, b.kind == .punctuation, b.text == "," else { return false }
+        let lang = language.prefix(2).lowercased() == "en" ? "en" : "de"
+        guard let words = listCommaWords[lang], words.contains(a.normalized),
+              !dictProtectedLower.contains(a.normalized),
+              !FunctionWords.isNegation(a.normalized, language: language) else { return false }
+        let ai = a.index, bi = b.index
+        guard ai > 0, ai + 1 < baseline.count, bi > 0, bi + 1 < candidate.count else { return false }
+        let bp = baseline[ai - 1], bn = baseline[ai + 1], cp = candidate[bi - 1], cn = candidate[bi + 1]
+        guard bp.kind == .word, bn.kind == .word, cp.kind == .word, cn.kind == .word,
+              bp.normalized == cp.normalized, bn.normalized == cn.normalized else { return false }
+        func scan(_ tokens: [Token], from start: Int) -> (stop: String, between: [String])? {
+            var between: [String] = []
+            var i = start
+            while i < tokens.count {
+                let t = tokens[i]
+                if t.kind == .punctuation {
+                    guard t.text == "," else { return nil }
+                } else if t.kind == .word {
+                    if words.contains(t.normalized) { return (t.normalized, between) }
+                    between.append(t.normalized)
+                    if between.count > listCommaWordCap { return nil }
+                } else {
+                    return nil
+                }
+                i += 1
+            }
+            return nil
+        }
+        guard let sb = scan(baseline, from: ai + 2), let sc = scan(candidate, from: bi + 2) else { return false }
+        return sb.stop == sc.stop && sb.between == sc.between
+    }
+
     /// Quick task 261003-au9: prosodic marks a rejected punctuation `.move` may be re-accepted for.
     private static let movableMarks: Set<String> = [",", ".", "?", "!"]
     private static let punctuationMoveJumpCap = 6
@@ -1333,6 +1390,9 @@ public enum EditGuard {
         }
         if isConnectorSplit(a: a, b: b, baseline: baseline, candidate: candidate, language: language, dictProtectedLower: dictProtectedLower) {
             return (true, .connectorSplit, nil)
+        }
+        if isListComma(a: a, b: b, baseline: baseline, candidate: candidate, language: language, dictProtectedLower: dictProtectedLower) {
+            return (true, .listComma, nil)
         }
         // 3. Digit lock (D-03).
         if EditGuardTokenizer.isDigitBearing(a.text) || EditGuardTokenizer.isDigitBearing(b.text) {
@@ -2684,6 +2744,7 @@ public enum EditGuard {
         AcceptClass.connectorSplit.rawValue,
         AcceptClass.punctuationMove.rawValue,
         AcceptClass.contractionExpansion.rawValue,
+        AcceptClass.listComma.rawValue,
     ]
 
     /// Quick task 260926-bbz: is the edit at `edits[i]` the LLM's
