@@ -20,7 +20,8 @@ import XCTest
 /// test to its sub-fix (testF1_, testF2_, testF3_, testF5_, testNWR_). Each
 /// sub-fix has a mutation that turns its tests red: MF1 (empty interjection
 /// set), MF2 (drop the `applySeamMarkCoupling` call), MF2r (drop its recase
-/// flip), MF3 (drop the quote clause of the survivors filter), MF5 (drop the
+/// flip), MF3 (drop the quote clause of the survivors filter), MF3b (drop the
+/// even-count check), MF5 (drop the
 /// `dictProtectedCasing` arm), MNWRa (drop the `isListedWord` conjunct),
 /// MNWRb (make `PlatformSpellLexicon.isListedWord` return false).
 ///
@@ -128,6 +129,17 @@ final class EditGuardHarmFixesTests: XCTestCase {
         let baseline = "She named the bent part \"derailleur\"."
         let r = run("en", baseline, "She named the very bent part derailleur.")
         XCTAssertEqual(r.text, baseline)
+    }
+
+    /// The opening mark's delete is accepted while the closing mark's delete is
+    /// reverted with its sentence: restoring only the closing quote would ship
+    /// an orphan, so the old collapse (which drops it) stands. Mutation MF3b.
+    func testF3_orphanClosingQuoteStaysDropped() {
+        let r = run(
+            "en",
+            "The mechanic said, \"The rim is bent, the tire is flat.\" Fixing the rim takes time because the shop is busy and then also the part is late.",
+            "The mechanic said, The rim is bent, the tire is flat. Fixing the rim takes long because the shop is busy, and the part is very late.")
+        XCTAssertEqual(r.text.filter { $0 == "\"" }.count % 2, 0, "unbalanced quotes in: \(r.text)")
     }
 
     // MARK: - F5: a dictionary term keeps its exact casing
