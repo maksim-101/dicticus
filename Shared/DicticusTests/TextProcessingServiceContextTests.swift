@@ -203,6 +203,6 @@ final class TextProcessingServiceContextTests: XCTestCase {
     func testVersionForContextSeamCarriesCodeSuffixMatchingResolvedContext() {
         let resolved = ContextResolver.resolve(bundleID: "com.apple.Terminal")
         XCTAssertEqual(resolved, .code)
-        XCTAssertEqual(CleanupPrompt.version(for: .transcriptionist, context: resolved), "v-transcriptionist-code")
+        XCTAssertEqual(CleanupPrompt.version(for: .transcriptionist, context: resolved), "v-transcriptionist-2-code")
     }
 }

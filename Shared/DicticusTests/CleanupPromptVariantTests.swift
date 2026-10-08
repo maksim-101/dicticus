@@ -107,7 +107,25 @@ final class CleanupPromptVariantTests: XCTestCase {
         XCTAssertEqual(rawValues.count, Set(rawValues).count, "Variant.rawValue must have no duplicates")
         XCTAssertEqual(CleanupPrompt.version(for: .rulePriority), "v-rulepriority",
                       "v-rulepriority is the prompt_version telemetry string used by the 44-13 bake-off report — it must be stable")
-        XCTAssertEqual(CleanupPrompt.version(for: .transcriptionist), "v-transcriptionist")
+        XCTAssertEqual(CleanupPrompt.version(for: .transcriptionist), "v-transcriptionist-2")
+    }
+
+    // MARK: - Quick 261008-gb5: German filler examples
+
+    /// German "also" often means "therefore" and EditGuard never lets the LLM delete it, so the instruction may
+    /// list only true fillers. English bodies are unchanged.
+    func testGermanFillerExamplesListOnlyTrueFillers_RED() {
+        func between(_ text: String, _ open: String) -> String? {
+            guard let o = text.range(of: open), let c = text.range(of: ")", range: o.upperBound..<text.endIndex) else { return nil }
+            return String(text[o.upperBound..<c.lowerBound])
+        }
+        let cases: [(CleanupPrompt.Variant, DictationContext)] = [(.transcriptionist, .default), (.transcriptionist, .code), (.rulePriority, .default)]
+        for (variant, context) in cases {
+            let de = CleanupPrompt.build(text: "x", language: "de", useSwissGerman: false, variant: variant, context: context)
+            XCTAssertEqual(between(de, "Füllwörter ("), "äh, ähm, sozusagen", "\(variant) \(context)")
+            let en = CleanupPrompt.build(text: "x", language: "en", useSwissGerman: false, variant: variant, context: context)
+            XCTAssertEqual(between(en, "remove pure filler ("), "uh, um, you know, like", "\(variant) \(context)")
+        }
     }
 
     // MARK: - ChatML frame identity across variants
