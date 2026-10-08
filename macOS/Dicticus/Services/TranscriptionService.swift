@@ -8,7 +8,7 @@ import os
 enum TranscriptionError: Error, Sendable {
     /// Recording was shorter than minimumDurationSeconds (D-06 in 02-RESEARCH.md).
     case tooShort
-    /// No voice activity detected — adaptive energy gate or no-speech-prob discard (D-10 in 02.1-RESEARCH.md).
+    /// No voice activity detected — adaptive energy gate, no-speech-prob discard (D-10 in 02.1-RESEARCH.md), or every chunk of the decode dropped as a ship-list phantom (quick task 261008-gb2).
     case silenceOnly
     /// ASR engine returned no transcription results.
     case noResult
@@ -66,6 +66,9 @@ final class AudioSampleBuffer: @unchecked Sendable {
 ///   2. Adaptive voice-activity gate: discard if no frame's energy dwarfs the clip's own noise floor (AdaptiveVoiceGate)
 ///   3. Boilerplate-hallucination discard: discard a whole-utterance closed-list match, e.g. "Thank you." (BoilerplateHallucination, quick task 260827-81z); also a lone "you"/"and"/"-" when the clip is under 1.5 s or the gate found no voice (quick task 260930-s1g)
 ///   4. No-speech discard: discard if every segment's noSpeechProb exceeds threshold (NoSpeechDiscard, WHISP-03)
+///   5. Near-silent short-clip discard: a clip under 2.5 s with at most 2 voiced frames is discarded after decode (AdaptiveVoiceGate.isNearSilentShortClip, quick task 261008-gb2)
+///
+/// Between the decode and the checks above, the per-chunk phantom drop (BoilerplateHallucination.chunkDropReasons, quick task 261008-gb2) removes a chunk of the decode that is only a ship-list phrase (when other chunks exist) or is tagged with a language other than German or English; the checks read the kept chunks only. When every chunk is removed the clip is a silent discard, or the "Unexpected language" notice when a language drop was the cause.
 ///
 /// Consumes ModelWarmupService.whisperKitInstance directly.
 /// Does NOT create its own WhisperKit instances outside of test support.
@@ -203,8 +206,10 @@ class TranscriptionService: ObservableObject {
     ///   3. Check minimum duration (D-11: reject clips shorter than 0.3s)
     ///   4. Adaptive voice-activity gate: reject if no frame dwarfs the clip's own noise floor
     ///   5. Transcribe via WhisperKit large-v3-turbo
+    ///   5b. Per-chunk phantom drop: remove a chunk that is only a ship-list phrase (multi-chunk decode) or is tagged neither German nor English; every later step reads the kept chunks only. All chunks removed: silenceOnly, or unexpectedLanguage when a language drop was the cause
     ///   6. Boilerplate-hallucination discard: reject a whole-utterance closed-list match, e.g. "Thank you.", or a lone "you"/"and"/"-" from a clip under 1.5 s or one with no voice found by the gate
     ///   7. No-speech discard: reject if every segment's noSpeechProb exceeds threshold
+    ///   7b. Near-silent short-clip discard: reject a clip under 2.5 s with at most 2 voiced frames
     ///   8. Detect language post-hoc with NLLanguageRecognizer (D-13)
     ///   9. Build DicticusTranscriptionResult
     ///
@@ -235,7 +240,7 @@ class TranscriptionService: ObservableObject {
     }
 
     /// The transcription path proper, from raw captured samples to a result:
-    /// resample → duration guard → AdaptiveVoiceGate → WhisperKit → NoSpeechDiscard
+    /// resample → duration guard → AdaptiveVoiceGate → WhisperKit → per-chunk phantom drop → NoSpeechDiscard
     /// → script validation → language detection → confidence.
     ///
     /// Split out of `stopRecordingAndTranscribe()` (quick task 260802-ass) so archived
@@ -308,12 +313,10 @@ class TranscriptionService: ObservableObject {
         // above). Used both by the guard below and by every post-gate discard-log
         // record so a future audit can size the bypassed-clip class.
         let gateBypassedByDuration = !gateDecision.voiceDetected && durationSeconds >= Self.gateBypassDurationSeconds
-        #if DEBUG_RECORDER
-        // Single-sourced frames-above-threshold count (quick task 260826-8ec) — bound once
-        // here so non-recorder builds emit no unused binding, and reused at every discard-log
-        // call site at or below this point in the function rather than recomputed per site.
+        // Single-sourced frames-above-threshold count (quick task 260826-8ec), bound in
+        // every build since 261008-gb2: the near-silent short-clip rule below reads it, and
+        // every discard-log call site at or below this point reuses it.
         let gateFramesAboveThreshold = gateDecision.framesAboveThreshold(in: gateFrameEnergies)
-        #endif
         // Phase 50 D-01: the energy gate alone no longer decides discard for long
         // clips — see gateBypassDurationSeconds above.
         guard Self.shouldProceedPastEnergyGate(voiceDetected: gateDecision.voiceDetected, durationSeconds: durationSeconds) else {
@@ -367,8 +370,67 @@ class TranscriptionService: ObservableObject {
             chunkingStrategy: .vad
         )
         let results = try await whisperKit.transcribe(audioArray: resampledSamples, decodeOptions: decodeOptions)
-        let allSegments = results.flatMap { $0.segments }
-        let combinedText = results.map(\.text).joined(separator: " ")
+
+        // Per-chunk phantom drop (quick task 261008-gb2). A long clip comes back as one
+        // result per voice-activity chunk, and a pause inside it can decode to a chunk of
+        // its own that is only "Thank you." The whole-clip checks below compare the JOINED
+        // text and cannot see that. Every consumer below reads the kept chunks only.
+        let chunkDrops = BoilerplateHallucination.chunkDropReasons(
+            results.map { (text: $0.text, language: $0.language) }
+        )
+        let keptResults = zip(results, chunkDrops).filter { $0.1 == nil }.map(\.0)
+        let allSegments = keptResults.flatMap { $0.segments }
+        let combinedText = keptResults.map(\.text).joined(separator: " ")
+        #if DEBUG_RECORDER
+        // Every post-decode discard-log record lists ALL original segments, a dropped
+        // chunk's segments carrying `drop_reason`, so a future false positive stays visible.
+        let segmentInfos: [DiscardProbe.SegmentInfo] = zip(results, chunkDrops).flatMap { result, drop in
+            result.segments.map {
+                DiscardProbe.SegmentInfo(
+                    text: $0.text,
+                    noSpeechProb: nil,
+                    avgLogProb: $0.avgLogprob,
+                    compressionRatio: $0.compressionRatio,
+                    temperature: $0.temperature,
+                    startSeconds: $0.start,
+                    endSeconds: $0.end,
+                    language: result.language,
+                    dropReason: drop?.rawValue
+                )
+            }
+        }
+        #endif
+        if keptResults.isEmpty && !results.isEmpty {
+            #if DEBUG_RECORDER
+            let phantomEnergy = AudioProcessor.calculateEnergy(of: resampledSamples)
+            await DiscardProbe.shared.record(
+                reason: "phantomSegmentsOnly",
+                platform: "macOS",
+                rawSampleCount: samples.count,
+                resampledSampleCount: resampledSamples.count,
+                hwSampleRate: inputSampleRate,
+                durationSeconds: durationSeconds,
+                rms: phantomEnergy.avg,
+                peak: phantomEnergy.max,
+                vadFrameCount: gateFrameEnergies.count,
+                vadTrueFrameCount: gateFramesAboveThreshold,
+                vadMaxFrameEnergy: gateDecision.maxFrameEnergy,
+                gateNoiseFloor: gateDecision.noiseFloor,
+                gateThreshold: gateDecision.threshold,
+                segments: segmentInfos,
+                noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable,
+                energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
+                gateBypassedByDuration: gateBypassedByDuration
+            )
+            #endif
+            // A clip emptied by a language drop becomes the existing "Unexpected language"
+            // retry notice (same as the non-Latin check below) instead of a silent loss of
+            // what may be garbled real speech; one emptied by ship-list phantoms is silent.
+            if chunkDrops.contains(.nonDeEnLanguage) {
+                throw TranscriptionError.unexpectedLanguage
+            }
+            throw TranscriptionError.silenceOnly  // defer resets to .idle
+        }
 
         // Whole-utterance boilerplate-hallucination discard (quick task 260827-81z): a
         // small closed list of Whisper subtitle-boilerplate strings ("Thank you." etc.)
@@ -405,15 +467,7 @@ class TranscriptionService: ObservableObject {
                 vadMaxFrameEnergy: gateDecision.maxFrameEnergy,
                 gateNoiseFloor: gateDecision.noiseFloor,
                 gateThreshold: gateDecision.threshold,
-                segments: allSegments.map {
-                    DiscardProbe.SegmentInfo(
-                        text: $0.text,
-                        noSpeechProb: nil,
-                        avgLogProb: $0.avgLogprob,
-                        compressionRatio: $0.compressionRatio,
-                        temperature: $0.temperature
-                    )
-                },
+                segments: segmentInfos,
                 noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable,
                 energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
                 gateBypassedByDuration: gateBypassedByDuration
@@ -443,15 +497,39 @@ class TranscriptionService: ObservableObject {
                 vadMaxFrameEnergy: gateDecision.maxFrameEnergy,
                 gateNoiseFloor: gateDecision.noiseFloor,
                 gateThreshold: gateDecision.threshold,
-                segments: allSegments.map {
-                    DiscardProbe.SegmentInfo(
-                        text: $0.text,
-                        noSpeechProb: nil,
-                        avgLogProb: $0.avgLogprob,
-                        compressionRatio: $0.compressionRatio,
-                        temperature: $0.temperature
-                    )
-                },
+                segments: segmentInfos,
+                noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable,
+                energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
+                gateBypassedByDuration: gateBypassedByDuration
+            )
+            #endif
+            throw TranscriptionError.silenceOnly  // defer resets to .idle
+        }
+
+        // Near-silent short-clip discard (quick task 261008-gb2, F3): a clip under 2.5 s with
+        // at most 2 voiced frames. It sits after decode and after NoSpeechDiscard so the
+        // discard record keeps the decoded segments (a future false positive stays visible)
+        // and every earlier reason keeps its label. It narrows Phase 50 D-01 for 2.0-2.5 s
+        // clips with no voiced frame: D-01's shortest low-gain real speech lasts 2.7 s, and
+        // the 0-voiced real passes since 2026-09-16 start at 3.5 s.
+        if AdaptiveVoiceGate.isNearSilentShortClip(durationSeconds: durationSeconds, voicedFrames: gateFramesAboveThreshold) {
+            #if DEBUG_RECORDER
+            let nearSilentEnergy = AudioProcessor.calculateEnergy(of: resampledSamples)
+            await DiscardProbe.shared.record(
+                reason: "nearSilentShortClip",
+                platform: "macOS",
+                rawSampleCount: samples.count,
+                resampledSampleCount: resampledSamples.count,
+                hwSampleRate: inputSampleRate,
+                durationSeconds: durationSeconds,
+                rms: nearSilentEnergy.avg,
+                peak: nearSilentEnergy.max,
+                vadFrameCount: gateFrameEnergies.count,
+                vadTrueFrameCount: gateFramesAboveThreshold,
+                vadMaxFrameEnergy: gateDecision.maxFrameEnergy,
+                gateNoiseFloor: gateDecision.noiseFloor,
+                gateThreshold: gateDecision.threshold,
+                segments: segmentInfos,
                 noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable,
                 energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
                 gateBypassedByDuration: gateBypassedByDuration
@@ -488,17 +566,7 @@ class TranscriptionService: ObservableObject {
             vadMaxFrameEnergy: gateDecision.maxFrameEnergy,
             gateNoiseFloor: gateDecision.noiseFloor,
             gateThreshold: gateDecision.threshold,
-            segments: allSegments.map {
-                DiscardProbe.SegmentInfo(
-                    text: $0.text,
-                    noSpeechProb: nil,
-                    avgLogProb: $0.avgLogprob,
-                    compressionRatio: $0.compressionRatio,
-                    temperature: $0.temperature,
-                    startSeconds: $0.start,
-                    endSeconds: $0.end
-                )
-            },
+            segments: segmentInfos,
             lowConfidenceShort: LowConfidenceShort.flag(
                 durationSeconds: durationSeconds,
                 avgLogProbs: allSegments.map(\.avgLogprob)
@@ -542,15 +610,7 @@ class TranscriptionService: ObservableObject {
                 vadMaxFrameEnergy: gateDecision.maxFrameEnergy,
                 gateNoiseFloor: gateDecision.noiseFloor,
                 gateThreshold: gateDecision.threshold,
-                segments: allSegments.map {
-                    DiscardProbe.SegmentInfo(
-                        text: $0.text,
-                        noSpeechProb: nil,
-                        avgLogProb: $0.avgLogprob,
-                        compressionRatio: $0.compressionRatio,
-                        temperature: $0.temperature
-                    )
-                },
+                segments: segmentInfos,
                 noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable,
                 energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
                 gateBypassedByDuration: gateBypassedByDuration
