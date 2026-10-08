@@ -63,4 +63,57 @@ final class BrandNarrowingTests: XCTestCase {
         XCTAssertEqual(matcher(bundled: ["Claude Code"]).apply(to: "Start ClotCode in the repo.", language: "en"),
                        "Start Claude Code in the repo.")
     }
+
+    // MARK: - G2: an all-lowercase dictionary word is not a brand target
+
+    func testG2_lowercaseLexiconTargetIsNotABrand_RED() {
+        let input = "Please send the Emial to the team."
+        XCTAssertEqual(matcher(live: ["Email"]).apply(to: input, language: "en"),
+                       "Please send the Email to the team.",
+                       "precondition: a cased target repairs the near-spelling")
+        XCTAssertEqual(matcher(live: ["email"]).apply(to: input, language: "en"), input)
+    }
+
+    func testG2_anchorYamlWithLowercaseEmail() {
+        let input = "Edit the YAML before the deploy."
+        XCTAssertEqual(matcher(live: ["email"]).apply(to: input, language: "en"), input)
+    }
+
+    func testG2_casedLexiconTargetKeepsReach() {
+        XCTAssertEqual(matcher(live: ["Kagi"]).apply(to: "Try Kagee for the search.", language: "en"),
+                       "Try Kagi for the search.")
+    }
+
+    // MARK: - G3: a window that spells the whole canonical plus more is not rewritten
+
+    func testG3_iPadOSStaysWithIPadLive_RED() {
+        let input = "Update to iPadOS next week."
+        XCTAssertEqual(matcher(live: ["iPad"]).apply(to: input, language: "en"), input)
+    }
+
+    // MARK: - G4: a dotted name keeps its dot
+
+    func testG4_dottedSurfaceKeptWhenSpacedSiblingLive_RED() {
+        let input = "Open Claude.ai in the browser."
+        XCTAssertEqual(matcher(live: ["Claude AI", "Claude.ai"]).apply(to: input, language: "en"), input)
+    }
+
+    func testG4_lowercaseDottedUnifiesToDottedSibling_RED() {
+        XCTAssertEqual(
+            matcher(live: ["Claude AI", "Claude.ai", "claude.ai"])
+                .apply(to: "Visit claude.ai for the docs.", language: "en"),
+            "Visit Claude.ai for the docs.")
+    }
+
+    func testG4_misheardDottedRepairsToDottedSibling_RED() {
+        XCTAssertEqual(
+            matcher(live: ["Claude AI", "Claude.ai"]).apply(to: "Open cloud.ai in the browser.", language: "en"),
+            "Open Claude.ai in the browser.")
+    }
+
+    func testG4_spacedSurfaceStillReachesSpacedSibling() {
+        XCTAssertEqual(
+            matcher(live: ["Claude AI", "Claude.ai"]).apply(to: "Open Claude ai in the browser.", language: "en"),
+            "Open Claude AI in the browser.")
+    }
 }
