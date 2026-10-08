@@ -118,7 +118,11 @@ enum BoilerplateHallucination {
     /// Why `chunkDropReasons` removed one chunk of a decode.
     enum ChunkDropReason: String {
         case boilerplateSegment
+        case nonDeEnLanguage
     }
+
+    /// Languages a chunk may be tagged with and still be kept.
+    static let chunkLanguages: Set<String> = ["de", "en"]
 
     /// Per-chunk drop (quick task 261008-gb2, F1). `match` compares the joined clip text, so
     /// a pause phantom that is one chunk of a long clip ("... real speech" + "Thank you.")
