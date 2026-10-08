@@ -8,7 +8,7 @@ import os
 enum TranscriptionError: Error, Sendable {
     /// Recording was shorter than minimumDurationSeconds (D-06 in 02-RESEARCH.md).
     case tooShort
-    /// No voice activity detected — adaptive energy gate or no-speech-prob discard (D-10 in 02.1-RESEARCH.md).
+    /// No voice activity detected — adaptive energy gate, no-speech-prob discard (D-10 in 02.1-RESEARCH.md), or every chunk of the decode dropped as a ship-list phantom (quick task 261008-gb2).
     case silenceOnly
     /// ASR engine returned no transcription results.
     case noResult
@@ -66,6 +66,8 @@ final class AudioSampleBuffer: @unchecked Sendable {
 ///   2. Adaptive voice-activity gate: discard if no frame's energy dwarfs the clip's own noise floor (AdaptiveVoiceGate)
 ///   3. Boilerplate-hallucination discard: discard a whole-utterance closed-list match, e.g. "Thank you." (BoilerplateHallucination, quick task 260827-81z); also a lone "you"/"and"/"-" when the clip is under 1.5 s or the gate found no voice (quick task 260930-s1g)
 ///   4. No-speech discard: discard if every segment's noSpeechProb exceeds threshold (NoSpeechDiscard, WHISP-03)
+///
+/// Before layer 3's whole-clip checks run, the per-chunk phantom drop (quick task 261008-gb2) removes a chunk of a multi-chunk decode that is only a ship-list phrase (BoilerplateHallucination.chunkDropReasons); when every chunk is removed the clip is a silent discard.
 ///
 /// Consumes ModelWarmupService.whisperKitInstance directly.
 /// Does NOT create its own WhisperKit instances outside of test support.
@@ -203,6 +205,7 @@ class TranscriptionService: ObservableObject {
     ///   3. Check minimum duration (D-11: reject clips shorter than 0.3s)
     ///   4. Adaptive voice-activity gate: reject if no frame dwarfs the clip's own noise floor
     ///   5. Transcribe via WhisperKit large-v3-turbo
+    ///   5b. Per-chunk phantom drop: remove a chunk of a multi-chunk decode that is only a ship-list phrase; every later step reads the kept chunks only
     ///   6. Boilerplate-hallucination discard: reject a whole-utterance closed-list match, e.g. "Thank you.", or a lone "you"/"and"/"-" from a clip under 1.5 s or one with no voice found by the gate
     ///   7. No-speech discard: reject if every segment's noSpeechProb exceeds threshold
     ///   8. Detect language post-hoc with NLLanguageRecognizer (D-13)
@@ -235,7 +238,7 @@ class TranscriptionService: ObservableObject {
     }
 
     /// The transcription path proper, from raw captured samples to a result:
-    /// resample → duration guard → AdaptiveVoiceGate → WhisperKit → NoSpeechDiscard
+    /// resample → duration guard → AdaptiveVoiceGate → WhisperKit → per-chunk phantom drop → NoSpeechDiscard
     /// → script validation → language detection → confidence.
     ///
     /// Split out of `stopRecordingAndTranscribe()` (quick task 260802-ass) so archived
@@ -367,8 +370,61 @@ class TranscriptionService: ObservableObject {
             chunkingStrategy: .vad
         )
         let results = try await whisperKit.transcribe(audioArray: resampledSamples, decodeOptions: decodeOptions)
-        let allSegments = results.flatMap { $0.segments }
-        let combinedText = results.map(\.text).joined(separator: " ")
+
+        // Per-chunk phantom drop (quick task 261008-gb2). A long clip comes back as one
+        // result per voice-activity chunk, and a pause inside it can decode to a chunk of
+        // its own that is only "Thank you." The whole-clip checks below compare the JOINED
+        // text and cannot see that. Every consumer below reads the kept chunks only.
+        let chunkDrops = BoilerplateHallucination.chunkDropReasons(
+            results.map { (text: $0.text, language: $0.language) }
+        )
+        let keptResults = zip(results, chunkDrops).filter { $0.1 == nil }.map(\.0)
+        let allSegments = keptResults.flatMap { $0.segments }
+        let combinedText = keptResults.map(\.text).joined(separator: " ")
+        #if DEBUG_RECORDER
+        // Every post-decode discard-log record lists ALL original segments, a dropped
+        // chunk's segments carrying `drop_reason`, so a future false positive stays visible.
+        let segmentInfos: [DiscardProbe.SegmentInfo] = zip(results, chunkDrops).flatMap { result, drop in
+            result.segments.map {
+                DiscardProbe.SegmentInfo(
+                    text: $0.text,
+                    noSpeechProb: nil,
+                    avgLogProb: $0.avgLogprob,
+                    compressionRatio: $0.compressionRatio,
+                    temperature: $0.temperature,
+                    startSeconds: $0.start,
+                    endSeconds: $0.end,
+                    language: result.language,
+                    dropReason: drop?.rawValue
+                )
+            }
+        }
+        #endif
+        if keptResults.isEmpty && !results.isEmpty {
+            #if DEBUG_RECORDER
+            let phantomEnergy = AudioProcessor.calculateEnergy(of: resampledSamples)
+            await DiscardProbe.shared.record(
+                reason: "phantomSegmentsOnly",
+                platform: "macOS",
+                rawSampleCount: samples.count,
+                resampledSampleCount: resampledSamples.count,
+                hwSampleRate: inputSampleRate,
+                durationSeconds: durationSeconds,
+                rms: phantomEnergy.avg,
+                peak: phantomEnergy.max,
+                vadFrameCount: gateFrameEnergies.count,
+                vadTrueFrameCount: gateFramesAboveThreshold,
+                vadMaxFrameEnergy: gateDecision.maxFrameEnergy,
+                gateNoiseFloor: gateDecision.noiseFloor,
+                gateThreshold: gateDecision.threshold,
+                segments: segmentInfos,
+                noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable,
+                energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
+                gateBypassedByDuration: gateBypassedByDuration
+            )
+            #endif
+            throw TranscriptionError.silenceOnly  // defer resets to .idle
+        }
 
         // Whole-utterance boilerplate-hallucination discard (quick task 260827-81z): a
         // small closed list of Whisper subtitle-boilerplate strings ("Thank you." etc.)
@@ -405,15 +461,7 @@ class TranscriptionService: ObservableObject {
                 vadMaxFrameEnergy: gateDecision.maxFrameEnergy,
                 gateNoiseFloor: gateDecision.noiseFloor,
                 gateThreshold: gateDecision.threshold,
-                segments: allSegments.map {
-                    DiscardProbe.SegmentInfo(
-                        text: $0.text,
-                        noSpeechProb: nil,
-                        avgLogProb: $0.avgLogprob,
-                        compressionRatio: $0.compressionRatio,
-                        temperature: $0.temperature
-                    )
-                },
+                segments: segmentInfos,
                 noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable,
                 energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
                 gateBypassedByDuration: gateBypassedByDuration
@@ -443,15 +491,7 @@ class TranscriptionService: ObservableObject {
                 vadMaxFrameEnergy: gateDecision.maxFrameEnergy,
                 gateNoiseFloor: gateDecision.noiseFloor,
                 gateThreshold: gateDecision.threshold,
-                segments: allSegments.map {
-                    DiscardProbe.SegmentInfo(
-                        text: $0.text,
-                        noSpeechProb: nil,
-                        avgLogProb: $0.avgLogprob,
-                        compressionRatio: $0.compressionRatio,
-                        temperature: $0.temperature
-                    )
-                },
+                segments: segmentInfos,
                 noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable,
                 energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
                 gateBypassedByDuration: gateBypassedByDuration
@@ -488,17 +528,7 @@ class TranscriptionService: ObservableObject {
             vadMaxFrameEnergy: gateDecision.maxFrameEnergy,
             gateNoiseFloor: gateDecision.noiseFloor,
             gateThreshold: gateDecision.threshold,
-            segments: allSegments.map {
-                DiscardProbe.SegmentInfo(
-                    text: $0.text,
-                    noSpeechProb: nil,
-                    avgLogProb: $0.avgLogprob,
-                    compressionRatio: $0.compressionRatio,
-                    temperature: $0.temperature,
-                    startSeconds: $0.start,
-                    endSeconds: $0.end
-                )
-            },
+            segments: segmentInfos,
             lowConfidenceShort: LowConfidenceShort.flag(
                 durationSeconds: durationSeconds,
                 avgLogProbs: allSegments.map(\.avgLogprob)
@@ -542,15 +572,7 @@ class TranscriptionService: ObservableObject {
                 vadMaxFrameEnergy: gateDecision.maxFrameEnergy,
                 gateNoiseFloor: gateDecision.noiseFloor,
                 gateThreshold: gateDecision.threshold,
-                segments: allSegments.map {
-                    DiscardProbe.SegmentInfo(
-                        text: $0.text,
-                        noSpeechProb: nil,
-                        avgLogProb: $0.avgLogprob,
-                        compressionRatio: $0.compressionRatio,
-                        temperature: $0.temperature
-                    )
-                },
+                segments: segmentInfos,
                 noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable,
                 energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
                 gateBypassedByDuration: gateBypassedByDuration

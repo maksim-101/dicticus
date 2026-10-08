@@ -106,6 +106,16 @@
 // that reached Whisper only through the Phase 50 D-01 duration bypass), false for the
 // duration arm.
 //
+// Cycle 8 (quick task 261008-gb2, PER-CHUNK PHANTOM DROP): adds two discard-log reasons.
+// `phantomSegmentsOnly`: the per-chunk drop removed every chunk of the decode.
+// `nearSilentShortClip`: a clip under 2.5 s with at most 2 voiced 100 ms frames,
+// discarded after decode so the record keeps the decoded segments. Every post-decode
+// record (boilerplate, short-stock, noSpeech, the two new reasons, `pass`, `noResult`)
+// now lists ALL original segments, each with `language` (WhisperKit's per-chunk
+// `result.language`) and `start_s`/`end_s`; a segment of a removed chunk also carries
+// `drop_reason` (`boilerplateSegment` or `nonDeEnLanguage`). A `pass` record with a
+// `drop_reason` segment is a clip whose remaining chunks were pasted.
+//
 // Output: ~/Library/Application Support/Dicticus/DebugRecordings/discard-YYYY-MM-DD.jsonl
 // Retention: 14 days, purged once per launch.
 
@@ -155,6 +165,12 @@ public actor DiscardProbe {
         /// sites (which never captured this) compile unchanged.
         public let startSeconds: Float?
         public let endSeconds: Float?
+        /// The chunk's detected language code (WhisperKit `TranscriptionResult.language`),
+        /// quick task 261008-gb2. Optional so call sites without it compile unchanged.
+        public let language: String?
+        /// Set when the per-chunk phantom drop removed this segment's chunk:
+        /// `boilerplateSegment` or `nonDeEnLanguage`.
+        public let dropReason: String?
 
         public init(
             text: String,
@@ -163,7 +179,9 @@ public actor DiscardProbe {
             compressionRatio: Float? = nil,
             temperature: Float? = nil,
             startSeconds: Float? = nil,
-            endSeconds: Float? = nil
+            endSeconds: Float? = nil,
+            language: String? = nil,
+            dropReason: String? = nil
         ) {
             self.text = text
             self.noSpeechProb = noSpeechProb
@@ -172,6 +190,8 @@ public actor DiscardProbe {
             self.temperature = temperature
             self.startSeconds = startSeconds
             self.endSeconds = endSeconds
+            self.language = language
+            self.dropReason = dropReason
         }
     }
 
@@ -255,6 +275,8 @@ public actor DiscardProbe {
                 if let temperature = seg.temperature { segLine["temperature"] = temperature }
                 if let startSeconds = seg.startSeconds { segLine["start_s"] = startSeconds }
                 if let endSeconds = seg.endSeconds { segLine["end_s"] = endSeconds }
+                if let language = seg.language { segLine["language"] = language }
+                if let dropReason = seg.dropReason { segLine["drop_reason"] = dropReason }
                 return segLine
             }
         }
