@@ -176,13 +176,13 @@ final class EditGuardHarmFixesTests: XCTestCase {
     }
 
     /// 261008-gb4 follow-up: the casing rejection reverts only the casing
-    /// token; the article inserted next to it, in the same edit cluster,
+    /// token; the article inserted beside it, within one edit cluster,
     /// still ships. Mutation MF5b.
     func testF5_dictCasingRejectionKeepsAdjacentInsert_RED() {
         let r = run(
-            "en", "And then as for zorbex lubricant I am open to switching as well.",
-            "And then, as for the ZORBEX lubricant, I am open to switching as well.", dictProtected: ["zorbex"])
-        XCTAssertEqual(r.text, "And then, as for the zorbex lubricant, I am open to switching as well.")
+            "en", "Next regarding zorbex lubricant the shop keeps two spare tins.",
+            "Next, regarding the ZORBEX lubricant, the shop keeps two spare tins.", dictProtected: ["zorbex"])
+        XCTAssertEqual(r.text, "Next, regarding the zorbex lubricant, the shop keeps two spare tins.")
         XCTAssertTrue(hasReject(r, "dictProtectedCasing"), "\(r.edits)")
     }
 
