@@ -144,7 +144,7 @@ final class EditGuardHarmFixesTests: XCTestCase {
     func testF3_orphanClosingQuoteStaysDropped() {
         let r = run(
             "en",
-            "The mechanic said, \"The rim is bent, the tire is flat.\" Fixing the rim takes time because the shop is busy and then also the part is late.",
+            "The mechanic said, \"The rim is bent, the tire is flat.\" Fixing the rim takes time because the shop is busy and as well the part is late.",
             "The mechanic said, The rim is bent, the tire is flat. Fixing the rim takes long because the shop is busy, and the part is very late.")
         XCTAssertEqual(r.text.filter { $0 == "\"" }.count % 2, 0, "unbalanced quotes in: \(r.text)")
     }
