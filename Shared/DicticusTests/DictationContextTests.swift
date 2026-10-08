@@ -40,12 +40,12 @@ final class DictationContextTests: XCTestCase {
     // MARK: - CleanupPrompt.version(for:context:) — D-10 telemetry bucketing
 
     func testVersionForContextCodeAddsSuffix() {
-        XCTAssertEqual(CleanupPrompt.version(for: .transcriptionist, context: .code), "v-transcriptionist-2-code")
+        XCTAssertEqual(CleanupPrompt.version(for: .transcriptionist, context: .code), "v-transcriptionist-code")
     }
 
     func testVersionForContextDefaultAndProseAreUnsuffixed() {
-        XCTAssertEqual(CleanupPrompt.version(for: .transcriptionist, context: .default), "v-transcriptionist-2")
-        XCTAssertEqual(CleanupPrompt.version(for: .transcriptionist, context: .prose), "v-transcriptionist-2")
+        XCTAssertEqual(CleanupPrompt.version(for: .transcriptionist, context: .default), "v-transcriptionist")
+        XCTAssertEqual(CleanupPrompt.version(for: .transcriptionist, context: .prose), "v-transcriptionist")
     }
 
     func testVersionForWithoutContextArgumentIsUnchanged() {
@@ -53,7 +53,7 @@ final class DictationContextTests: XCTestCase {
         // compiling AND behaving identically — this is the D-09-style
         // attribution lock for the new parameter's default.
         XCTAssertEqual(CleanupPrompt.version(for: .rulePriority), "v-rulepriority")
-        XCTAssertEqual(CleanupPrompt.version(for: .transcriptionist), "v-transcriptionist-2")
+        XCTAssertEqual(CleanupPrompt.version(for: .transcriptionist), "v-transcriptionist")
     }
 
     // MARK: - CleanupPrompt.build(context:) — 38-02: real .code identifier-safe body
