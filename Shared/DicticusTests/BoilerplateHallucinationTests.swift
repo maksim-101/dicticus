@@ -219,4 +219,84 @@ final class BoilerplateHallucinationTests: XCTestCase {
     func testShortStockMaxDurationIsOnePointFiveSeconds() {
         XCTAssertEqual(BoilerplateHallucination.shortStockMaxDurationSeconds, 1.5)
     }
+
+    // MARK: - Quick 261008-gb2: per-chunk boilerplate drop (F1)
+    //
+    // A long clip is decoded as several chunks. A chunk that is only a ship-list phrase
+    // next to other chunks is a pause phantom; a sole chunk is left to the whole-clip
+    // `match`; a phrase inside a longer chunk is never touched.
+
+    private func drops(_ chunks: [(String, String)]) -> [BoilerplateHallucination.ChunkDropReason?] {
+        BoilerplateHallucination.chunkDropReasons(chunks.map { (text: $0.0, language: $0.1) })
+    }
+
+    func testChunkDropTrailingThankYouChunk_RED() {
+        let r = drops([("We moved the review to the second floor and booked the lamp room", "en"), ("Thank you.", "en")])
+        XCTAssertEqual(r, [nil, .boilerplateSegment])
+    }
+
+    func testChunkDropLeadingDashThankYouChunk_RED() {
+        let r = drops([
+            ("The ferry leaves earlier on Sundays", "en"),
+            ("Der Kaffee ist leider schon kalt geworden", "de"),
+            ("- Thank you.", "en")
+        ])
+        XCTAssertEqual(r, [nil, nil, .boilerplateSegment])
+    }
+
+    func testChunkDropEveryChunkIsPhantom_RED() {
+        let r = drops([("Thank you.", "en"), ("Thank you.", "en")])
+        XCTAssertEqual(r, [.boilerplateSegment, .boilerplateSegment])
+    }
+
+    func testChunkDropSoleChunkIsLeftToWholeClipMatch() {
+        XCTAssertEqual(drops([("Thank you.", "en")]), [nil])
+    }
+
+    func testChunkDropPhraseInsideLongerChunkIsKept() {
+        let r = drops([
+            ("Thank you. The garden gate needs a new hinge", "en"),
+            ("The tomatoes are almost ready. Thank you.", "en"),
+            ("Thank you. Thank you.", "en")
+        ])
+        XCTAssertEqual(r, [nil, nil, nil])
+    }
+
+    func testChunkDropGermanThanksStaysExcluded() {
+        XCTAssertEqual(drops([("Der Zug hat Verspätung", "de"), ("Vielen Dank.", "de")]), [nil, nil])
+        XCTAssertEqual(drops([("Der Zug hat Verspätung", "de"), ("Danke.", "de")]), [nil, nil])
+    }
+
+    func testChunkDropCaseAndPunctuationStayExact() {
+        XCTAssertEqual(drops([("The ferry leaves early", "en"), ("thank you.", "en")]), [nil, nil])
+        XCTAssertEqual(drops([("The ferry leaves early", "en"), ("Thank you", "en")]), [nil, nil])
+    }
+
+    func testChunkDropEmptyListGivesEmptyArray() {
+        XCTAssertEqual(drops([]).count, 0)
+    }
+
+    // MARK: - Quick 261008-gb2: per-chunk language drop (F2)
+
+    func testChunkDropPolishLookingChunkAfterGerman_RED() {
+        let r = drops([("Wir sehen uns heute am Fluss", "de"), ("Zaplamy toki mase.", "pl")])
+        XCTAssertEqual(r, [nil, .nonDeEnLanguage])
+    }
+
+    func testChunkDropSoleSpanishLookingChunk_RED() {
+        XCTAssertEqual(drops([("Las mesas verdes cantan.", "es")]), [.nonDeEnLanguage])
+    }
+
+    func testChunkDropGermanAndEnglishChunksAreKept() {
+        XCTAssertEqual(drops([("Das Boot liegt am Steg", "de"), ("The boat is at the pier", "en")]), [nil, nil])
+    }
+
+    func testChunkDropShipListChunkTaggedOtherLanguageIsBoilerplateFirst() {
+        let r = drops([("The kettle is on the left shelf", "en"), ("Thank you.", "pl")])
+        XCTAssertEqual(r, [nil, .boilerplateSegment])
+    }
+
+    func testChunkLanguagesAreExactlyGermanAndEnglish() {
+        XCTAssertEqual(BoilerplateHallucination.chunkLanguages, ["de", "en"])
+    }
 }

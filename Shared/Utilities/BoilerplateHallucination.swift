@@ -26,6 +26,15 @@ import Foundation
 /// file reads no energy value and sets no energy threshold; the gate made that call for
 /// its own discard decision, and it is not a confidence signal either.
 ///
+/// Reviewed amendment (quick task 261008-gb2): `chunkDropReasons` and ONLY it reads two
+/// further non-text inputs, named here so no more can arrive silently. (1) The number of
+/// chunks WhisperKit returned for the clip (a long clip is decoded as one result per
+/// voice-activity chunk). (2) Each chunk's detected language code. Neither is a confidence
+/// or energy signal. The prohibition list above stays in force word for word. The
+/// per-chunk path removes one leading "-" before comparing (the measured leading-dash
+/// form of the phantom); whole-clip `match` keeps its pinned no-normalisation semantics.
+/// Still called only from macOS.
+///
 /// Matching semantics, pinned (for `shipList`; `matchShortStock` compares lowercased, see below):
 /// - Trim leading/trailing whitespace and newlines, then compare for EXACT string
 ///   equality against the closed list below. No lowercasing, no punctuation stripping,
@@ -104,5 +113,47 @@ enum BoilerplateHallucination {
         guard !trimmed.isEmpty, shortStockList.contains(trimmed.lowercased()) else { return nil }
         guard durationSeconds < shortStockMaxDurationSeconds || !voiceDetected else { return nil }
         return trimmed
+    }
+
+    /// Why `chunkDropReasons` removed one chunk of a decode.
+    enum ChunkDropReason: String {
+        case boilerplateSegment
+        case nonDeEnLanguage
+    }
+
+    /// Languages a chunk may be tagged with and still be kept. Dicticus dictates German
+    /// and English; Whisper tags a chunk with a third language only when it garbles or
+    /// hallucinates.
+    static let chunkLanguages: Set<String> = ["de", "en"]
+
+    /// Per-chunk drop (quick task 261008-gb2, F1 and F2). `match` compares the joined clip
+    /// text, so a pause phantom that is one chunk of a long clip ("... real speech" +
+    /// "Thank you.") is invisible to it.
+    ///
+    /// F1: for a decode of two or more chunks, a chunk whose text, trimmed and with one
+    /// leading "-" removed, is exactly a ship-list phrase gets `.boilerplateSegment`. A sole
+    /// chunk is left to the whole-clip `match`. A ship-list phrase inside a longer chunk
+    /// never matches. Measured over every macOS discard log from 2026-08-13 to 2026-10-08:
+    /// 4 non-sole ship-list chunks among 444 multi-chunk passes, and 0 of the corpus's real
+    /// "thank you"s sit alone in a chunk.
+    ///
+    /// F2: a chunk whose language is not in `chunkLanguages` gets `.nonDeEnLanguage`, at any
+    /// chunk count. Measured over the same logs: 3 such chunks among 2,875 pass segments (one
+    /// sole Arabic clip the non-Latin check already refused, one sole Spanish clip that was
+    /// garbled German speech, one Polish chunk after German speech). Deliberately no rule for
+    /// an "en" chunk inside a "de" clip: code-switching is a supported way to dictate.
+    ///
+    /// The boilerplate check runs first. Returns one entry per input chunk, in order.
+    static func chunkDropReasons(_ chunks: [(text: String, language: String)]) -> [ChunkDropReason?] {
+        chunks.map { chunk in
+            if chunks.count >= 2 {
+                var t = chunk.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if t.hasPrefix("-") {
+                    t = String(t.dropFirst()).trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                if match(t) != nil { return .boilerplateSegment }
+            }
+            return chunkLanguages.contains(chunk.language) ? nil : .nonDeEnLanguage
+        }
     }
 }
