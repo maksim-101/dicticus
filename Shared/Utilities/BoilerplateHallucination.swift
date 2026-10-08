@@ -105,4 +105,13 @@ enum BoilerplateHallucination {
         guard durationSeconds < shortStockMaxDurationSeconds || !voiceDetected else { return nil }
         return trimmed
     }
+
+    /// Why `chunkDropReasons` removed one chunk of a multi-chunk decode.
+    enum ChunkDropReason: String {
+        case boilerplateSegment
+    }
+
+    static func chunkDropReasons(_ chunks: [(text: String, language: String)]) -> [ChunkDropReason?] {
+        chunks.map { _ in nil }
+    }
 }
