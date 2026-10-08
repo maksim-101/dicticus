@@ -292,6 +292,19 @@ public enum EditGuard {
         /// other accepted punctuation. Moving step 5 itself ahead of step 1
         /// would yield `contentWordIdentityChange`, a trigger.
         case dictProtectedCasing
+        /// Quick task 261008-gb4 (F2): assigned by `applySeamMarkCoupling` to
+        /// an accepted `punctuationOrCasing` delete of a baseline mark, and to
+        /// the casing-only substitute of the word after it, when a rejected
+        /// punctuation `.move` of the candidate lands on that very seam.
+        /// Stage trace of the live defect (`2026-10-03T15:58:49.280Z`,
+        /// `2026-10-08T06:23:58.556Z`, `2026-10-08T06:42:03.868Z`): the LLM
+        /// deleted the baseline's period or comma at a seam and moved a mark
+        /// onto it; the move was rejected, the delete was not, and the seam
+        /// shipped with no mark at all. Both edits are reverted together, so
+        /// the seam keeps its dictated mark and the casing of the word after
+        /// it. Accept to reject only; `pauseSplitMerge` deletes are left
+        /// alone. NOT a member of `sentenceRevertTriggerClasses`.
+        case punctuationSeamCoupling
     }
 
     /// The log-shaped record: one classified edit, ready to serialize
@@ -806,6 +819,7 @@ public enum EditGuard {
         }
         applyHyphenCompoundJoinExemption(edits: edits, verdicts: &result, dictProtectedLower: dictProtectedLower)
         applyPunctuationMoveExemption(edits: edits, verdicts: &result, baseline: baseline, candidate: candidate, language: language)
+        applySeamMarkCoupling(edits: edits, verdicts: &result, candidate: candidate)
         applyContractionExpansionExemption(edits: edits, verdicts: &result, baseline: baseline, candidate: candidate, language: language, dictProtectedLower: dictProtectedLower)
         return result
     }
@@ -950,6 +964,15 @@ public enum EditGuard {
     private static let movableMarks: Set<String> = [",", ".", "?", "!"]
     private static let punctuationMoveJumpCap = 6
 
+    /// Quick task 261003-au9: "quiet" means a keep, or a substitute that only
+    /// changes a word's case. Shared by `applyPunctuationMoveExemption` and
+    /// `applySeamMarkCoupling`.
+    private static func isQuietEdit(_ e: Edit) -> Bool {
+        if e.kind == .keep { return true }
+        if e.kind == .substitute, let f = e.from, let t = e.to, f.kind == .word, f.normalized == t.normalized { return true }
+        return false
+    }
+
     /// Quick task 261003-au9 (Rule B). Re-accepts a rejected `unclassified`
     /// punctuation move in the two shapes named on `AcceptClass.punctuationMove`.
     /// "Quiet" means a keep, or a substitute that only changes a word's case.
@@ -961,11 +984,7 @@ public enum EditGuard {
         edits: [Edit], verdicts: inout [ClassifiedEdit],
         baseline: [Token], candidate: [Token], language: String
     ) {
-        func quiet(_ e: Edit) -> Bool {
-            if e.kind == .keep { return true }
-            if e.kind == .substitute, let f = e.from, let t = e.to, f.kind == .word, f.normalized == t.normalized { return true }
-            return false
-        }
+        let quiet = isQuietEdit
         var byCand: [Int: Edit] = [:]
         var idxByCand: [Int: Int] = [:]
         var byBase: [Int: Int] = [:]
@@ -1017,6 +1036,62 @@ public enum EditGuard {
             guard ok else { continue }
             verdicts[i] = ClassifiedEdit(kind: verdicts[i].kind, from: verdicts[i].from, to: verdicts[i].to,
                                          accepted: true, acceptClass: AcceptClass.punctuationMove.rawValue, rejectClass: nil)
+        }
+    }
+
+    private static let seamMarks: Set<String> = [",", ".", ";", ":", "?", "!"]
+
+    /// Quick task 261008-gb4 (F2). Where a punctuation `.move` is rejected,
+    /// the candidate mark never renders at its destination. If that
+    /// destination is a seam between two quiet, non-punctuation candidate
+    /// tokens whose edits sit at `ip` and `ip + 2`, and `edits[ip + 1]` is an
+    /// accepted `punctuationOrCasing` delete of a baseline mark, the seam
+    /// would ship with no mark at all: the move that was meant to replace the
+    /// deleted mark is gone and the delete stands alone. The delete is then
+    /// rejected (`punctuationSeamCoupling`), and so is the casing-only
+    /// substitute of the word after it, so the dictated mark and the casing
+    /// after it come back together.
+    ///
+    /// Why at classify time: `applyPunctuationMoveExemption` requires the two
+    /// neighbour edits of an accepted move to be adjacent (`inx == ip + 1`),
+    /// so an accepted `punctuationMove` never lands on a seam that holds a
+    /// delete; 246 of the 248 rejected punctuation moves in the planning
+    /// replay were rejected at classify (`unclassified`). A classify-time
+    /// pass therefore sees every seam shape, and `rebuild`'s
+    /// `applyAtomicGroupCoupling` sees the flips. Verdicts only go from
+    /// accepted to rejected. `pauseSplitMerge` deletes have a different
+    /// accept class and are left alone: a merged false pause-split period
+    /// stays merged.
+    private static func applySeamMarkCoupling(
+        edits: [Edit], verdicts: inout [ClassifiedEdit], candidate: [Token]
+    ) {
+        var idxByCand: [Int: Int] = [:]
+        for (k, e) in edits.enumerated() {
+            if let t = e.to { idxByCand[t.index] = k }
+        }
+        func reject(_ k: Int) {
+            verdicts[k] = ClassifiedEdit(
+                kind: verdicts[k].kind, from: verdicts[k].from, to: verdicts[k].to,
+                accepted: false, acceptClass: nil, rejectClass: RejectionClass.punctuationSeamCoupling.rawValue
+            )
+        }
+        for i in edits.indices {
+            guard edits[i].kind == .move, !verdicts[i].accepted,
+                  let a = edits[i].from, let b = edits[i].to,
+                  a.kind == .punctuation, b.kind == .punctuation,
+                  seamMarks.contains(a.text), seamMarks.contains(b.text) else { continue }
+            let j = b.index
+            guard j > 0, j < candidate.count - 1,
+                  candidate[j - 1].kind != .punctuation, candidate[j + 1].kind != .punctuation,
+                  let ip = idxByCand[j - 1], let inx = idxByCand[j + 1], inx == ip + 2,
+                  isQuietEdit(edits[ip]), isQuietEdit(edits[inx]) else { continue }
+            let d = ip + 1
+            guard edits[d].kind == .delete, let deleted = edits[d].from,
+                  deleted.kind == .punctuation, seamMarks.contains(deleted.text),
+                  verdicts[d].accepted,
+                  verdicts[d].acceptClass == AcceptClass.punctuationOrCasing.rawValue else { continue }
+            reject(d)
+            if edits[inx].kind == .substitute, verdicts[inx].accepted { reject(inx) }
         }
     }
 
