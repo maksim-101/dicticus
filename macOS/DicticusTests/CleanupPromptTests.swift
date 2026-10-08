@@ -211,7 +211,7 @@ final class CleanupPromptTests: XCTestCase {
     func testCurrentVersionIsVTranscriptionist() {
         XCTAssertNotEqual(CleanupPrompt.currentVersion, "v-brave",
                           "currentVersion must be bumped off v-brave so JSONL analysis buckets Transcriptionist-prompt records separately")
-        XCTAssertEqual(CleanupPrompt.currentVersion, "v-transcriptionist")
+        XCTAssertEqual(CleanupPrompt.currentVersion, "v-transcriptionist-2")
     }
 
     func testDefaultInstructionReferencesVTranscriptionist() {

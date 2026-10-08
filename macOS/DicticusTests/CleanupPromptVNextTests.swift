@@ -65,7 +65,8 @@ final class CleanupPromptVNextTests: XCTestCase {
         XCTAssertNotEqual(CleanupPrompt.currentVersion, "v20", "currentVersion must be bumped off v20")
         XCTAssertNotEqual(CleanupPrompt.currentVersion, "v-next", "currentVersion must be bumped off v-next for the brave prompt")
         XCTAssertNotEqual(CleanupPrompt.currentVersion, "v-brave", "currentVersion must be bumped off v-brave for the Transcriptionist prompt")
-        XCTAssertEqual(CleanupPrompt.currentVersion, "v-transcriptionist")
+        XCTAssertNotEqual(CleanupPrompt.currentVersion, "v-transcriptionist", "currentVersion must be bumped off v-transcriptionist after the German filler-list change (261008-gb5)")
+        XCTAssertEqual(CleanupPrompt.currentVersion, "v-transcriptionist-2")
     }
 
     func testDefaultInstructionReferencesCurrentVersion() {
