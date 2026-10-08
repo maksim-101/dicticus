@@ -279,7 +279,7 @@ final class BoilerplateHallucinationTests: XCTestCase {
     // MARK: - Quick 261008-gb2: per-chunk language drop (F2)
 
     func testChunkDropPolishLookingChunkAfterGerman_RED() {
-        let r = drops([("Wir treffen uns morgen vor dem Bahnhof", "de"), ("Zaplamy toki mase.", "pl")])
+        let r = drops([("Wir sehen uns heute am Fluss", "de"), ("Zaplamy toki mase.", "pl")])
         XCTAssertEqual(r, [nil, .nonDeEnLanguage])
     }
 
