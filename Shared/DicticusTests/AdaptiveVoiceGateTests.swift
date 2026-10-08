@@ -82,7 +82,7 @@ final class AdaptiveVoiceGateTests: XCTestCase {
     //
     // Single-sources the frames-above-threshold count previously computed inline at
     // TranscriptionService ~283 (`gateFrameEnergies.filter { $0 > gateDecision.threshold }.count`).
-    // Diagnostic-only — this helper participates in no gating decision.
+    // Since quick task 261008-gb2 this count also feeds isNearSilentShortClip.
 
     func testFramesAboveThresholdCountsSpeechFrames() {
         // Two frames (0.01, 0.015) clearly above the resulting threshold, six frames
