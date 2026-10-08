@@ -21,6 +21,10 @@ import XCTest
 /// terminal mark. It is context-dependent too, and the boundary-coupling pass
 /// reverts it when the recase of the word after it is itself reverted.
 ///
+/// Since 261008-gb5 (`AcceptClass.listComma`) an `and`/`or` (German `und`/`oder`) replaced by `,` is accepted when the
+/// kept words on both sides are unchanged and a later `and`/`or` of the same list survives within four equal words;
+/// `A and B` -> `A, B` and every other connector-to-comma without a surviving coordinator stays rejected.
+///
 /// `;`, `,` and `:` as targets, `but`, `or`, `because`, `so` and their German
 /// counterparts, word swaps (D-09), noun coordination and `which` -> `:` stay
 /// rejected; the negatives below pin each.
@@ -93,6 +97,23 @@ final class EditGuardConnectorSplitTests: XCTestCase {
         static let commaJump = Pair("en", "We need nets, floats or buoys for example.", "We need nets floats or buoys, for example.")
         static let coupledMove = Pair("en", "Should the club hire a second crew? member or does the club pay for the repairs because by then it is late or sell the old sails.", "Should the club hire a second crew member? Or does the club pay for the repairs, because by then it is late, sell the old sails.")
         static let controlMove = Pair("en", "Should the club hire a second crew? member or does the club pay for the repairs.", "Should the club hire a second crew member? Or does the club pay for the repairs.")
+        static let listEn = Pair("en", "We need nets and floats and buoys for the boat.", "We need nets, floats, and buoys for the boat.")
+        static let listOr = Pair("en", "You can paint or sand or oil the deck.", "You can paint, sand, or oil the deck.")
+        static let listMixed = Pair("en", "We need nets and floats or buoys for the boat.", "We need nets, floats, or buoys for the boat.")
+        static let listMulti = Pair("en", "The planks are torn or not dry or not sealed.", "The planks are torn, not dry, or not sealed.")
+        static let listUnd = Pair("de", "Wir kaufen Mehl und Zucker und Salz für das Fest.", "Wir kaufen Mehl, Zucker und Salz für das Fest.")
+        static let listOder = Pair("de", "Wir können streichen oder schleifen oder ölen.", "Wir können streichen, schleifen oder ölen.")
+        static let listSameSentence = Pair("en", "We need nets and floats and buoys because the boat is old.", "We need nets, floats and buoys because the boat is aged.")
+        static let listNextSentence = Pair("en", "We need nets and floats and buoys. The shop really has enough.", "We need nets, floats and buoys. The shop has enough.")
+        static let pairOnly = Pair("en", "We need nets and floats.", "We need nets, floats.")
+        static let everyConnector = Pair("en", "We need nets and floats and buoys.", "We need nets, floats, buoys.")
+        static let andNot = Pair("en", "We sell bread and not cakes today.", "We sell bread, not cakes today.")
+        static let andThen = Pair("en", "We sand the hull and then we paint it.", "We sand the hull, then we paint it.")
+        static let pairDe = Pair("de", "Wir kaufen Brot und Milch.", "Wir kaufen Brot, Milch.")
+        static let farCoordinator = Pair("en", "We need nets and floats for the old boat at the harbor and ropes.", "We need nets, floats for the old boat at the harbor and ropes.")
+        static let nextSentenceCoordinator = Pair("en", "We need nets and floats. And then we leave.", "We need nets, floats. And then we leave.")
+        static let neighbourChanged = Pair("en", "We need nets and float and buoys.", "We need nets, floats, and buoys.")
+        static let butToComma = Pair("en", "The tool is small but sturdy and cheap.", "The tool is small, sturdy and cheap.")
     }
 
     // MARK: - Helpers
@@ -172,9 +193,11 @@ final class EditGuardConnectorSplitTests: XCTestCase {
         assertRejected(run(Fx.audit22), from: "etc", to: ".", .contentWordIdentityChange)
     }
 
-    /// 10-03:#24 shape: `and` -> `,` stays rejected.
-    func testAudit24_andToCommaStaysRejected() {
-        assertRejected(run(Fx.audit24), from: "and", to: ",", .contentWordIdentityChange)
+    /// 10-03:#24 shape: `and` -> `,` with a surviving `and` is accepted since 261008-gb5 (list comma).
+    func testAudit24_listCommaAccepted_RED() {
+        let r = run(Fx.audit24)
+        XCTAssertEqual(r.text, Fx.audit24.llm)
+        assertAccepted(r, from: "and", to: ",", "listComma")
     }
 
     /// 10-03:#40 shape: `which` -> `:` stays rejected.
@@ -346,4 +369,87 @@ final class EditGuardConnectorSplitTests: XCTestCase {
         assertAccepted(r, from: "?", to: "?", kind: "move", "punctuationMove")
         assertAccepted(r, from: "or", to: "Or", "punctuationOrCasing")
     }
+
+    // MARK: - Quick 261008-gb5: list commas
+
+    private func assertListComma(_ p: Pair, connector: String, file: StaticString = #filePath, line: UInt = #line) {
+        let r = run(p)
+        XCTAssertEqual(r.text, p.llm, file: file, line: line)
+        assertAccepted(r, from: connector, to: ",", "listComma", file: file, line: line)
+    }
+
+    /// 10-08:#160 shape: first `and` -> `,` and an Oxford comma inserted before the surviving `and`.
+    func testListCommaSameCoordinatorEnglish_RED() { assertListComma(Fx.listEn, connector: "and") }
+
+    /// 10-08:#407 shape.
+    func testListCommaOrSeries_RED() { assertListComma(Fx.listOr, connector: "or") }
+
+    /// 10-08:#440 shape (PD-1): `and` -> `,` with a surviving `or`.
+    func testListCommaMixedCoordinators_RED() { assertListComma(Fx.listMixed, connector: "and") }
+
+    /// 10-08:#526 shape: one word sits between the right neighbour and the surviving `or`.
+    func testListCommaMultiWordItem_RED() { assertListComma(Fx.listMulti, connector: "or") }
+
+    func testListCommaGermanUnd_RED() { assertListComma(Fx.listUnd, connector: "und") }
+
+    func testListCommaGermanOder_RED() { assertListComma(Fx.listOder, connector: "oder") }
+
+    /// M3: the comma reverts with its sentence when an independent content rejection sits in it.
+    func testListCommaRevertsWithContentRejectionInSameSentence_RED() {
+        let p = Fx.listSameSentence
+        let r = run(p)
+        XCTAssertEqual(r.text, p.baseline)
+        assertRejected(r, from: "and", to: ",", .sentenceCoupledRevert)
+        assertRejected(r, from: "old", to: "aged", .contentWordIdentityChange)
+    }
+
+    func testListCommaSurvivesContentRejectionInNextSentence_RED() {
+        let p = Fx.listNextSentence
+        let r = run(p)
+        XCTAssertEqual(r.text, "We need nets, floats and buoys. The shop really has enough.")
+        assertAccepted(r, from: "and", to: ",", "listComma")
+        assertRejected(r, from: "really", kind: "delete", .contentWordDeletion)
+    }
+
+    // MARK: - Quick 261008-gb5: connector-to-comma without a surviving coordinator stays rejected
+
+    private func assertCommaRejected(_ p: Pair, connector: String, file: StaticString = #filePath, line: UInt = #line) {
+        let r = run(p)
+        XCTAssertEqual(r.text, p.baseline, file: file, line: line)
+        assertRejected(r, from: connector, to: ",", .contentWordIdentityChange, file: file, line: line)
+    }
+
+    /// M1: `A and B` -> `A, B` loses the conjunction.
+    func testAndToCommaWithoutLaterCoordinatorStaysRejected() { assertCommaRejected(Fx.pairOnly, connector: "and") }
+
+    /// M1: both connectors of `A and B and C` replaced: the first one's scan ends in a different place in each text.
+    func testEveryConnectorToCommaStaysRejected() {
+        let r = run(Fx.everyConnector)
+        XCTAssertEqual(r.text, Fx.everyConnector.baseline)
+        XCTAssertEqual(r.edits.filter { $0.from == "and" && $0.to == "," && !$0.accepted }.count, 2, "\(r.edits)")
+    }
+
+    /// 10-08:#139/#451 shape.
+    func testAndNotToCommaStaysRejected() { assertCommaRejected(Fx.andNot, connector: "and") }
+
+    /// 10-08:#173/#459 shape.
+    func testAndThenToCommaStaysRejected() { assertCommaRejected(Fx.andThen, connector: "and") }
+
+    func testGermanUndToCommaWithoutLaterCoordinatorStaysRejected() { assertCommaRejected(Fx.pairDe, connector: "und") }
+
+    /// M4: the surviving `and` sits six words after the right neighbour.
+    func testFarLaterCoordinatorStaysRejected() { assertCommaRejected(Fx.farCoordinator, connector: "and") }
+
+    /// M5: a coordinator in the next sentence is not part of the list.
+    func testLaterCoordinatorInNextSentenceStaysRejected() { assertCommaRejected(Fx.nextSentenceCoordinator, connector: "and") }
+
+    /// M2: the right neighbour is inflected, so the kept-words condition fails.
+    func testListCommaNeighbourChangedStaysRejected() {
+        let r = run(Fx.neighbourChanged)
+        XCTAssertEqual(r.text, Fx.neighbourChanged.baseline)
+        assertRejected(r, from: "and", to: ",", .contentWordIdentityChange)
+    }
+
+    /// M6: `but` is not a list word.
+    func testButToCommaStaysRejected() { assertCommaRejected(Fx.butToComma, connector: "but") }
 }
