@@ -440,7 +440,7 @@ final class EditGuardConnectorSplitTests: XCTestCase {
     /// M4: the surviving `and` sits six words after the right neighbour.
     func testFarLaterCoordinatorStaysRejected() { assertCommaRejected(Fx.farCoordinator, connector: "and") }
 
-    /// M5: a coordinator in the next sentence is not part of the list.
+    /// M5: a coordinator past the sentence end belongs to another clause.
     func testLaterCoordinatorInNextSentenceStaysRejected() { assertCommaRejected(Fx.nextSentenceCoordinator, connector: "and") }
 
     /// M2: the right neighbour is inflected, so the kept-words condition fails.
