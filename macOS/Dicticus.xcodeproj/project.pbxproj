@@ -227,6 +227,7 @@
 		E95F2079082597A0ABF52F78 /* PasteProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 581D101921D572E116C6A241 /* PasteProbe.swift */; };
 		E96FCDD523E8F5CAEDD1B303 /* AiCleanupPane.swift in Sources */ = {isa = PBXBuildFile; fileRef = FBC4C4363B1672EAB82E3084 /* AiCleanupPane.swift */; };
 		E98DF26857206CBF0E7D21C7 /* DictionaryExactPassCaseTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85844C88385261660FE6757B /* DictionaryExactPassCaseTests.swift */; };
+		EA4A61E5035A9786DD25E19E /* EditGuardHarmFixesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 53682B7066876EC9929F75F7 /* EditGuardHarmFixesTests.swift */; };
 		ECCC98D4D7A901320AB0DCF0 /* BrandMatcherShortAcronymGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E6914B9852E32683771AD7A /* BrandMatcherShortAcronymGuardTests.swift */; };
 		ED4AF727A2381FBEECFD285C /* LexiconVetoTraceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BA973F764EC1E7A1A749B80 /* LexiconVetoTraceTests.swift */; };
 		ED56393CBE6A29FCA1D06187 /* EditGuardExactStutterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2E3C0945B499287BC2D6132 /* EditGuardExactStutterTests.swift */; };
@@ -337,6 +338,7 @@
 		51DD0C4B358C8AFB21749F27 /* Dicticus.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Dicticus.entitlements; sourceTree = "<group>"; };
 		522490ACE2397E3E812A984D /* PostEditDiffTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PostEditDiffTests.swift; sourceTree = "<group>"; };
 		52C80ED16FD0F19347A8CF3B /* TextProcessingServiceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextProcessingServiceTests.swift; sourceTree = "<group>"; };
+		53682B7066876EC9929F75F7 /* EditGuardHarmFixesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditGuardHarmFixesTests.swift; sourceTree = "<group>"; };
 		563054E122CDA669E9808B05 /* EditGuardSeamSpacingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditGuardSeamSpacingTests.swift; sourceTree = "<group>"; };
 		56D14A2CA0763BE92AFC0300 /* InflectionRulesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InflectionRulesTests.swift; sourceTree = "<group>"; };
 		581D101921D572E116C6A241 /* PasteProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PasteProbe.swift; sourceTree = "<group>"; };
@@ -828,6 +830,7 @@
 				3931C660399C4F5714646B17 /* EditGuardFixtureCoverageTests.swift */,
 				A7D03D036A33A2051FEFAB61 /* EditGuardFixtures.swift */,
 				A79871663647645D625FA964 /* EditGuardGrammarRegressionTests.swift */,
+				53682B7066876EC9929F75F7 /* EditGuardHarmFixesTests.swift */,
 				C4ED406D24673A5ECE8C0493 /* EditGuardHyphenCompoundJoinTests.swift */,
 				30794E5300F4E706343F9A23 /* EditGuardLoneSwapPropagationTests.swift */,
 				153DE91A83FA8BA7403E4663 /* EditGuardMaterializeInvariantTests.swift */,
@@ -1226,6 +1229,7 @@
 				BDC0C44074CD829203DDED3D /* EditGuardFixtureCoverageTests.swift in Sources */,
 				9F89D0D615C50B4212555C98 /* EditGuardFixtures.swift in Sources */,
 				E3A74E4BB36C40A3E2E8AAAC /* EditGuardGrammarRegressionTests.swift in Sources */,
+				EA4A61E5035A9786DD25E19E /* EditGuardHarmFixesTests.swift in Sources */,
 				AAEF36D568F74634FFE3A05A /* EditGuardHyphenCompoundJoinTests.swift in Sources */,
 				5513879160DB3099A648C4C0 /* EditGuardLoneSwapPropagationTests.swift in Sources */,
 				32AC8196828109C4EA66F8FB /* EditGuardMaterializeInvariantTests.swift in Sources */,

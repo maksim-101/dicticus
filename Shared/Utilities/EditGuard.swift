@@ -273,6 +273,38 @@ public enum EditGuard {
         /// principle lower an acronym; 0 `formattingProjection` records in
         /// 3436.
         case acronymLoweredAfterDot
+        /// Quick task 261008-gb4 (F5): assigned by `classifySubstitute` to a
+        /// casing-only `.substitute` of a word whose normalized form is a
+        /// dictionary replacement value (`dictProtected`). Stage trace of the
+        /// live defect (`2026-10-06T03:40:31.040Z`, `2026-10-08T05:57:48.772Z`):
+        /// the dictionary produced a lowercase term, the LLM wrote it in
+        /// capitals, and step 1's casing-only accept ran before step 5's
+        /// dictProtect check and shipped it.
+        ///
+        /// Strict: the dictionary spelling survives verbatim, with no
+        /// exception. Sentence-initial capitals come back after the gate from
+        /// `applyFinalCapitalization`. The cost is also paid by a German noun
+        /// capital the LLM adds to a lowercase dictionary term
+        /// (`2026-10-03T05:07:48.000Z`), reported as a judgment row.
+        /// NOT a member of `sentenceRevertTriggerClasses` (the
+        /// `acronymLoweredAfterDot` precedent): a casing-only restore carries
+        /// no content signal, and triggering would revert the sentence's
+        /// other accepted punctuation. Moving step 5 itself ahead of step 1
+        /// would yield `contentWordIdentityChange`, a trigger.
+        case dictProtectedCasing
+        /// Quick task 261008-gb4 (F2): assigned by `applySeamMarkCoupling` to
+        /// an accepted `punctuationOrCasing` delete of a baseline mark, and to
+        /// the casing-only substitute of the word after it, when a rejected
+        /// punctuation `.move` of the candidate lands on that very seam.
+        /// Stage trace of the live defect (`2026-10-03T15:58:49.280Z`,
+        /// `2026-10-08T06:23:58.556Z`, `2026-10-08T06:42:03.868Z`): the LLM
+        /// deleted the baseline's period or comma at a seam and moved a mark
+        /// onto it; the move was rejected, the delete was not, and the seam
+        /// shipped with no mark at all. Both edits are reverted together, so
+        /// the seam keeps its dictated mark and the casing of the word after
+        /// it. Accept to reject only; `pauseSplitMerge` deletes are left
+        /// alone. NOT a member of `sentenceRevertTriggerClasses`.
+        case punctuationSeamCoupling
     }
 
     /// The log-shaped record: one classified edit, ready to serialize
@@ -787,6 +819,7 @@ public enum EditGuard {
         }
         applyHyphenCompoundJoinExemption(edits: edits, verdicts: &result, dictProtectedLower: dictProtectedLower)
         applyPunctuationMoveExemption(edits: edits, verdicts: &result, baseline: baseline, candidate: candidate, language: language)
+        applySeamMarkCoupling(edits: edits, verdicts: &result, candidate: candidate)
         applyContractionExpansionExemption(edits: edits, verdicts: &result, baseline: baseline, candidate: candidate, language: language, dictProtectedLower: dictProtectedLower)
         return result
     }
@@ -931,6 +964,15 @@ public enum EditGuard {
     private static let movableMarks: Set<String> = [",", ".", "?", "!"]
     private static let punctuationMoveJumpCap = 6
 
+    /// Quick task 261003-au9: "quiet" means a keep, or a substitute that only
+    /// changes a word's case. Shared by `applyPunctuationMoveExemption` and
+    /// `applySeamMarkCoupling`.
+    private static func isQuietEdit(_ e: Edit) -> Bool {
+        if e.kind == .keep { return true }
+        if e.kind == .substitute, let f = e.from, let t = e.to, f.kind == .word, f.normalized == t.normalized { return true }
+        return false
+    }
+
     /// Quick task 261003-au9 (Rule B). Re-accepts a rejected `unclassified`
     /// punctuation move in the two shapes named on `AcceptClass.punctuationMove`.
     /// "Quiet" means a keep, or a substitute that only changes a word's case.
@@ -942,11 +984,7 @@ public enum EditGuard {
         edits: [Edit], verdicts: inout [ClassifiedEdit],
         baseline: [Token], candidate: [Token], language: String
     ) {
-        func quiet(_ e: Edit) -> Bool {
-            if e.kind == .keep { return true }
-            if e.kind == .substitute, let f = e.from, let t = e.to, f.kind == .word, f.normalized == t.normalized { return true }
-            return false
-        }
+        let quiet = isQuietEdit
         var byCand: [Int: Edit] = [:]
         var idxByCand: [Int: Int] = [:]
         var byBase: [Int: Int] = [:]
@@ -998,6 +1036,64 @@ public enum EditGuard {
             guard ok else { continue }
             verdicts[i] = ClassifiedEdit(kind: verdicts[i].kind, from: verdicts[i].from, to: verdicts[i].to,
                                          accepted: true, acceptClass: AcceptClass.punctuationMove.rawValue, rejectClass: nil)
+        }
+    }
+
+    private static let seamMarks: Set<String> = [",", ".", ";", ":", "?", "!"]
+
+    /// Quick task 261008-gb4 (F2). Where a punctuation `.move` is rejected,
+    /// the candidate mark never renders at its destination. If that
+    /// destination is a seam between two quiet, non-punctuation candidate
+    /// tokens whose edits sit at `ip` and `ip + 2`, and `edits[ip + 1]` is an
+    /// accepted `punctuationOrCasing` delete of a baseline mark, the seam
+    /// would ship with no mark at all: the move that was meant to replace the
+    /// deleted mark is gone and the delete stands alone. The delete is then
+    /// rejected (`punctuationSeamCoupling`), and so is the casing-only
+    /// substitute of the word after it, so the dictated mark and the casing
+    /// after it come back together. (`applyAtomicGroupCoupling` would revert
+    /// that substitute anyway, as it shares a cluster with the delete; the
+    /// flip keeps the log attribution on `punctuationSeamCoupling`.)
+    ///
+    /// Why at classify time: `applyPunctuationMoveExemption` requires the two
+    /// neighbour edits of an accepted move to be adjacent (`inx == ip + 1`),
+    /// so an accepted `punctuationMove` never lands on a seam that holds a
+    /// delete; 246 of the 248 rejected punctuation moves in the planning
+    /// replay were rejected at classify (`unclassified`). A classify-time
+    /// pass therefore sees every seam shape, and `rebuild`'s
+    /// `applyAtomicGroupCoupling` sees the flips. Verdicts only go from
+    /// accepted to rejected. `pauseSplitMerge` deletes have a different
+    /// accept class and are left alone: a merged false pause-split period
+    /// stays merged.
+    private static func applySeamMarkCoupling(
+        edits: [Edit], verdicts: inout [ClassifiedEdit], candidate: [Token]
+    ) {
+        var idxByCand: [Int: Int] = [:]
+        for (k, e) in edits.enumerated() {
+            if let t = e.to { idxByCand[t.index] = k }
+        }
+        func reject(_ k: Int) {
+            verdicts[k] = ClassifiedEdit(
+                kind: verdicts[k].kind, from: verdicts[k].from, to: verdicts[k].to,
+                accepted: false, acceptClass: nil, rejectClass: RejectionClass.punctuationSeamCoupling.rawValue
+            )
+        }
+        for i in edits.indices {
+            guard edits[i].kind == .move, !verdicts[i].accepted,
+                  let a = edits[i].from, let b = edits[i].to,
+                  a.kind == .punctuation, b.kind == .punctuation,
+                  seamMarks.contains(a.text), seamMarks.contains(b.text) else { continue }
+            let j = b.index
+            guard j > 0, j < candidate.count - 1,
+                  candidate[j - 1].kind != .punctuation, candidate[j + 1].kind != .punctuation,
+                  let ip = idxByCand[j - 1], let inx = idxByCand[j + 1], inx == ip + 2,
+                  isQuietEdit(edits[ip]), isQuietEdit(edits[inx]) else { continue }
+            let d = ip + 1
+            guard edits[d].kind == .delete, let deleted = edits[d].from,
+                  deleted.kind == .punctuation, seamMarks.contains(deleted.text),
+                  verdicts[d].accepted,
+                  verdicts[d].acceptClass == AcceptClass.punctuationOrCasing.rawValue else { continue }
+            reject(d)
+            if edits[inx].kind == .substitute, verdicts[inx].accepted { reject(inx) }
         }
     }
 
@@ -1184,6 +1280,14 @@ public enum EditGuard {
             return (false, nil, .acronymLoweredAfterDot)
         }
 
+        // Quick task 261008-gb4 (F5): a dictionary term keeps its exact
+        // spelling; the casing-only accept below must not reach it (see
+        // `RejectionClass.dictProtectedCasing`).
+        if a.kind == .word, a.normalized == b.normalized, a.text != b.text,
+           dictProtectedLower.contains(a.normalized) {
+            return (false, nil, .dictProtectedCasing)
+        }
+
         // 1. Casing-only fix.
         if a.normalized == b.normalized, a.text != b.text {
             return (true, .punctuationOrCasing, nil)
@@ -1248,6 +1352,8 @@ public enum EditGuard {
             return (false, nil, .pronounPersonChange)
         }
         // 5. dictProtect — the user's dictionary spelling must survive verbatim.
+        //    (Casing-only changes of a dictionary term are rejected earlier,
+        //    before step 1, as `dictProtectedCasing`.)
         if dictProtectedLower.contains(a.normalized) {
             return (false, nil, .contentWordIdentityChange)
         }
@@ -1299,8 +1405,17 @@ public enum EditGuard {
         // -ig read as a derivational suffix pair) before this exemption is
         // ever consulted. Real-word pairs (both known) never reach this
         // branch — they still fall through to steps 7/8/9 unchanged.
+        //
+        // Quick task 261008-gb4 (NWR, `2026-10-07T20:12:45.233Z` by ts): the
+        // source must also be absent from the bundled EN+DE word list
+        // (`SpellLexicon.isListedWord`). The platform checker lacks some real
+        // words the bundled list holds, and a "repair" of one of those
+        // replaced a dictated word with a similar one. A listed source falls
+        // through to steps 7 to 9, where a lone word swap is rejected
+        // (gp8's carve-out keeps the sentence's punctuation).
         if a.kind == .word, b.kind == .word,
            !isKnownForRepair(a, language: language, dictProtectedLower: dictProtectedLower, lexicon: lexicon),
+           !lexicon.isListedWord(a.text, language: language),
            isKnownForRepair(b, language: language, dictProtectedLower: dictProtectedLower, lexicon: lexicon),
            isNonWordRepairClose(a.normalized, b.normalized, language: language) {
             return (true, .nonWordRepair, nil)
@@ -3660,7 +3775,35 @@ public enum EditGuard {
     /// punctuation token standing between the run's word/numeric neighbours
     /// (a mixed run has 2+ tokens and at least one candidate-sourced token
     /// always survives), so it can never trip that check either.
+    ///
+    /// Quick task 261008-gb4 (F3): a restored DOUBLE quotation mark is not
+    /// dropped from a mixed run unless a candidate-sourced double quotation
+    /// mark sits in the same run. A coupled revert restores both marks of a
+    /// quoted word; the closing one lands in a run with the kept comma or
+    /// period and was dropped as "restored", so the pasted text carried an
+    /// unbalanced quote (2026-10-05T18:22 and 2026-10-08T04:39 by ts). A
+    /// quote is not a competing mark, so keeping it makes no form that
+    /// exists in neither input; a candidate quote in the run still wins, so
+    /// no doubled quote is synthesised. Single quotes and apostrophes are
+    /// unchanged. The invariant argument above still holds: a mixed run
+    /// keeps at least one candidate-sourced token.
+    ///
+    /// The exemption applies only when it leaves an even number of double
+    /// quotation marks in the output. A quoted span whose opening mark was
+    /// legitimately deleted while its closing mark was restored (the two
+    /// delete verdicts diverged across a sentence boundary,
+    /// 2026-09-08T04:20 by ts) would otherwise ship an orphan closing quote
+    /// that the old collapse dropped; there the old behaviour stands.
     private static func collapseMixedProvenancePunctuationRuns(_ tokens: [WorkToken]) -> [WorkToken] {
+        func quoteCount(_ t: [WorkToken]) -> Int { t.filter { doubleQuotationMarks.contains($0.text) }.count }
+        let keeping = collapseMixedProvenancePunctuationRuns(tokens, keepRestoredDoubleQuotes: true)
+        if quoteCount(keeping) % 2 == 0 { return keeping }
+        return collapseMixedProvenancePunctuationRuns(tokens, keepRestoredDoubleQuotes: false)
+    }
+
+    private static func collapseMixedProvenancePunctuationRuns(
+        _ tokens: [WorkToken], keepRestoredDoubleQuotes: Bool
+    ) -> [WorkToken] {
         guard tokens.count > 1 else { return tokens }
         var result: [WorkToken] = []
         var i = 0
@@ -3678,7 +3821,11 @@ public enum EditGuard {
             if run.count < 2 || run.allSatisfy({ $0.source == run[0].source }) {
                 result.append(contentsOf: run)
             } else {
-                var survivors = run.filter { $0.source == .candidate }
+                let candidateHasDoubleQuote = run.contains { $0.source == .candidate && doubleQuotationMarks.contains($0.text) }
+                var survivors = run.filter {
+                    $0.source == .candidate
+                        || (keepRestoredDoubleQuotes && !candidateHasDoubleQuote && doubleQuotationMarks.contains($0.text))
+                }
                 if let originalLastTrailing = run.last?.trailing, let last = survivors.last {
                     survivors[survivors.count - 1] = WorkToken(
                         text: last.text, normalized: last.normalized, kind: last.kind,
@@ -3692,6 +3839,9 @@ public enum EditGuard {
         }
         return result
     }
+
+    /// The six double quotation mark characters (F3 of 261008-gb4).
+    private static let doubleQuotationMarks: Set<String> = ["\"", "\u{201C}", "\u{201D}", "\u{201E}", "\u{00AB}", "\u{00BB}"]
 
     /// Opening or closing role of a straight quotation mark (261001-opz).
     enum QuoteRole { case opening, closing }
@@ -3935,17 +4085,55 @@ public enum EditGuard {
         moodMarks.contains(from) != moodMarks.contains(to)
     }
 
-    private static func firstWordToken(_ tokens: [Token], sentenceIndex: Int) -> Token? {
-        tokens.first { $0.sentenceIndex == sentenceIndex && $0.kind == .word }
+    /// Quick task 261008-gb4 (F1): the closed set of interjections the mood
+    /// lock reads past. A baseline sentence that opens with one of these and a
+    /// comma (`Ja, wir müssen ...`) is compared by the first word AFTER the
+    /// comma; without the comma there is no skip (`So if ...` keeps `So`).
+    private static let moodLockLeadingInterjections: Set<String> = [
+        "ja", "nein", "okay", "ok", "also", "gut", "so", "yes", "no", "well"
+    ]
+
+    /// The baseline word the mood lock compares for `sentenceIndex`: the
+    /// sentence's first word, or, behind a leading interjection plus comma,
+    /// the first word after that comma together with the skipped interjection.
+    private static func moodLockBaselineFirst(
+        _ baseline: [Token], sentenceIndex: Int
+    ) -> (word: Token, skippedInterjection: String?)? {
+        guard let firstIndex = baseline.firstIndex(where: { $0.sentenceIndex == sentenceIndex && $0.kind == .word }) else { return nil }
+        let first = baseline[firstIndex]
+        let commaIndex = firstIndex + 1
+        if moodLockLeadingInterjections.contains(first.normalized),
+           baseline.indices.contains(commaIndex),
+           baseline[commaIndex].sentenceIndex == sentenceIndex,
+           baseline[commaIndex].kind == .punctuation, baseline[commaIndex].text == ",",
+           let after = baseline[(commaIndex + 1)...].first(where: { $0.sentenceIndex == sentenceIndex && $0.kind == .word }) {
+            return (after, first.normalized)
+        }
+        return (first, nil)
     }
 
-    private static func firstWordToken(_ tokens: [WorkToken], sentenceIndex: Int) -> WorkToken? {
-        tokens.first { $0.sentenceIndex == sentenceIndex && $0.kind == .word }
+    /// The index in the rebuilt stream the mood lock compares for
+    /// `sentenceIndex`. When the baseline skipped an interjection and the
+    /// rebuilt sentence still opens with it, that word and a directly
+    /// following comma are skipped too (the LLM may have deleted the comma);
+    /// otherwise, and when nothing follows, the first word's index.
+    private static func moodLockRebuiltFirstIndex(
+        _ tokens: [WorkToken], sentenceIndex: Int, skippedInterjection: String?
+    ) -> Int? {
+        guard let first = tokens.firstIndex(where: { $0.sentenceIndex == sentenceIndex && $0.kind == .word }) else { return nil }
+        guard let skipped = skippedInterjection, tokens[first].normalized == skipped else { return first }
+        var next = first + 1
+        if tokens.indices.contains(next), tokens[next].sentenceIndex == sentenceIndex,
+           tokens[next].kind == .punctuation, tokens[next].text == "," {
+            next += 1
+        }
+        guard next < tokens.count else { return first }
+        return tokens[next...].firstIndex(where: { $0.sentenceIndex == sentenceIndex && $0.kind == .word }) ?? first
     }
 
     /// Quick task 260825-q1w (D-C, landmine 5): the mood lock's `violates`
-    /// check compares `firstWordToken(baseline, sentenceIndex:)` against
-    /// `firstWordToken(tokens, sentenceIndex:)` BY SENTENCE INDEX. A
+    /// check compares `moodLockBaselineFirst(baseline, sentenceIndex:)` against
+    /// the rebuilt stream's `moodLockRebuiltFirstIndex` BY SENTENCE INDEX. A
     /// candidate-side sentence SPLIT shifts every later candidate sentence
     /// index by one, so the check can silently compare two DIFFERENT
     /// sentences — the root cause of the 2026-08-23 false positive
@@ -4041,12 +4229,19 @@ public enum EditGuard {
         // reorder corruptions.
         let sentenceIndices = Set(baseline.map(\.sentenceIndex)).union(candidate.map(\.sentenceIndex))
         for sentenceIndex in sentenceIndices.sorted() {
-            guard let baselineFirst = firstWordToken(baseline, sentenceIndex: sentenceIndex) else { continue }
+            // Quick task 261008-gb4 (F1): a baseline sentence opening with an
+            // interjection and a comma (`Ja, ...`) is compared by the word
+            // after the comma, so a fronted verb behind `Ja,` no longer
+            // slips past a lock that only saw `Ja`. The skip is keyed to the
+            // baseline; the rebuilt stream skips the same interjection (and
+            // its comma, if the LLM kept it). Residue: a baseline without
+            // the comma gets no skip.
+            guard let (baselineFirst, skippedInterjection) = moodLockBaselineFirst(baseline, sentenceIndex: sentenceIndex) else { continue }
             let baselineIsFiniteOrModal = FiniteVerbCues.isFiniteOrModal(baselineFirst.normalized, language: language)
             var moodLockFiredForSentence = false
 
             for attempt in 0..<2 {
-                guard let rebuiltIndex = tokens.firstIndex(where: { $0.sentenceIndex == sentenceIndex && $0.kind == .word }) else { break }
+                guard let rebuiltIndex = moodLockRebuiltFirstIndex(tokens, sentenceIndex: sentenceIndex, skippedInterjection: skippedInterjection) else { break }
                 let rebuiltFirst = tokens[rebuiltIndex]
                 let violates = FiniteVerbCues.isFiniteOrModal(rebuiltFirst.normalized, language: language) && !baselineIsFiniteOrModal
                 guard violates else { break }
