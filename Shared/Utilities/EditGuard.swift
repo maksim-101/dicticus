@@ -273,6 +273,25 @@ public enum EditGuard {
         /// principle lower an acronym; 0 `formattingProjection` records in
         /// 3436.
         case acronymLoweredAfterDot
+        /// Quick task 261008-gb4 (F5): assigned by `classifySubstitute` to a
+        /// casing-only `.substitute` of a word whose normalized form is a
+        /// dictionary replacement value (`dictProtected`). Stage trace of the
+        /// live defect (`2026-10-06T03:40:31.040Z`, `2026-10-08T05:57:48.772Z`):
+        /// the dictionary produced a lowercase term, the LLM wrote it in
+        /// capitals, and step 1's casing-only accept ran before step 5's
+        /// dictProtect check and shipped it.
+        ///
+        /// Strict: the dictionary spelling survives verbatim, with no
+        /// exception. Sentence-initial capitals come back after the gate from
+        /// `applyFinalCapitalization`. The cost is also paid by a German noun
+        /// capital the LLM adds to a lowercase dictionary term
+        /// (`2026-10-03T05:07:48.000Z`), reported as a judgment row.
+        /// NOT a member of `sentenceRevertTriggerClasses` (the
+        /// `acronymLoweredAfterDot` precedent): a casing-only restore carries
+        /// no content signal, and triggering would revert the sentence's
+        /// other accepted punctuation. Moving step 5 itself ahead of step 1
+        /// would yield `contentWordIdentityChange`, a trigger.
+        case dictProtectedCasing
     }
 
     /// The log-shaped record: one classified edit, ready to serialize
@@ -1184,6 +1203,14 @@ public enum EditGuard {
             return (false, nil, .acronymLoweredAfterDot)
         }
 
+        // Quick task 261008-gb4 (F5): a dictionary term keeps its exact
+        // spelling; the casing-only accept below must not reach it (see
+        // `RejectionClass.dictProtectedCasing`).
+        if a.kind == .word, a.normalized == b.normalized, a.text != b.text,
+           dictProtectedLower.contains(a.normalized) {
+            return (false, nil, .dictProtectedCasing)
+        }
+
         // 1. Casing-only fix.
         if a.normalized == b.normalized, a.text != b.text {
             return (true, .punctuationOrCasing, nil)
@@ -1248,6 +1275,8 @@ public enum EditGuard {
             return (false, nil, .pronounPersonChange)
         }
         // 5. dictProtect — the user's dictionary spelling must survive verbatim.
+        //    (Casing-only changes of a dictionary term are rejected earlier,
+        //    before step 1, as `dictProtectedCasing`.)
         if dictProtectedLower.contains(a.normalized) {
             return (false, nil, .contentWordIdentityChange)
         }
