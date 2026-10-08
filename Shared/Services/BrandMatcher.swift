@@ -316,17 +316,22 @@ final class BrandMatcher {
                 // ("LLMs" over canonical "LLM") loses its inflection when
                 // rewritten to the bare canonical. Skip the rewrite when the
                 // normalized window is strictly longer than the normalized
-                // canonical and equals it plus one of s/es/ed/ing exactly
-                // (the apostrophe form is already covered because `normalize`
-                // drops apostrophes). Identity rewrites (window == canonical)
-                // are unaffected — the length check requires strictly longer.
+                // canonical and contains it (the apostrophe form is already
+                // covered because `normalize` drops apostrophes). Identity
+                // rewrites (window == canonical) are unaffected — the length
+                // check requires strictly longer.
+                // Quick task 261008-gb3, guard G3: generalized from the
+                // s/es/ed/ing suffix list to any superstring. Record #473:
+                // "iPadOS" -> "iPad" (dl 2) cut the "OS" the speaker said,
+                // which is a different product. A window that spells the whole
+                // canonical plus letters the speaker added is never a
+                // misspelling of that canonical. Over the logged rewrites the
+                // only other superstring fires (UAT8, iTerm2., ANCOS-CH) were
+                // already blocked by the digit and interior-punctuation guards.
                 let wnorm = normalize(window)
                 let cnorm = normalize(m.canon)
-                if wnorm.count > cnorm.count, wnorm.hasPrefix(cnorm) {
-                    let suffix = String(wnorm.dropFirst(cnorm.count))
-                    if ["s", "es", "ed", "ing"].contains(suffix) {
-                        continue
-                    }
+                if wnorm.count > cnorm.count, wnorm.contains(cnorm) {
+                    continue
                 }
 
                 // Digit-sequence parity guard (quick task 260825-pt5, guard
@@ -444,6 +449,7 @@ final class BrandMatcher {
 
         let tmeta = encode(token, language: language)
         let vowelOnsetCode: Character = language.lowercased().hasPrefix("de") ? "0" : "A"
+        let tokenHasDot = interiorPunctuation(token).contains(".")
         var best: (canon: String, score: Double, jw: Double, dl: Int)? = nil
         for entry in canonEncoded {
             let na = tnorm
@@ -475,6 +481,22 @@ final class BrandMatcher {
             if dl > BrandMatcher.maxEditDistance, phon,
                tmeta.first == vowelOnsetCode,
                na.first != nb.first {
+                continue
+            }
+            // Quick task 261008-gb3, guard G4: a token with an interior dot
+            // ("Claude.ai", "cloud.ai") is never matched to a canonical that
+            // has none ("Claude AI"), at any distance. Records #403
+            // (Claude.ai -> Claude AI) and #369 (cloud.ai left unrepaired):
+            // under 6oi's order "Claude AI" sorts before "Claude.ai" and wins
+            // the tie. At dl 0 the s1d post-pick guard is exempt, so the dot
+            // was deleted; at dl >= 1 the s1d guard rejects the undotted
+            // winner, so the dotted sibling never got a chance. Skipping the
+            // undotted candidates here lets the dotted sibling win. The s1d
+            // guard still governs hyphens and keeps its dl-0 exemption.
+            // Rejected alternatives: a TLD allowlist (list-based, lens B), and
+            // skipping windows that already equal a canonical (it leaves #369
+            // broken and reverses 6oi's case unifications).
+            if tokenHasDot, !interiorPunctuation(entry.canon).contains(".") {
                 continue
             }
             let orthoOk = jw >= BrandMatcher.jwThreshold && dl <= BrandMatcher.maxEditDistance
@@ -657,7 +679,22 @@ final class BrandMatcher {
     /// the counts).
     private func resolvedCanonicals() -> [String] {
         guard let provider = liveDictionaryCanonicalProvider else { return baseCanonicals }
-        return BrandMatcher.dedupeNFC(baseCanonicals + provider().sorted())
+        // Quick task 261008-gb3, guard G2: an all-lowercase live target that is
+        // itself a dictionary word ("email", "commits", "screenshot") is an
+        // ordinary word whose spacing or spelling the user fixes through an
+        // exact dictionary entry ("e mail" -> "email"), not a brand. As a
+        // canonical it would pull any dl-3 phonetic neighbour onto it (records
+        // #505/#507: YAML -> email). Cased lexicon-word targets (eBay, Kagi,
+        // iPad, Vercel) keep their reach: excluding every lexicon-word target
+        // would lose "Kagee" -> "Kagi" and the live Vercel repairs. Bundled
+        // canonicals are never filtered, and DictionaryService exact entries
+        // are unaffected (they do not go through this list).
+        let live = provider().filter { raw in
+            let v = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                .precomposedStringWithCanonicalMapping
+            return !(v == v.lowercased() && combinedLexicon.contains(v))
+        }
+        return BrandMatcher.dedupeNFC(baseCanonicals + live.sorted())
     }
 
     private static func dedupeNFC(_ list: [String]) -> [String] {
