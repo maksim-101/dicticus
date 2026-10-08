@@ -113,18 +113,37 @@ extension AdaptiveVoiceGate.Decision {
     /// decision's own `threshold`, single-sourcing what was previously an inline
     /// `frameEnergies.filter { $0 > gateDecision.threshold }.count` expression at
     /// the `TranscriptionService.transcribe()` call site (quick task 260826-8ec).
-    /// Diagnostic-only: its sole consumer is discard-log instrumentation, and it
-    /// participates in no gating decision.
+    /// Also the input of `AdaptiveVoiceGate.isNearSilentShortClip`, a gating decision,
+    /// since quick task 261008-gb2.
     func framesAboveThreshold(in frameEnergies: [Float]) -> Int {
         frameEnergies.filter { $0 > threshold }.count
     }
 }
 
 extension AdaptiveVoiceGate {
+    /// Near-silent short-clip rule (quick task 261008-gb2, F3): a clip shorter than this
+    /// (exclusive) with at most `nearSilentMaxVoicedFrames` voiced frames is discarded after
+    /// decode. The constants are the user's rule.
+    ///
+    /// Measured margin over the macOS discard logs (2026-08-13 to 2026-10-08), 54 pass
+    /// records under 2.5 s that carry a frame count: the phantoms sit at 1 voiced frame (4
+    /// records) and 4 frames (2 short-stock phantoms, "And" and "you"), the lowest real short
+    /// utterance has 5. The cutoff of 2 leaves 3 unoccupied frame counts below real speech.
+    ///
+    /// The Phase 50 D-01 duration bypass sends 2.0-2.5 s clips with no voiced frame to
+    /// Whisper; this rule narrows that to clips of 2.5 s and longer. Evidence that no real
+    /// speech lives in the narrowed band: D-01's own shortest low-gain real speech lasts 2.7 s,
+    /// and the 0-voiced real passes since 2026-09-16 start at 3.5 s.
+    ///
+    /// Called from macOS only (iOS runs Parakeet: no duration bypass, no silence
+    /// hallucination, Phase 47.1 D-02).
     static let nearSilentMaxDurationSeconds: Float = 2.5
     static let nearSilentMaxVoicedFrames = 2
 
+    /// True when `durationSeconds < nearSilentMaxDurationSeconds` and
+    /// `voicedFrames <= nearSilentMaxVoicedFrames`. `voicedFrames` is
+    /// `Decision.framesAboveThreshold(in:)` of the clip.
     static func isNearSilentShortClip(durationSeconds: Float, voicedFrames: Int) -> Bool {
-        false
+        durationSeconds < nearSilentMaxDurationSeconds && voicedFrames <= nearSilentMaxVoicedFrames
     }
 }
