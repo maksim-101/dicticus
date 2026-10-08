@@ -60,8 +60,8 @@ final class BrandNarrowingTests: XCTestCase {
                        "Ask Claude about the plan.")
         XCTAssertEqual(matcher(bundled: ["Vercel"]).apply(to: "Deploy it to versile tonight.", language: "en"),
                        "Deploy it to Vercel tonight.")
-        XCTAssertEqual(matcher(bundled: ["Claude Code"]).apply(to: "Start ClotCode in the repo.", language: "en"),
-                       "Start Claude Code in the repo.")
+        XCTAssertEqual(matcher(bundled: ["Claude Code"]).apply(to: "Launch ClotCode for the sandbox demo.", language: "en"),
+                       "Launch Claude Code for the sandbox demo.")
     }
 
     // MARK: - G2: an all-lowercase dictionary word is not a brand target
