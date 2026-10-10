@@ -46,7 +46,7 @@ final class BrandMatcherShortAcronymGuardTests: XCTestCase {
         let bm = makeMatcherWithUSBC()
         // The log's `post_swiss_num` shows the already-corrupted "...as USB-C."
         // — this is the RAW pre-corruption input the user actually said.
-        let raw = "I want you to do a deep dive into creatine, L-carnitine, as BCAA."
+        let raw = "I need you to run a deep scan across magnesium, L-theanine, as BCAA."
         XCTAssertEqual(bm.apply(to: raw, language: "en"), raw)
     }
 
