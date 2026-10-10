@@ -168,10 +168,10 @@ final class EditGuardMergeAtomicityTests: XCTestCase {
 
     /// corpus 2026-07-19T11:02:37.529Z, cleanup-2026-07-19.jsonl:45.
     /// `move(for) ACCEPTED + delete(of) REJECTED`, separated only by
-    /// `keep(heartrate)` — no existing narrow coupling saw this pair.
+    /// `keep(pulse)` — no existing narrow coupling saw this pair.
     func testAtomicRevert_ofForHeartrateInstance() {
-        let baseline = "She wants to be able to click in a dial and move the finger around to see individual data points. Like what was the value at any given time of heartrate for instance and then also along the way lost the info about the workouts so when I click on the workouts a small pop-up should show up"
-        let llm = "She wants to be able to click in a dial and move the finger around to see individual data points, like the value at any given time for heartrate, and then also along the way, lost the info about workouts. So when I click on the workouts, a small pop-up should show up."
+        let baseline = "She wants to be able to tap in a knob and slide the cursor around to see single sample marks. Like what was the reading at any chosen moment of pulse for instance and then also along the way dropped the notes about the sessions so when I tap on the sessions a small pop-up should show up"
+        let llm = "She wants to be able to tap in a knob and slide the cursor around to see single sample marks, like the reading at any chosen moment for pulse, and then also along the way, dropped the notes about sessions. So when I tap on the sessions, a small pop-up should show up."
         // 49.6 D-01: reconciled — the second (run-on, no terminal period)
         // baseline sentence also carries independent `contentWordDeletion`
         // ("of") and `contentWordIdentityChange` ("instance"->",")
@@ -346,10 +346,10 @@ final class EditGuardMergeAtomicityTests: XCTestCase {
     // Evidence record 2026-07-29T03:47:35.149Z
     // (260801-9n7-EVIDENCE.json; brand name anonymized shape-preserving for
     // this public repo): EditGuard correctly REJECTS the LLM's
-    // cross-sentence em-dash merge at the "...it's labeled. So it matches..."
+    // cross-sentence em-dash merge at the "...it's named. So it fits..."
     // boundary, but the restored sentence-terminal "." inherits the
     // candidate em-dash's EMPTY trailing instead of its own baseline " "
-    // trailing — gluing the two sentences together ("labeled.So") in the
+    // trailing — gluing the two sentences together ("named.So") in the
     // rebuilt text. See `materialize`'s rejected-`.substitute` render
     // branch.
 
@@ -360,8 +360,8 @@ final class EditGuardMergeAtomicityTests: XCTestCase {
     /// WITH this defect present — it is never evidence the bug is fixed.
     /// `XCTAssertEqual(out, expected)` is the load-bearing assertion.
     func testRestoredTerminalPunctuation_keepsInterSentenceSpace_labeledSo() {
-        let baseline = "So help me adjust the feedback email or however it's labeled. So it matches these new states because I haven't sent it yet. I only was in contact with Pearcom support and now I want to go that separate lane as well because this is not acceptable anymore."
-        let llm = "So, help me adjust the feedback email—or however it's labeled—to match these new states, because I haven't sent it yet. I was only in contact with Pearcom support, and now I want to go down that separate lane as well, because this is not acceptable anymore.</corrected_text>"
+        let baseline = "So help me revise the survey form or however it's named. So it fits these new stages because I haven't posted it today. I only was in touch with Pearcom support and now I plan to go that distinct track as usual because this is not tolerable anymore."
+        let llm = "So, help me revise the survey form—or however it's named—to fit these new stages, because I haven't posted it today. I was only in touch with Pearcom support, and now I plan to go down that distinct track as usual, because this is not tolerable anymore.</corrected_text>"
         // 49.6 D-01: reconciled — sentences 2 and 3 each carry an
         // independent content-bearing rejection (`contentWordInsertion`
         // "down"; the `.move` of "only"), so the whole-sentence coupled
@@ -370,8 +370,8 @@ final class EditGuardMergeAtomicityTests: XCTestCase {
         // "So," comma and em-dash survive unchanged — this is still the
         // load-bearing assertion for the original defect this test guards
         // (the restored "." keeps its own baseline space, no
-        // "labeled.So" glue).
-        let expected = "So, help me adjust the feedback email—or however it's labeled. So it matches these new states because I haven't sent it yet. I only was in contact with Pearcom support and now I want to go that separate lane as well because this is not acceptable anymore."
+        // "named.So" glue).
+        let expected = "So, help me revise the survey form—or however it's named. So it fits these new stages because I haven't posted it today. I only was in touch with Pearcom support and now I plan to go that distinct track as usual because this is not tolerable anymore."
         let out = guardOut(baseline, llm)
         XCTAssertEqual(out, expected)
         assertNeitherSourceClean(out, baseline, llm)
@@ -420,8 +420,8 @@ final class EditGuardMergeAtomicityTests: XCTestCase {
     /// reintroduces a DIFFERENT neither-source splice in the same region).
     func testAggregate_evidenceFixturesNeitherSourceClean() {
         let cases: [(baseline: String, llm: String, lang: String)] = [
-            ("She wants to be able to click in a dial and move the finger around to see individual data points. Like what was the value at any given time of heartrate for instance and then also along the way lost the info about the workouts so when I click on the workouts a small pop-up should show up",
-             "She wants to be able to click in a dial and move the finger around to see individual data points, like the value at any given time for heartrate, and then also along the way, lost the info about workouts. So when I click on the workouts, a small pop-up should show up.", "en"),
+            ("She wants to be able to tap in a knob and slide the cursor around to see single sample marks. Like what was the reading at any chosen moment of pulse for instance and then also along the way dropped the notes about the sessions so when I tap on the sessions a small pop-up should show up",
+             "She wants to be able to tap in a knob and slide the cursor around to see single sample marks, like the reading at any chosen moment for pulse, and then also along the way, dropped the notes about sessions. So when I tap on the sessions, a small pop-up should show up.", "en"),
             ("Also in the current layout it's unclear to what time period this report is referring to.",
              "Also, in the current layout, it is unclear to what time period this report refers.", "en"),
             ("- Yes, we can go ahead, but first I wanna clear the context window because it's already 75% full.",
