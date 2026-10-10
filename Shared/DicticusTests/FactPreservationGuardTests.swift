@@ -61,8 +61,8 @@ final class FactPreservationGuardTests: XCTestCase {
     /// completely independent mechanism (whole-text literal presence, not
     /// `EditDiff` token alignment).
     func testCatchesValueCorruptionInDigitFlankedCommaNumber() {
-        let baseline = "...the latency was 10,011 milliseconds under load."
-        let corrupted = "...the latency was 10,111 milliseconds under load."
+        let baseline = "...the wait was 10,011 milliseconds under stress."
+        let corrupted = "...the wait was 10,111 milliseconds under stress."
         let result = FactPreservationGuard.check(baseline: baseline, output: corrupted)
         XCTAssertFalse(result.preserved)
         XCTAssertTrue(result.missingLiterals.contains("10,011"), "expected '10,011' flagged missing, got \(result.missingLiterals)")
