@@ -482,8 +482,8 @@ final class EditGuardDanglingPunctuationTests: XCTestCase {
             $0.id == "record-2026-09-01T17-17-59-197Z"
         }!
         let out = guardOut(record.baseline, record.candidate, record.language)
-        XCTAssertFalse(out.contains("possible.points"), "the restored ellipsis remnant must not glue to the following word")
-        XCTAssertTrue(out.contains("two possible points of contact"), "the phrase must read as one of the two inputs actually wrote it")
+        XCTAssertFalse(out.contains("possible.spots"), "the restored ellipsis remnant must not glue to the following word")
+        XCTAssertTrue(out.contains("two possible spots of friction"), "the phrase must read as one of the two inputs actually wrote it")
     }
 
     /// The LLM resolved the ellipsis in place and the guard must now accept that resolution
