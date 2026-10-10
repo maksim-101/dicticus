@@ -167,6 +167,22 @@ final class TextProcessingServiceContextTests: XCTestCase {
         XCTAssertEqual(defaultOutput, "EditGuard rejects the edit.")
     }
 
+    // MARK: - Quick 261010-8do: leading number through process(...) in both modes
+
+    func testPlainModeLeadingNumberKeepsNextWordCase_RED() async {
+        let plainService = TextProcessingService(cleanupService: nil, historyService: testHistory)
+        let output = await plainService.process(text: "12 sind fertig.", language: "de", mode: .plain)
+        XCTAssertEqual(output, "12 sind fertig.")
+    }
+
+    func testAiCleanupLeadingNumberKeepsNextWordCase_RED() async {
+        let mock = MockCleanupProvider()
+        mock.returnValue = "9 of the boxes are open."
+        let service = TextProcessingService(cleanupService: mock, historyService: testHistory)
+        let output = await service.process(text: "9 of the boxes are open.", language: "en", mode: .aiCleanup)
+        XCTAssertEqual(output, "9 of the boxes are open.")
+    }
+
     // MARK: - Approved scope extension: context reaches the CleanupProvider/CleanupPrompt seam
 
     /// Proves the resolved context is not just a telemetry value but actually
