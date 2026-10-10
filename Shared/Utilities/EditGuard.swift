@@ -1477,11 +1477,16 @@ public enum EditGuard {
         // replaced a dictated word with a similar one. A listed source falls
         // through to steps 7 to 9, where a lone word swap is rejected
         // (gp8's carve-out keeps the sentence's punctuation).
+        //
+        // Quick task 261010-8dm: a German compound of two known words, with
+        // three or more letters changed, is left as dictated (see
+        // `isCompoundPartSwap`).
         if a.kind == .word, b.kind == .word,
            !isKnownForRepair(a, language: language, dictProtectedLower: dictProtectedLower, lexicon: lexicon),
            !lexicon.isListedWord(a.text, language: language),
            isKnownForRepair(b, language: language, dictProtectedLower: dictProtectedLower, lexicon: lexicon),
-           isNonWordRepairClose(a.normalized, b.normalized, language: language) {
+           isNonWordRepairClose(a.normalized, b.normalized, language: language),
+           !isCompoundPartSwap(a, b, language: language, lexicon: lexicon) {
             return (true, .nonWordRepair, nil)
         }
         // 7. Derivation (D-02a) — checked BEFORE the lemma-lock accept path.
@@ -2034,6 +2039,28 @@ public enum EditGuard {
 
     private static func foldForSimilarity(_ s: String) -> String {
         s.lowercased().folding(options: .diacriticInsensitive, locale: nil)
+    }
+
+    // MARK: - Quick task 261010-8dm
+
+    private static let compoundPartMinLength = 4
+    private static let compoundPartSwapMinDistance = 3
+
+    /// True for a German swap of three or more letters in a dictated token that
+    /// splits into two parts of four letters or more which the checker knows:
+    /// `Ventilcaps` -> `Ventilkappe`. A long shared prefix makes such a swap
+    /// look like a small edit, so the compound was read as a garble. A one- or
+    /// two-letter fix, or a split with an unknown part, stays repairable.
+    private static func isCompoundPartSwap(
+        _ a: Token, _ b: Token, language: String, lexicon: any SpellLexicon
+    ) -> Bool {
+        guard language.hasPrefix("de"), a.text.count >= 2 * compoundPartMinLength else { return false }
+        guard LevenshteinDistance.distance(foldForSimilarity(a.normalized), foldForSimilarity(b.normalized)) >= compoundPartSwapMinDistance else { return false }
+        let chars = Array(a.text)
+        for i in compoundPartMinLength...(chars.count - compoundPartMinLength) {
+            if lexicon.isKnownCompoundPart(String(chars[..<i])), lexicon.isKnownCompoundPart(String(chars[i...])) { return true }
+        }
+        return false
     }
 
     // MARK: - Quick task 261003-aua
