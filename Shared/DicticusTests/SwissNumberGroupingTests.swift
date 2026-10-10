@@ -93,8 +93,8 @@ final class SwissNumberGroupingTests: XCTestCase {
 
     func testD11_contrastPairLeavesUtteranceUntouched() {
         XCTAssertEqual(
-            SwissNumberFormatter.format("It should never be 1,80 but actually 1.80 meters"),
-            "It should never be 1,80 but actually 1.80 meters"
+            SwissNumberFormatter.format("It must never read 1,80 but actually 1.80 liters"),
+            "It must never read 1,80 but actually 1.80 liters"
         )
     }
 
@@ -111,7 +111,7 @@ final class SwissNumberGroupingTests: XCTestCase {
         let inputs = [
             "2,273", "10,011", "1.250", "1'250", "2'273",
             "2,273.50", "1.250,70", "€2,273", "2,273.", "3,141", "0,125",
-            "It should never be 1,80 but actually 1.80 meters",
+            "It must never read 1,80 but actually 1.80 liters",
             "2026", "im Jahr 2026", "10000", "65535",
             "1,80", "2,5",
             "write 1,80 with a comma",
