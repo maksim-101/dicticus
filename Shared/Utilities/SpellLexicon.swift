@@ -42,11 +42,15 @@ public protocol SpellLexicon: Sendable {
     /// frequency lexicon, whatever the language. Used only to keep
     /// `nonWordRepair` off real words the platform checker lacks.
     func isListedWord(_ text: String, language: String) -> Bool
+
+    /// Quick task 261010-8dm: stub carries no behaviour yet.
+    func isKnownCompoundPart(_ text: String) -> Bool
 }
 
 public extension SpellLexicon {
     func isCompoundAcceptedRepair(source: String, candidate: String, language: String) -> Bool { false }
     func isListedWord(_ text: String, language: String) -> Bool { false }
+    func isKnownCompoundPart(_ text: String) -> Bool { false }
 }
 
 /// The production implementation: `NSSpellChecker` (macOS) / `UITextChecker`
