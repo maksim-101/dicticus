@@ -95,6 +95,10 @@ targets:
     sources:
       - path: DicticusTests
       - path: ../Shared/DicticusTests
+        # Local-only, gitignored (privacy, 2026-10-10): never in the generated project.
+        excludes:
+          - GermanPosProbeFixtures.swift
+          - PosTaggerProbeTests.swift
     # NSPrincipalClass (2026-07-24 test-isolation hard fix, quick task 260724-9v8):
     # Xcode instantiates this class before any XCTestCase runs, which lets
     # DicticusTestBootstrap.init() redirect DicticusDefaults.suite to an
