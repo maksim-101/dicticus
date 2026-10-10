@@ -553,7 +553,7 @@ final class SelfCorrectionResolverTests: XCTestCase {
             ("de-eigentlich-noprep-copula", "Das Treffen ist um 8 Uhr. Nein, eigentlich um 9 Uhr.", "Das Treffen ist um 9 Uhr.", "de"),
             ("de-price-nocopula-noprep", "Es kostet 100 Franken. Ach nein, 120 Franken.", "Es kostet 120 Franken.", "de"),
             ("en-nowait-clock", "The meeting is at 3:00. No wait, it's at 4:00.", "The meeting is at 4:00.", "en"),
-            ("en-real-ampm", "Tomorrow I think I have a meeting at 9 a.m. No, actually it's 8 a.m.", "Tomorrow I think I have a meeting at 8 a.m.", "en"),
+            ("en-real-ampm", "Tomorrow I guess I have a session at 9 a.m. No, actually it's 8 a.m.", "Tomorrow I guess I have a session at 8 a.m.", "en"),
             ("en-pm", "Dinner is at 7pm. No, it's at 8pm.", "Dinner is at 8pm.", "en"),
             ("en-price-dollars", "It costs 50 dollars. No, actually it's 60 dollars.", "It costs 60 dollars.", "en"),
             ("en-plain", "The total is 5. No, it's 6.", "The total is 6.", "en"),
@@ -576,7 +576,7 @@ final class SelfCorrectionResolverTests: XCTestCase {
     ///
     /// Phase 43 (43-01 Task 3): `enSingleNounName` INVERTED — previously
     /// pinned the pre-existing comma-path corruption
-    /// ("So I'm meeting his name is Joe Smith.", dropping "Joe Miller") as
+    /// ("So I'm calling her name is Anna Hoffmann.", dropping "Anna Becker") as
     /// expected production behavior. That pin is removed.
     ///
     /// Phase 43 (43-04, D-04 gate verdict: ENABLED at zero corruption):
@@ -584,7 +584,7 @@ final class SelfCorrectionResolverTests: XCTestCase {
     /// value. The restricted anchored proper-noun evidence source cleared
     /// its own scale-replay pass (`selfcorr43`: 18/1778, zero corruptions,
     /// exactly one new genuine resolution vs. the pre-43-04 baseline — see
-    /// 43-04-SUMMARY.md) — this exact frame ("... No, actually his name is
+    /// 43-04-SUMMARY.md) — this exact frame ("... No, actually her name is
     /// Y.") is the cross-sentence shape the anchored-noun source targets.
     /// It must NEVER again assert the dropped-noun corruption.
     func testSentenceBoundaryNounNameAbstains() {
@@ -594,10 +594,10 @@ final class SelfCorrectionResolverTests: XCTestCase {
             deSingleNoun,
             "spike-012[de-single-noun]: noun restatement must ABSTAIN (safe miss) — byte-identical (no anchored-noun frame present)"
         )
-        let enSingleNounName = "So I'm meeting Joe Miller. No, actually his name is Joe Smith."
+        let enSingleNounName = "So I'm calling Anna Becker. No, actually her name is Anna Hoffmann."
         XCTAssertEqual(
             SelfCorrectionResolver.resolve(enSingleNounName, language: "en"),
-            "So I'm meeting Joe Smith.",
+            "So I'm calling Anna Hoffmann.",
             "spike-012[en-single-noun-name]: Phase 43-04/D-04 anchored-noun evidence source resolves this cleanly (gate verdict: ENABLED, zero corruption) — must never again assert the dropped-noun corruption"
         )
     }
@@ -616,8 +616,8 @@ final class SelfCorrectionResolverTests: XCTestCase {
             ("n-es-ist-spaet", "Es ist schon spät.", "de"),
             ("n-its-fine", "It's fine.", "en"),
             ("n-das-ist-gut-oder", "Das ist gut, oder?", "de"),
-            ("n-no-misunderstood", "No, you misunderstood me. I'm fine with the regular countdown.", "en"),
-            ("n-no-leave-movies", "No, leave these two movies as they are for now.", "en"),
+            ("n-no-misunderstood", "No, you misheard me. I'm happy with the regular timer.", "en"),
+            ("n-no-leave-movies", "No, leave these two clips as they are for today.", "en"),
             ("n-no-idea", "I went home early. No idea why though.", "en"),
             ("n-nein-anders", "Nein, das sehe ich anders.", "de"),
             ("n-five-oclock", "It's 5 o'clock somewhere.", "en"),
@@ -630,7 +630,7 @@ final class SelfCorrectionResolverTests: XCTestCase {
             ("n-that-reminds", "No, actually that reminds me of something.", "en"),
             ("n-ambiguous-two-clocks", "The meeting is at 8:00 or at 9:00. No, it's at 10:00.", "en"),
             ("n-nein-solo", "Nein.", "de"),
-            ("n-no-hover", "No only hover and hotkey because clicking might also trigger bartender six.", "en"),
+            ("n-no-hover", "No only scroll and hotkey because dragging might also trigger launcher six.", "en"),
         ]
         for c in cases {
             XCTAssertEqual(
@@ -692,10 +692,10 @@ final class SelfCorrectionResolverTests: XCTestCase {
         )
         XCTAssertEqual(
             SelfCorrectionResolver.resolve(
-                "I have a meeting at nine, no actually eight.",
+                "We have a session at nine, no actually eight.",
                 language: "en"
             ),
-            "I have a meeting at eight."
+            "We have a session at eight."
         )
     }
 
@@ -736,17 +736,17 @@ final class SelfCorrectionResolverTests: XCTestCase {
     func testAnchoredNounPositives() {
         XCTAssertEqual(
             SelfCorrectionResolver.resolve(
-                "His name is Joe Miller, no actually Joe Smith.",
+                "Her name is Anna Becker, no actually Anna Hoffmann.",
                 language: "en"
             ),
-            "His name is Joe Smith."
+            "Her name is Anna Hoffmann."
         )
         XCTAssertEqual(
             SelfCorrectionResolver.resolve(
-                "So I'm meeting Joe Miller. No, actually his name is Joe Smith.",
+                "So I'm calling Anna Becker. No, actually her name is Anna Hoffmann.",
                 language: "en"
             ),
-            "So I'm meeting Joe Smith."
+            "So I'm calling Anna Hoffmann."
         )
     }
 
@@ -757,11 +757,11 @@ final class SelfCorrectionResolverTests: XCTestCase {
     /// exactly-one-candidate discipline), and (b) an ordinary comma+connector
     /// sentence with no proper-noun restatement frame at all.
     func testAnchoredNounNegatives() {
-        let twoSameShapeNounsAmbiguous = "I'm meeting Joe Miller and Jane Doe. No, his name is Bob Smith."
+        let twoSameShapeNounsAmbiguous = "I'm calling Anna Becker and Jane Doe. No, her name is Eva Smith."
         XCTAssertEqual(
             SelfCorrectionResolver.resolve(twoSameShapeNounsAmbiguous, language: "en"),
             twoSameShapeNounsAmbiguous,
-            "D-04 guardrail: S1 has TWO same-shape proper-noun candidates (Joe Miller, Jane Doe) — ambiguous, must ABSTAIN, byte-identical"
+            "D-04 guardrail: S1 has TWO same-shape proper-noun candidates (Anna Becker, Jane Doe) — ambiguous, must ABSTAIN, byte-identical"
         )
         let plainCommaConnectorNoNounFrame = "I like the color, no that one is nice."
         XCTAssertEqual(
@@ -974,11 +974,11 @@ final class SelfCorrectionResolverTests: XCTestCase {
     /// an EXACT D-06 command phrase that must not fire.
     func testScratchCommandNegativesGermanByteIdentical() {
         let cases: [(id: String, text: String, reason: String)] = [
-            ("real-corpus-1", "Also streiche diesen Sprachentoggle komplett aus dem Admin Panel.", "real debug-log collision (39-RESEARCH.md Pitfall 3) — not an exact D-06 phrase"),
+            ("real-corpus-1", "Also streiche diesen Farbschalter komplett aus dem Setup Panel.", "real debug-log collision (39-RESEARCH.md Pitfall 3) — not an exact D-06 phrase"),
             ("real-corpus-2", "Ich denke, man kann die Zurückschaltfläche komplett streichen.", "real debug-log collision (39-RESEARCH.md Pitfall 3) — not an exact D-06 phrase"),
             ("real-corpus-3", "Es wäre gut, wenn man hier den Verlauf löschen kann.", "real debug-log collision (39-RESEARCH.md Pitfall 3) — not an exact D-06 phrase"),
-            ("real-corpus-4", "Wir haben geprüft, ob wichtige Aspekte vergessen gingen.", "real debug-log collision (39-RESEARCH.md Pitfall 3) — not an exact D-06 phrase"),
-            ("real-corpus-5", "Es gibt Abschnitte, die du inhaltlich ignorieren kannst.", "real debug-log collision (39-RESEARCH.md Pitfall 3) — not an exact D-06 phrase"),
+            ("real-corpus-4", "Wir haben geprüft, ob zentrale Punkte vergessen gingen.", "real debug-log collision (39-RESEARCH.md Pitfall 3) — not an exact D-06 phrase"),
+            ("real-corpus-5", "Es gibt Kapitel, die du thematisch ignorieren kannst.", "real debug-log collision (39-RESEARCH.md Pitfall 3) — not an exact D-06 phrase"),
             ("exact-phrase-content-follows", "Bitte streiche das Kapitel aus dem Bericht.", "allowed prefix + exact phrase 'streiche das' + a content word follows"),
             ("same-words-different-order", "Du kannst den letzten Satz ignorieren, wenn er unklar ist.", "same words, different order — must not match"),
             ("not-a-shipped-phrase", "Vergiss das nicht wieder.", "'vergiss das' is NOT a shipped phrase"),
