@@ -50,8 +50,8 @@ final class EditGuardClassifierRuleTests: XCTestCase {
     /// in `englishSubstitutable` via `englishInsertable`); after Task 2,
     /// the coordinator lock rejects it before step 6 can accept.
     func testD09_substituteAndToOr_RED() {
-        let baseline = "check for logic and necessity"
-        let llm = "check for logic or necessity"
+        let baseline = "look for rigor and purpose"
+        let llm = "look for rigor or purpose"
         let out = guardOut(baseline, llm)
         XCTAssertEqual(out, baseline)
         let result = guardResult(baseline, llm)

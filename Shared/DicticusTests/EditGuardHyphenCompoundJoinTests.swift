@@ -3,22 +3,22 @@ import XCTest
 
 /// Quick task 260825-q1w (D-A/D-B in the plan): calibrates `EditGuard` to
 /// accept a PURE two-token hyphen join — the LLM hyphenating two ADJACENT
-/// dictated tokens with no letter change on either side (`decision wise` ->
-/// `decision-wise`). Every join in the 2026-08 debug logs is a PAIR: the
+/// dictated tokens with no letter change on either side (`budget wise` ->
+/// `budget-wise`). Every join in the 2026-08 debug logs is a PAIR: the
 /// `.substitute` that introduces the hyphenated token, immediately followed
 /// by the baseline's now-redundant second word, dropped either as a
 /// `.delete` or as a `.substitute` against prosodic punctuation (D-B) — the
 /// exemption must accept both halves or neither, or the rebuilt text glues
-/// the leftover word back on (`decision-wise wise`).
+/// the leftover word back on (`budget-wise wise`).
 ///
 /// POSITIVES (RED before `AcceptClass.hyphenCompoundJoin` + the exemption
 /// exist, GREEN after) are real, trimmed 2026-08 records. NEGATIVES are the
 /// calibration proof — they must stay GREEN (rejected) both before and
 /// after this task, so the predicate never loosens as a side effect.
 ///
-/// `self` -> `self-evaluation` is flipped to a POSITIVE here (D-A): the raw
-/// record shows the paired `delete 'evaluation'` immediately after the
-/// substitute — the user dictated "my self evaluation" and the LLM
+/// `self` -> `self-assessment` is flipped to a POSITIVE here (D-A): the raw
+/// record shows the paired `delete 'assessment'` immediately after the
+/// substitute — the user dictated "my self assessment" and the LLM
 /// hyphenated two adjacent dictated tokens, exactly the shape this
 /// exemption exists to accept. `relation` -> `relationship` (no hyphen, no
 /// adjacent partner) stays the surviving negative.
@@ -33,16 +33,16 @@ final class EditGuardHyphenCompoundJoinTests: XCTestCase {
 
     /// cleanup-2026-08-23.jsonl #124 — delete partner.
     func testPositive_selfEvaluation_deletePartner_en() {
-        let baseline = "Then my self evaluation, the whole thing is fine."
-        let candidate = "Then my self-evaluation, the whole thing is fine."
+        let baseline = "Then my self assessment, the entire thing is okay."
+        let candidate = "Then my self-assessment, the entire thing is okay."
         let result = guardOut(baseline, candidate)
         XCTAssertEqual(result.text, candidate)
         XCTAssertTrue(result.edits.contains {
             $0.kind == "substitute" && $0.from == "self" && $0.accepted && $0.acceptClass == "hyphenCompoundJoin"
-        }, "expected the substitute self -> self-evaluation classified hyphenCompoundJoin — got: \(result.edits)")
+        }, "expected the substitute self -> self-assessment classified hyphenCompoundJoin — got: \(result.edits)")
         XCTAssertTrue(result.edits.contains {
-            $0.from == "evaluation" && $0.accepted
-        }, "expected the paired 'evaluation' drop to also be accepted — got: \(result.edits)")
+            $0.from == "assessment" && $0.accepted
+        }, "expected the paired 'assessment' drop to also be accepted — got: \(result.edits)")
     }
 
     /// cleanup-2026-08-23.jsonl #70 shape — two adjacent dictated tokens
@@ -96,8 +96,8 @@ final class EditGuardHyphenCompoundJoinTests: XCTestCase {
     /// is the calibrated line; joins spanning three or more dictated tokens
     /// stay rejected (out-of-scope section of the plan).
     func testNegative_threeTokenJoin_en() {
-        let baseline = "So the delegation not script is the point."
-        let candidate = "So the delegation-not-script is the point."
+        let baseline = "So the submission not draft is the point."
+        let candidate = "So the submission-not-draft is the point."
         let result = guardOut(baseline, candidate)
         XCTAssertEqual(result.text, baseline)
     }
@@ -114,8 +114,8 @@ final class EditGuardHyphenCompoundJoinTests: XCTestCase {
     /// whose baseline pair also happens to be adjacent (deleted partner),
     /// but the candidate has NO hyphen — must stay rejected.
     func testNegative_selbstErklaerend_derivational_de() {
-        let baseline = "Das ist nicht ganz selbst erklärend."
-        let candidate = "Das ist nicht ganz selbstverständlich."
+        let baseline = "Das wirkt nicht ganz selbst erklärend."
+        let candidate = "Das wirkt nicht ganz selbstverständlich."
         let result = guardOut(baseline, candidate, "de")
         XCTAssertEqual(result.text, baseline)
     }
@@ -130,10 +130,10 @@ final class EditGuardHyphenCompoundJoinTests: XCTestCase {
     /// bug fix — it requires establishing coupling-exemption safety across
     /// a full corpus replay, out of this quick task's scope.
     func testLimitationPin_atomicGroupRevertsJoinWhenGroupmateRejected_en() {
-        let baseline = "The design and decision wise and then we can go."
-        let candidate = "The design and decision-wise. Then we can go."
+        let baseline = "The layout and budget wise and then we can go."
+        let candidate = "The layout and budget-wise. Then we can go."
         let result = guardOut(baseline, candidate)
-        XCTAssertTrue(result.text.contains("decision wise"),
+        XCTAssertTrue(result.text.contains("budget wise"),
             "known limitation (landmine 3): a co-rejected groupmate reverts the whole atomic group, including the otherwise-qualifying join — got: \(result.text)")
     }
 }

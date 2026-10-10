@@ -24,8 +24,8 @@ final class ITNRangeNounTests: XCTestCase {
     // MARK: - D-13: clusters (RED on pre-fix code, GREEN after the noun-list change)
 
     func testD13_clustersRange_oneTwoFive() {
-        let out = ITNUtility.applyITN(to: "address the clusters one two five", language: "en")
-        XCTAssertEqual(out, "address the clusters 1 to 5")
+        let out = ITNUtility.applyITN(to: "review all clusters one two five", language: "en")
+        XCTAssertEqual(out, "review all clusters 1 to 5")
         XCTAssertFalse(out.contains("102"))
     }
 

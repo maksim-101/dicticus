@@ -33,14 +33,14 @@ final class GroundingLiteTests: XCTestCase {
         ("en", "But before you act on it, I want you to analyze the situation and get a holistic picture and then make a recommendation of what to change or how to change."),
         ("en", "What's your recommendation here and why?"),
         ("en", "It seems like you're not up to date with the current storage prices, which experienced quite the hike in the past few months and even years."),
-        ("en", "Because I definitely would like to install Tailscale again, and then if possible Proton VPN as well, or at least some other VPN for travel or just being not at home."),
-        ("en", "Because I clearly remember the senior support agent from Apple support telling me that the VPN configuration somehow might interfere with Apple's security protocols on their servers, which then might hinder network connectivity or something along those lines."),
-        ("en", "So there's still a mistake in there. I currently have two Claude Code sessions open, but only one is shown."),
+        ("en", "Because I truly want to set up Tailscale afresh, and then if possible Mullvad as well, or maybe some other tunnel for trips or just being away from home."),
+        ("en", "Because I vividly recall the junior desk operator from Acme support informing me that the tunnel setup possibly could clash with Acme's safety rules on their machines, which then could block network access or something in that direction."),
+        ("en", "So there remains a bug in there. I presently have three Claude Code windows open, but just one is listed."),
         ("de", "Also das klingt erst einmal spannend, diese Visual Document Retrieval, aber ich möchte auch klarstellen, dass die meisten Dokumente, auch PDF, nicht eingescannt sind. Also das sind keine Fotos von Dokumenten, sondern effektive Dokumente. Und ich weiss nicht, ob da OCR greift."),
         ("de", "Was du jeweils rechts vom Auftrag siehst, also wir haben eine Auftragsnummer, dann den Auftragstitel und dann ein blaues I-Symbol. Wenn ich da drauf klicke, geht ein Pop-Up auf, das mir den gesamten Auftrag anzeigt, also eine kleine Auftragsmaske, und was gestern noch aufkam, ist, dass die Auftragsnummer in dieser Journalliste wahrscheinlich nicht oder nur selten benötigt wird und dass die dann in der Journalliste verschwinden könnte und bei Bedarf über dieses I-Symbol aufgerufen werden könnte."),
         ("de", "Diese Klimaanlage ist anscheinend nur für 42 Quadratmeter geeignet."),
-        ("de", "Wir sprechen dabei noch nicht von der Lösung, also eines fertigen Zielbildes und den daraus abgeleiteten operationalisierten Leitprinzipien, aber erst einmal eine Ergebnisaufbereitung und Auswertung."),
-        ("de", "Aber seit neuestem beobachte ich zwei Dinge. Das eine ist, dass ich in der Texteingabe von Claude Code nun beliebig Text auswählen kann oder meinen Cursor setzen kann, wie in einem normalen Texteditor auch. Also nicht dieses normale Terminalverhalten. Und zudem gibt es auch wie einen Vollbildmodus von Claude Code selbst innerhalb des Terminalfensters, das durchaus angenehmer ist als die bisherige Erfahrung. Ist das ebenfalls möglich in"),
+        ("de", "Wir reden dabei noch nicht vom Ergebnis, also eines fertigen Leitbildes und den daraus hergeleiteten operationalisierten Grundsätzen, aber zunächst einmal eine Datenaufbereitung und Analyse."),
+        ("de", "Aber seit kurzem bemerke ich zwei Dinge. Das erste ist, dass ich im Eingabefeld von Claude Code jetzt frei Text markieren kann oder meine Schreibmarke platzieren kann, wie in einem gewöhnlichen Notizprogramm auch. Also nicht dieses übliche Konsolenverhalten. Und außerdem existiert auch quasi ein Fullscreen-Modus von Claude Code selbst im Shellfenster, der deutlich bequemer ist als die frühere Erfahrung. Ist das ebenfalls machbar in"),
         ("de", "Ich glaube, die Richtung dieses Satzes stimmt. Doch kam hier natürlich auch die Frage auf, ob dann wirklich in jedem Fall, wenn das System, die KI, wer auch immer wirklich gut programmiert ist, der Mensch dann das besser weiss und wie einfach es ist, dem zu widersprechen. Ich glaube, es sollte keine Masterarbeit bedingen, um einem Maschinenvorschlag zu widersprechen, und trotzdem sollte man nicht einfach nur Nein klicken können oder nee, das passt mir jetzt nicht. Darum tue ich es nicht, so mit der Attitüde heranzugehen. Weisst du, was ich meine?"),
         ("en", "As for the orphaned code, you can delete it."),
         ("en", "Oh maybe I got the wrong moment. It's actually trying to initialize, but then it says failed setup."),
@@ -133,11 +133,11 @@ final class GroundingLiteTests: XCTestCase {
     // MARK: - POSITIVE: letter-expansion guard (eval_set.json en-inve-030/032)
 
     func testLetterGuardRevertsInventedHashOnBareLetter_enInve030() {
-        let input = "Also, you talk about HDDD and C D D and then also K days."
-        let output = "Also, you talk about HDDD and C# D D and then also K days."
+        let input = "Besides, we speak of HDDX and C D D plus K weeks."
+        let output = "Besides, we speak of HDDX and C# D D plus K weeks."
         XCTAssertEqual(
             GroundingLite.guardLetterExpansion(input: input, output: output),
-            "Also, you talk about HDDD and C D D and then also K days."
+            "Besides, we speak of HDDX and C D D plus K weeks."
         )
     }
 
@@ -145,11 +145,11 @@ final class GroundingLiteTests: XCTestCase {
         // Input dictates a lowercase "c" — matching is case-insensitive, and
         // the reversion preserves the OUTPUT's own casing (strips only the
         // suffix), matching the gold_ideal capitalization.
-        let input = "Visually speaking, I liked your variants c, d and E the best."
-        let output = "Visually speaking, I liked your variants C#, d and E the best."
+        let input = "Frankly speaking, I preferred your drafts c, f and G the most."
+        let output = "Frankly speaking, I preferred your drafts C#, f and G the most."
         XCTAssertEqual(
             GroundingLite.guardLetterExpansion(input: input, output: output),
-            "Visually speaking, I liked your variants C, d and E the best."
+            "Frankly speaking, I preferred your drafts C, f and G the most."
         )
     }
 

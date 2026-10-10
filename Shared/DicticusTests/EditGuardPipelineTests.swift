@@ -128,13 +128,13 @@ final class EditGuardPipelineTests: XCTestCase {
     /// digit corruption structurally invisible to it.
     func testDigitValueChangeNeverReachesOutput() async {
         let mock = PipelineMockCleanupProvider()
-        mock.returnValue = "The latency was 10,111 milliseconds under load."
+        mock.returnValue = "The wait was 10,111 milliseconds under stress."
         let service = TextProcessingService(
             dictionaryService: dictionaryService, cleanupService: mock, historyService: testHistory
         )
 
         let output = await service.process(
-            text: "The latency was 10,011 milliseconds under load.", language: "en", mode: .aiCleanup
+            text: "The wait was 10,011 milliseconds under stress.", language: "en", mode: .aiCleanup
         )
 
         XCTAssertTrue(output.contains("10,011"), "final output \"\(output)\" must contain the true value 10,011")
@@ -208,16 +208,16 @@ final class EditGuardPipelineTests: XCTestCase {
     /// `gate=rejected` in production today (pre-Phase-44 gate stack).
     func testGermanWordOrderRepairSurvivesTheWholePipeline() async {
         let mock = PipelineMockCleanupProvider()
-        mock.returnValue = "Weil die Fragen ja gleich sofort ausgewertet werden."
+        mock.returnValue = "Weil die Zahlen ja gleich später geprüft werden."
         let service = TextProcessingService(
             dictionaryService: dictionaryService, cleanupService: mock, historyService: testHistory
         )
 
         let output = await service.process(
-            text: "Weil die Fragen werden ja gleich sofort ausgewertet.", language: "de", mode: .aiCleanup
+            text: "Weil die Zahlen werden ja gleich später geprüft.", language: "de", mode: .aiCleanup
         )
 
-        XCTAssertTrue(output.contains("ausgewertet werden"),
+        XCTAssertTrue(output.contains("geprüft werden"),
             "the German verb-final word-order repair must reach the end of the pipeline intact — got: \(output)")
     }
 
@@ -230,9 +230,9 @@ final class EditGuardPipelineTests: XCTestCase {
     /// is the EN word->digit sibling of `testStep3aOrdering` (DE, digit->
     /// word) and the regression net for that contract in EN.
     func testNumberFormPolicy_wordToDigit_en() async {
-        let rawText = "so maybe check that again and then either opt for option 2 or three depending on what you find"
+        let rawText = "so maybe verify that twice and then either go for variant 2 or three based on what you see"
         let mock = PipelineMockCleanupProvider()
-        mock.returnValue = "So maybe check that again and then either opt for option 2 or 3 depending on what you find."
+        mock.returnValue = "So maybe verify that twice and then either go for variant 2 or 3 based on what you see."
         let service = TextProcessingService(
             dictionaryService: dictionaryService, cleanupService: mock, historyService: testHistory
         )

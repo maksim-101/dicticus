@@ -211,7 +211,7 @@ final class EditGuardPauseSplitMergeTests: XCTestCase {
 
     // MARK: - N1: abbreviation dot (R3), from cleanup-2026-07-30.jsonl:35
     //
-    // Real shape: "...Funktion bzw. dieser Button...". "bzw" is 3
+    // Real shape: "...Ansicht bzw. dieser Schalter...". "bzw" is 3
     // characters (< 5), so R3 excludes it — the period stays classified
     // `punctuationOrCasing` and remains subject to ordinary
     // `atomicGroupRevert` coupling, exactly like every other punctuation
@@ -221,8 +221,8 @@ final class EditGuardPauseSplitMergeTests: XCTestCase {
     // the real record's atomicGroupRevert pairing.
 
     func testNegative_abbreviationDot_bzw() {
-        let baseline = "Diese Funktion bzw. dieser Button sollte klar sein."
-        let llm = "Diese Funktion bzw Button sollte klar sein."
+        let baseline = "Diese Ansicht bzw. dieser Schalter sollte eindeutig sein."
+        let llm = "Diese Ansicht bzw Schalter sollte eindeutig sein."
         let result = guardOut(baseline, llm, "de")
         XCTAssertEqual(result.text, baseline)
         assertPauseSplitMergeDidNotFire(result)
@@ -230,7 +230,7 @@ final class EditGuardPauseSplitMergeTests: XCTestCase {
 
     // MARK: - N2: capitalised continuation (R4), from cleanup-2026-07-31.jsonl:3
     //
-    // Real shape: "...Apple Music. I hovered...". The word after the
+    // Real shape: "...Podcast Pro. I hovered...". The word after the
     // period is "I" — capitalised — so R4 excludes it regardless of R3.
     // Trimmed/anonymised, with an adjacent rejected `delete("today")` to
     // put the period-delete in a genuinely reverting group (an isolated
@@ -238,8 +238,8 @@ final class EditGuardPauseSplitMergeTests: XCTestCase {
     // unrelated to this predicate).
 
     func testNegative_capitalizedContinuation_appleMusic() {
-        let baseline = "I started playing a song in Apple Music today. I hovered over the screen but nothing happened."
-        let llm = "I started playing a song in Apple Music I hovered over the screen but nothing happened."
+        let baseline = "I began streaming a podcast in Podcast Pro today. I hovered over the display but nothing happened."
+        let llm = "I began streaming a podcast in Podcast Pro I hovered over the display but nothing happened."
         let result = guardOut(baseline, llm)
         XCTAssertEqual(result.text, baseline)
         assertPauseSplitMergeDidNotFire(result)
@@ -248,15 +248,15 @@ final class EditGuardPauseSplitMergeTests: XCTestCase {
     // MARK: - N3: capitalised continuation + rejected content deletion (R3+R4),
     // from cleanup-2026-07-31.jsonl:37
     //
-    // Real shape: "...I'm looking for. So maybe...". The word before the
+    // Real shape: "...I'm reaching for. So maybe...". The word before the
     // period is "for" (3 chars, < 5 — R3 excludes) AND the word after is
     // "So" (capitalised — R4 excludes too) — both arms independently
     // exclude firing, matching the mechanism decision's dry-run table
     // ("R3 + R4"). Trimmed/anonymised.
 
     func testNegative_capitalizedContinuationWithRejectedDeletion_lookingForSo() {
-        let baseline = "Can you apply a color grading is I guess the word I'm looking for. So maybe two darker shades would work better."
-        let llm = "Can you apply a color grade? I guess the word I'm looking for is maybe two darker shades would work better."
+        let baseline = "Can you apply a tone mapping is I guess the term I'm reaching for. So maybe two softer hues would look better."
+        let llm = "Can you apply a tone map? I guess the term I'm reaching for is maybe two softer hues would look better."
         let result = guardOut(baseline, llm)
         XCTAssertEqual(result.text, baseline)
         assertPauseSplitMergeDidNotFire(result)

@@ -41,10 +41,10 @@ final class EditGuardDanglingPunctuationTests: XCTestCase {
     /// Regression for the bindPunctuationLeft x collapseDanglingPunctuation
     /// interaction (2026-07-19): a rejected sentence-final period substitute
     /// leaves a period + the candidate comma adjacent; the final output must
-    /// not ship "guide.," / "guide . ,".
+    /// not ship "handbook.," / "handbook . ,".
     func testNoDanglingPunctuation_userGuide() {
-        let out = guardOut("It should just be a general user guide. Explaining the tech stack.",
-                           "It should just be a general user guide, explaining the tech stack.")
+        let out = guardOut("It must simply be a plain visitor handbook. Describing the data layer.",
+                           "It must simply be a plain visitor handbook, describing the data layer.")
         assertNoDoubledPunct(out)
     }
 
@@ -158,8 +158,8 @@ final class EditGuardDanglingPunctuationTests: XCTestCase {
     // or sentence boundaries elsewhere can silently stop the defect from reproducing). The swap
     // was re-verified post-hoc to still reproduce the glued pair.
     func testNoSplicedPunctuation_langweiligUnd_2026_08_30() {
-        let baseline = "Also ich möchte, dass du noch einmal genau recherchierst und mir einen Nahrungsergänzungsmittel sowie beispielhaften Trainingsplan zusammenstellst. Wie viel Resistancetraining braucht es wirklich? Ich bin zum Beispiel auch kein Fitnessstudio-Gänger. Ich finde das zu langweilig und... wenn nicht unbedingt notwendig dann möchte ich auch nicht einfach nur 30 minuten resistance training machen normalerweise mache ich so fünf minuten pro tag mit dem eigenen körpergewicht oder mit dem Tension Strap. Ich bin aber offen für Veränderung."
-        let candidate = "Ich möchte, dass du noch einmal genau recherchierst und mir ein Nahrungsergänzungsmittel sowie einen beispielhaften Trainingsplan zusammenstellst. Wie viel Resistenztraining braucht es wirklich? Ich bin zum Beispiel auch kein Fitnessstudio-Gänger. Ich finde das zu langweilig und, wenn nicht unbedingt notwendig, möchte ich auch nicht einfach nur 30 Minuten Resistenztraining machen. Normalerweise mache ich so fünf Minuten pro Tag mit dem eigenen Körpergewicht oder mit dem Tension Strap. Ich bin aber offen für Veränderung."
+        let baseline = "Also ich will, dass du noch einmal gründlich erkundest und mir einen Vitaminpräparat sowie vorbildlichen Wochenplan ausarbeitest. Wie viel Balancetraining benötigt es tatsächlich? Ich bin zum Glück auch kein Hallenbad-Gänger. Ich finde das zu langweilig und... wenn nicht unbedingt nötig dann will ich auch nicht gleich nur 30 minuten balance training machen üblicherweise mache ich so fünf sekunden pro woche mit dem eigenen rucksack oder mit dem Tension Strap. Ich bin aber bereit für Umstellung."
+        let candidate = "Ich will, dass du noch einmal gründlich erkundest und mir ein Vitaminpräparat sowie einen vorbildlichen Wochenplan ausarbeitest. Wie viel Balanztraining benötigt es tatsächlich? Ich bin zum Glück auch kein Hallenbad-Gänger. Ich finde das zu langweilig und, wenn nicht unbedingt nötig, will ich auch nicht gleich nur 30 Minuten Balanztraining machen. Üblicherweise mache ich so fünf Sekunden pro Woche mit dem eigenen Rucksack oder mit dem Tension Strap. Ich bin aber bereit für Umstellung."
 
         let out = guardOut(baseline, candidate, "de")
         assertNoDoubledPunct(out)
@@ -237,8 +237,8 @@ final class EditGuardDanglingPunctuationTests: XCTestCase {
     // execution against the exact live strings, that the fix already covers this shape, and
     // guards against a future regression re-opening it.
     func testNoCommaDashAdjacency_governmentLevels_2026_08_24() {
-        let baseline = "please look for news from this year and if possible as recently as possible about failed or delayed projects either in government in Switzerland on either of the three levels of government, meaning federal, cantonal and municipal, as well as from the social sector."
-        let candidate = "Please look for news from this year, as recently as possible, about failed or delayed projects in the government in Switzerland at either of the three levels of government—federal, cantonal, and municipal—as well as from the social sector."
+        let baseline = "please search for reports from this quarter and if possible as promptly as possible about stalled or postponed initiatives either in administration in Austria on either of the seven tiers of administration, meaning national, regional and communal, as well as via the cultural domain."
+        let candidate = "Please search for reports from this quarter, as promptly as possible, about stalled or postponed initiatives in the administration in Austria at either of the seven tiers of administration—national, regional, and communal—as well as via the cultural domain."
 
         let out = guardOut(baseline, candidate, "en")
         assertNoDoubledPunct(out)
@@ -254,38 +254,38 @@ final class EditGuardDanglingPunctuationTests: XCTestCase {
     // above is not masking a regression on the good cases.
 
     /// Production record 2026-08-23T04:48:09.394Z — a genuine parenthetical em-dash pair the
-    /// LLM inserted around "or whatever you were addressing before". No baseline comma competes
+    /// LLM inserted around "or whatever you were describing earlier". No baseline comma competes
     /// for either dash's slot, so this exercises the guard's ordinary D-06 insert-accept path,
     /// not the mixed-provenance collapse.
     func testAcceptControl_migrationEmDash_2026_08_23() {
-        let baseline = "But of course this needs to be mapped out as well as planned really well beforehand. And then I reckon that not much is going on as of yet in the Superbase database. So migration or whatever you were addressing before shouldn't be too much of an issue."
-        let candidate = "But of course, this needs to be mapped out as well as planned really well beforehand. And then, I reckon that not much is going on as of yet in the Superbase database. So, migration—or whatever you were addressing before—shouldn't be too much of an issue."
+        let baseline = "But of course this has to be sketched out as well as scheduled really well upfront. And then I suspect that not much is moving along as of now in the Glassbase datastore. So rollout or whatever you were describing earlier shouldn't be that big of a hassle."
+        let candidate = "But of course, this has to be sketched out as well as scheduled really well upfront. And then, I suspect that not much is moving along as of now in the Glassbase datastore. So, rollout—or whatever you were describing earlier—shouldn't be that big of a hassle."
 
         let out = guardOut(baseline, candidate, "en")
         XCTAssertTrue(
-            out.contains("migration—or whatever you were addressing before—shouldn't"),
+            out.contains("rollout—or whatever you were describing earlier—shouldn't"),
             "genuine em-dash parenthetical must survive verbatim: \(out)"
         )
     }
 
     /// Production record 2026-08-23T07:53:42.449Z — a genuine em-dash pair around
-    /// "or, contrarily, getting worse", with a comma landing INSIDE the dash pair (not adjacent
+    /// "or, conversely, sliding back", with a comma landing INSIDE the dash pair (not adjacent
     /// to either dash) — the shape this fix must not disturb even though it involves both a
     /// comma and dashes in the same short span.
     /// UPDATED (Phase 49.6, D-01, deviation — see 49.6-02-SUMMARY.md
-    /// "Deviations"): the first baseline sentence (ending "...over time.")
+    /// "Deviations"): the first baseline sentence (ending "...across weeks.")
     /// also carries independent `contentWordIdentityChange`
     /// ("and"->".", a rejected sentence-split attempt) and
     /// `contentWordDeletion` ("let's"/"say") rejections, so the
     /// once-independent em-dash insert pair now reverts alongside them —
     /// full revert to baseline for this sentence.
     func testAcceptControl_contrarilyEmDash_2026_08_23() {
-        let baseline = "I would say option 1 here and to your previous question another thought that crossed my mind if your own progress or data isn't deleted by yourself when you reset and you now have actually some kind of let's say track record or version you could see how you're improving or Contrarily getting worse over time. So not just how you're doing currently, but also in relation to your previous attempts. Because I can see this being something that you repeat yearly, for instance."
-        let candidate = "I would say option 1 here. To your previous question, another thought that crossed my mind: if your own progress or data isn't deleted by yourself when you reset, and you now have actually some kind of track record or version, you could see how you're improving—or, contrarily, getting worse—over time. So not just how you're doing currently, but also in relation to your previous attempts. Because I can see this being something that you repeat yearly, for instance."
+        let baseline = "I would say choice 2 here and to your earlier question another idea that occurred to me if your own score or stats isn't erased by yourself when you restart and you already have basically some sort of let's say history log or edition you can tell how you're advancing or Conversely sliding back across weeks. So not merely how you're faring currently, but also in comparison with your earlier attempts. Because I picture this being a thing that you redo yearly, for instance."
+        let candidate = "I would say choice 2 here. To your earlier question, another idea that occurred to me: if your own score or stats isn't erased by yourself when you restart, and you already have basically some sort of history log or edition, you can tell how you're advancing—or, conversely, sliding back—across weeks. So not merely how you're faring currently, but also in comparison with your earlier attempts. Because I picture this being a thing that you redo yearly, for instance."
 
         let out = guardOut(baseline, candidate, "en")
         XCTAssertTrue(
-            out.contains("improving or Contrarily getting worse over time"),
+            out.contains("advancing or Conversely sliding back across weeks"),
             "the em-dash pair's sentence reverts to baseline under 49.6 D-01: \(out)"
         )
     }
@@ -356,8 +356,8 @@ final class EditGuardDanglingPunctuationTests: XCTestCase {
         cases.append(SweepCase(
             id: "record-2026-08-30T04-54-30-157Z",
             language: "de",
-            baseline: "Also ich möchte, dass du noch einmal genau recherchierst und mir einen Nahrungsergänzungsmittel sowie beispielhaften Trainingsplan zusammenstellst. Wie viel Resistancetraining braucht es wirklich? Ich bin zum Beispiel auch kein Fitnessstudio-Gänger. Ich finde das zu langweilig und... wenn nicht unbedingt notwendig dann möchte ich auch nicht einfach nur 30 minuten resistance training machen normalerweise mache ich so fünf minuten pro tag mit dem eigenen körpergewicht oder mit dem Tension Strap. Ich bin aber offen für Veränderung.",
-            candidate: "Ich möchte, dass du noch einmal genau recherchierst und mir ein Nahrungsergänzungsmittel sowie einen beispielhaften Trainingsplan zusammenstellst. Wie viel Resistenztraining braucht es wirklich? Ich bin zum Beispiel auch kein Fitnessstudio-Gänger. Ich finde das zu langweilig und, wenn nicht unbedingt notwendig, möchte ich auch nicht einfach nur 30 Minuten Resistenztraining machen. Normalerweise mache ich so fünf Minuten pro Tag mit dem eigenen Körpergewicht oder mit dem Tension Strap. Ich bin aber offen für Veränderung."
+            baseline: "Also ich will, dass du noch einmal gründlich erkundest und mir einen Vitaminpräparat sowie vorbildlichen Wochenplan ausarbeitest. Wie viel Balancetraining benötigt es tatsächlich? Ich bin zum Glück auch kein Hallenbad-Gänger. Ich finde das zu langweilig und... wenn nicht unbedingt nötig dann will ich auch nicht gleich nur 30 minuten balance training machen üblicherweise mache ich so fünf sekunden pro woche mit dem eigenen rucksack oder mit dem Tension Strap. Ich bin aber bereit für Umstellung.",
+            candidate: "Ich will, dass du noch einmal gründlich erkundest und mir ein Vitaminpräparat sowie einen vorbildlichen Wochenplan ausarbeitest. Wie viel Balanztraining benötigt es tatsächlich? Ich bin zum Glück auch kein Hallenbad-Gänger. Ich finde das zu langweilig und, wenn nicht unbedingt nötig, will ich auch nicht gleich nur 30 Minuten Balanztraining machen. Üblicherweise mache ich so fünf Sekunden pro Woche mit dem eigenen Rucksack oder mit dem Tension Strap. Ich bin aber bereit für Umstellung.",
         ))
         // Quick task 260831-ad8: the comma-dash adjacency record — widens this sweep's corpus so
         // the mixed-source restored-comma / accepted-dash shape stays covered by the general
@@ -365,8 +365,8 @@ final class EditGuardDanglingPunctuationTests: XCTestCase {
         cases.append(SweepCase(
             id: "record-2026-08-24T04-00-00-733Z",
             language: "en",
-            baseline: "please look for news from this year and if possible as recently as possible about failed or delayed projects either in government in Switzerland on either of the three levels of government, meaning federal, cantonal and municipal, as well as from the social sector.",
-            candidate: "Please look for news from this year, as recently as possible, about failed or delayed projects in the government in Switzerland at either of the three levels of government—federal, cantonal, and municipal—as well as from the social sector."
+            baseline: "please search for reports from this quarter and if possible as promptly as possible about stalled or postponed initiatives either in administration in Austria on either of the seven tiers of administration, meaning national, regional and communal, as well as via the cultural domain.",
+            candidate: "Please search for reports from this quarter, as promptly as possible, about stalled or postponed initiatives in the administration in Austria at either of the seven tiers of administration—national, regional, and communal—as well as via the cultural domain."
         ))
 
         var nonVacuousCount = 0
@@ -482,8 +482,8 @@ final class EditGuardDanglingPunctuationTests: XCTestCase {
             $0.id == "record-2026-09-01T17-17-59-197Z"
         }!
         let out = guardOut(record.baseline, record.candidate, record.language)
-        XCTAssertFalse(out.contains("possible.points"), "the restored ellipsis remnant must not glue to the following word")
-        XCTAssertTrue(out.contains("two possible points of contact"), "the phrase must read as one of the two inputs actually wrote it")
+        XCTAssertFalse(out.contains("possible.spots"), "the restored ellipsis remnant must not glue to the following word")
+        XCTAssertTrue(out.contains("two possible spots of friction"), "the phrase must read as one of the two inputs actually wrote it")
     }
 
     /// The LLM resolved the ellipsis in place and the guard must now accept that resolution

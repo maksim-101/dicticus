@@ -110,10 +110,10 @@ final class EditGuardGrammarRegressionTests: XCTestCase {
     /// PRESERVE (must already pass, and stay passing): "werden" clause-final
     /// repair. In-repo canonical leak-stripped pair (see file doc comment).
     func testPreserve_deRepairWerden() {
-        let baseline = "Weil die Fragen werden ja gleich sofort ausgewertet."
-        let candidate = "Weil die Fragen ja gleich sofort ausgewertet werden."
+        let baseline = "Weil die Zahlen werden ja gleich später geprüft."
+        let candidate = "Weil die Zahlen ja gleich später geprüft werden."
         let out = guardOut(baseline, candidate, "de")
-        XCTAssertTrue(out.contains("ausgewertet werden"), out)
+        XCTAssertTrue(out.contains("geprüft werden"), out)
     }
 
     // MARK: - Class 2: mid-sentence wrong capitalization ("and Now")
