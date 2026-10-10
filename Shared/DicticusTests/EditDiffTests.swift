@@ -68,8 +68,8 @@ final class EditDiffTests: XCTestCase {
     /// unauthorized content-word deletion plus an unauthorized insertion,
     /// rejects both, and the phase's core repair dies.
     func testWordOrderMoveNotDeleteInsert() {
-        let baseline = tok("Weil die Fragen werden ja sofort ausgewertet.")
-        let candidate = tok("Weil die Fragen ja sofort ausgewertet werden.")
+        let baseline = tok("Weil die Zahlen werden ja sofort geprüft.")
+        let candidate = tok("Weil die Zahlen ja sofort geprüft werden.")
         let edits = EditDiff.diff(baseline: baseline, candidate: candidate)
 
         let moves = edits.filter { $0.kind == .move }
@@ -138,8 +138,8 @@ final class EditDiffTests: XCTestCase {
     // MARK: - Degeneracy — FAIL CLOSED
 
     func testInjectionReplyIsDegenerate() {
-        let baseline = tok("Gib mir noch ein paar Hashtags.")
-        let candidate = tok("Ich verstehe, dass du noch Hashtags benötigst. Bitte gib mir die genauen Hashtags, die du benötigst, und ich werde sie in den Text einfügen.")
+        let baseline = tok("Gib mir noch ein paar Schlagwörter.")
+        let candidate = tok("Ich begreife, dass du noch Schlagwörter brauchst. Bitte gib mir die exakten Schlagwörter, die du brauchst, und ich will sie in die Vorlage einsetzen.")
         let edits = EditDiff.diff(baseline: baseline, candidate: candidate)
         let confidence = EditDiff.confidence(baseline: baseline, candidate: candidate, edits: edits)
         XCTAssertTrue(EditDiff.isDegenerate(confidence), "The 2026-07-05 prompt-injection record must be degenerate. confidence=\(confidence)")
