@@ -31,9 +31,9 @@ final class BrandFunctionWordWindowTests: XCTestCase {
     func testTalescalRepairedIPAndSurvives() {
         XCTAssertEqual(
             makeMatcher().apply(
-                to: "I would point the CNAME record at my TALESCAL IP and not at the TrueNAS IP directly.",
+                to: "I would route the CNAME entry at my TALESCAL IP but not on the TrueNAS IP directly.",
                 language: "en"),
-            "I would point the CNAME record at my Tailscale IP and not at the TrueNAS IP directly.")
+            "I would route the CNAME entry at my Tailscale IP but not on the TrueNAS IP directly.")
     }
 
     // MARK: - Adversarially broadened function-word-span negatives (EN)
