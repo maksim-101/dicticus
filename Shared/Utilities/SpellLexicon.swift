@@ -42,11 +42,20 @@ public protocol SpellLexicon: Sendable {
     /// frequency lexicon, whatever the language. Used only to keep
     /// `nonWordRepair` off real words the platform checker lacks.
     func isListedWord(_ text: String, language: String) -> Bool
+
+    /// Quick task 261010-8dm: true iff the platform checker accepts `text`
+    /// once capitalised, under its German or its English dictionary. Serves
+    /// only to spot a dictated compound of two real words. It asks
+    /// `checkSpelling` alone: completions and guesses return nothing inside
+    /// app bundles while AppleSpell is wedged, and the bundled list holds
+    /// non-word fragments.
+    func isKnownCompoundPart(_ text: String) -> Bool
 }
 
 public extension SpellLexicon {
     func isCompoundAcceptedRepair(source: String, candidate: String, language: String) -> Bool { false }
     func isListedWord(_ text: String, language: String) -> Bool { false }
+    func isKnownCompoundPart(_ text: String) -> Bool { false }
 }
 
 /// The production implementation: `NSSpellChecker` (macOS) / `UITextChecker`
@@ -153,6 +162,29 @@ public final class PlatformSpellLexicon: SpellLexicon, @unchecked Sendable {
                 && Self.platformSelfListed(candidate)
                 && Self.platformGuessesInclude(source, lowerCandidate: lowerCandidate)
         }
+
+        lock.lock()
+        cache[key] = result
+        lock.unlock()
+        return result
+    }
+
+    /// Quick task 261010-8dm: the German checker rejects lowercase nouns, so
+    /// the part is queried capitalised, in German and then English. The answer
+    /// depends only on the lowercased text, which is the cache key.
+    public func isKnownCompoundPart(_ text: String) -> Bool {
+        let key = "part:" + text.lowercased()
+
+        lock.lock()
+        if let cached = cache[key] {
+            lock.unlock()
+            return cached
+        }
+        lock.unlock()
+
+        let cap = text.prefix(1).uppercased() + text.dropFirst().lowercased()
+        let result = Self.platformKnown(cap, language: "de")
+            || Self.platformKnown(cap, language: "en")
 
         lock.lock()
         cache[key] = result
