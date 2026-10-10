@@ -36,10 +36,10 @@ final class EditGuardMoodLockSplitTests: XCTestCase {
     // MARK: - Positive: live cleanup-2026-08-23.jsonl #11 — a no-reorder split
 
     func testPositive_noReorderSplitSurvivesMoodLock_en() {
-        let baseline = "Because I guess this is more ambiguous in nature right because delegation downward is about cost efficiency does the senior super advisor Need to do all the work? No."
-        let candidate = "Because I guess this is more ambiguous in nature, right, because delegation downward is about cost efficiency. Does the senior super advisor need to do all the work? No."
+        let baseline = "Because I suppose this is more uncertain in practice right because outsourcing upward is about time budget does the junior lead reviewer Have to do all the lifting? No."
+        let candidate = "Because I suppose this is more uncertain in practice, right, because outsourcing upward is about time budget. Does the junior lead reviewer have to do all the lifting? No."
         let result = guardOut(baseline, candidate)
-        XCTAssertTrue(result.text.contains("cost efficiency. Does the senior super advisor need to do all the work?"),
+        XCTAssertTrue(result.text.contains("time budget. Does the junior lead reviewer have to do all the lifting?"),
             "expected the split + both casing fixes to survive — got: \(result.text)")
         assertMoodLockDidNotFire(result)
     }
@@ -62,8 +62,8 @@ final class EditGuardMoodLockSplitTests: XCTestCase {
     /// (`XCTAssertEqual(result.text, baseline)` below); only the SPECIFIC
     /// rejection class differs.
     func testNegative_verbFrontingEn() {
-        let baseline = "You can push the commits and then I'm wondering where do we stand."
-        let candidate = "Can you push the commits and then I'm wondering where we stand."
+        let baseline = "You can send the patches and then I'm asking where do we stand."
+        let candidate = "Can you send the patches and then I'm asking where we stand."
         let result = guardOut(baseline, candidate)
         XCTAssertEqual(result.text, baseline)
         XCTAssertTrue(
