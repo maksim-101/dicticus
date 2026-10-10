@@ -896,7 +896,7 @@ final class DictionaryServiceSx1IterMTests: XCTestCase {
     }
 
     func testIterm_recovered() {
-        let result = DictionaryService.shared.apply(to: "arbeiten in iterm 2 mit Tabs")
+        let result = DictionaryService.shared.apply(to: "schreiben in iterm 2 mit Reitern")
         XCTAssertTrue(result.contains("iTerm"))
         XCTAssertFalse(result.contains("iterm 2"))
     }
