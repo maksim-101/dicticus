@@ -43,11 +43,12 @@ public protocol SpellLexicon: Sendable {
     /// `nonWordRepair` off real words the platform checker lacks.
     func isListedWord(_ text: String, language: String) -> Bool
 
-    /// Quick task 261010-8dm: true iff the platform checker knows `text`
-    /// capitalised, in German or English. Used only to recognise a dictated
-    /// compound of two real words. It asks `checkSpelling` alone: completions
-    /// and guesses return nothing inside app bundles while AppleSpell is
-    /// wedged, and the bundled list holds non-word fragments.
+    /// Quick task 261010-8dm: true iff the platform checker accepts `text`
+    /// once capitalised, under its German or its English dictionary. Serves
+    /// only to spot a dictated compound of two real words. It asks
+    /// `checkSpelling` alone: completions and guesses return nothing inside
+    /// app bundles while AppleSpell is wedged, and the bundled list holds
+    /// non-word fragments.
     func isKnownCompoundPart(_ text: String) -> Bool
 }
 
