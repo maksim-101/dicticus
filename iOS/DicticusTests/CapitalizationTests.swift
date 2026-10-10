@@ -224,4 +224,80 @@ final class CapitalizationTests: XCTestCase {
             "a run of dots is not a sentence boundary"
         )
     }
+
+    // MARK: - Quick 261010-8do: a leading number keeps the next word's case
+
+    func testLeadingNumberKeepsNextWordCase_RED() {
+        let de = "4 oder 5 genügen sicher."
+        XCTAssertEqual(
+            TextProcessingService.applyFinalCapitalization(de, language: "de"),
+            de,
+            "a number before the first letter means the word after it keeps the case it was dictated with"
+        )
+        let en = "3 apples were left on the shelf."
+        XCTAssertEqual(TextProcessingService.applyFinalCapitalization(en, language: "en"), en)
+    }
+
+    func testLeadingNumberBehindLineBreakOrQuoteKeepsNextWordCase_RED() {
+        let de = "\n6 und 7 fehlen noch."
+        XCTAssertEqual(TextProcessingService.applyFinalCapitalization(de, language: "de"), de)
+        let en = "\"8 of them,\" she said."
+        XCTAssertEqual(TextProcessingService.applyFinalCapitalization(en, language: "en"), en)
+    }
+
+    func testLeadingNumberTokenNotCapitalizedMidToken_RED() {
+        let ordinal = "1st round starts at noon."
+        XCTAssertEqual(
+            TextProcessingService.applyFinalCapitalization(ordinal, language: "en"),
+            ordinal,
+            "a number-led token must not get a capital inside the word ('1St')"
+        )
+        let clock = "10am suits everyone."
+        XCTAssertEqual(TextProcessingService.applyFinalCapitalization(clock, language: "en"), clock)
+    }
+
+    func testLeadingNumberStillCapitalizesNextSentence_RED() {
+        XCTAssertEqual(
+            TextProcessingService.applyFinalCapitalization("3 apples were left. then we went home.", language: "en"),
+            "3 apples were left. Then we went home."
+        )
+        XCTAssertEqual(
+            TextProcessingService.applyFinalCapitalization("4 oder 5 genügen. danach sehen wir weiter.", language: "de"),
+            "4 oder 5 genügen. Danach sehen wir weiter."
+        )
+    }
+
+    func testNumberedSentenceStartStillCapitalized() {
+        XCTAssertEqual(
+            TextProcessingService.applyFinalCapitalization("3. dann prüfen wir das.", language: "de"),
+            "3. Dann prüfen wir das.",
+            "a numbered start is capitalized by the sentence-initial pass once the first-letter pass skips the digit"
+        )
+        XCTAssertEqual(
+            TextProcessingService.applyFinalCapitalization("5. next we sort the list.", language: "en"),
+            "5. Next we sort the list."
+        )
+    }
+
+    func testSentenceStartingWithNumberMidTextKeepsNextWordCase() {
+        let de = "Das war gut. 4 bis 6 kommen morgen."
+        XCTAssertEqual(TextProcessingService.applyFinalCapitalization(de, language: "de"), de)
+        let en = "We counted twice. 2 of them were empty."
+        XCTAssertEqual(TextProcessingService.applyFinalCapitalization(en, language: "en"), en)
+    }
+
+    func testLeadingDigitAcronymUnchanged() {
+        let de = "2FA ist jetzt aktiv."
+        XCTAssertEqual(TextProcessingService.applyFinalCapitalization(de, language: "de"), de)
+        let en = "3D models load slowly."
+        XCTAssertEqual(TextProcessingService.applyFinalCapitalization(en, language: "en"), en)
+    }
+
+    func testLeadingSymbolSkippedToFirstLetter() {
+        XCTAssertEqual(
+            TextProcessingService.applyFinalCapitalization("→ next the lid closes.", language: "en"),
+            "→ Next the lid closes.",
+            "a leading symbol is skipped like leading punctuation; only a number stops the first-letter pass"
+        )
+    }
 }
