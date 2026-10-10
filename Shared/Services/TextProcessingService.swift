@@ -677,7 +677,7 @@ class TextProcessingService: ObservableObject {
     // MARK: - Post-gate capitalization (42-07/MLANG-01)
 
     /// Deterministic post-gate capitalization: the first alphabetic
-    /// character of `text`, plus (English only) the standalone pronoun "I"
+    /// character of `text` (unless a number comes first), plus (English only) the standalone pronoun "I"
     /// and its contractions (I'm, I've, I'll, I'd). `nonisolated` + `static`
     /// so it is a pure, MainActor-independent transform — directly testable
     /// without actor hops, matching the style of `SelfCorrectionResolver`.
@@ -721,11 +721,15 @@ class TextProcessingService: ObservableObject {
     /// everything else (including any leading punctuation/quotes) untouched.
     /// A no-op if `text` has no alphabetic character, or if that character
     /// is already uppercase.
+    /// Quick 261010-8do: also a no-op when a number comes before the first
+    /// letter, so the word after a leading number keeps the case it was
+    /// dictated with; a numbered start such as "3. dann" is still capitalized
+    /// by `capitalizeSentenceInitials`.
     ///
     /// Phase 38 Plan 01 (D-03): in `context == .code`, a no-op if the leading
     /// whitespace-delimited token looks like a technical identifier.
     nonisolated private static func capitalizeFirstAlphabeticCharacter(_ text: String, context: DictationContext) -> String {
-        guard let idx = text.firstIndex(where: { $0.isLetter }) else { return text }
+        guard let idx = text.firstIndex(where: { $0.isLetter || $0.isNumber }), text[idx].isLetter else { return text }
         if context == .code, looksLikeTechnicalIdentifier(leadingToken(of: text)) {
             return text
         }
