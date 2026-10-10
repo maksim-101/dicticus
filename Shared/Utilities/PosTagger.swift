@@ -75,6 +75,10 @@ public enum PosTagger {
     /// drift stale if a future OS update changes NLTagger's German model
     /// (the test goes red first, forcing a decision).
     ///
+    /// `GermanPosProbeFixtures` and `PosTaggerProbeTests` are kept
+    /// local-only (not tracked, listed in `.gitignore`: privacy, 2026-10-10),
+    /// so a public clone does not carry that evidence test.
+    ///
     /// Flipping this to `true` can only ever ADD accepted insertions to
     /// D-06 (never remove any) — `functionMisclassifiedAsContent` (the
     /// SAFE direction, a missed repair) does NOT gate this flag; only the

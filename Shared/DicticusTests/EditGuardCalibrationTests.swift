@@ -383,8 +383,8 @@ final class EditGuardCalibrationTests: XCTestCase {
     func testFollowup_iterm_protectedFromNonWordRepair() {
         let lexicon = PlatformSpellLexicon(extraAugmentation: ["iTerm"])
         let result = EditGuard.apply(
-            rulesCleaned: "Zudem kann ich ja dann in iterm 2 mit Tabs arbeiten.",
-            llmOutput: "Zudem kann ich ja dann in Item 2 mit Tabs arbeiten.",
+            rulesCleaned: "Außerdem darf ich ja später in iterm 2 mit Reitern arbeiten.",
+            llmOutput: "Außerdem darf ich ja später in Item 2 mit Reitern arbeiten.",
             language: "de",
             lexicon: lexicon
         )
@@ -427,10 +427,10 @@ final class EditGuardCalibrationTests: XCTestCase {
     /// `PlatformSpellLexicon.idiomKnownWords` does for the real lexicon).
     func testFollowup_punctoToPunkt_de_rejectedNotNonWordRepair() {
         let r = guardResult(
-            "Dann ist ebenfalls anzufügen, dass Handlungsbedarf in puncto Schulungsmaterial besteht.",
-            "Dann ist ebenfalls anzufügen, dass Handlungsbedarf in Punkt Schulungsmaterial besteht.",
+            "Dann ist außerdem festzuhalten, dass Erklärungsbedarf in puncto Fortbildungsangebot vorliegt.",
+            "Dann ist außerdem festzuhalten, dass Erklärungsbedarf in Punkt Fortbildungsangebot vorliegt.",
             lang: "de",
-            known: ["dann", "ist", "ebenfalls", "anzufügen", "dass", "handlungsbedarf", "in", "puncto", "punkt", "schulungsmaterial", "besteht"]
+            known: ["dann", "ist", "außerdem", "festzuhalten", "dass", "erklärungsbedarf", "in", "puncto", "punkt", "fortbildungsangebot", "vorliegt"]
         )
         let edit = r.edits.first { $0.from == "puncto" }
         XCTAssertEqual(edit?.accepted, false, "puncto is now a known idiom — must NOT be repaired via nonWordRepair")
@@ -444,10 +444,10 @@ final class EditGuardCalibrationTests: XCTestCase {
     /// pins the CURRENT behavior so any future change is visible.
     func testFollowup_assertCurrent_pitteToPiete_de_acceptsViaNonWordRepair() {
         let r = guardResult(
-            "So etwas wie, Pitte ignoriere den letzten Satz, sollte auch erkannt werden.",
-            "So etwas wie, Piete ignoriere den letzten Satz, sollte auch erkannt werden.",
+            "So etwas wie, Pitte übergehe die erste Zeile, muss ebenfalls erfasst werden.",
+            "So etwas wie, Piete übergehe die erste Zeile, muss ebenfalls erfasst werden.",
             lang: "de",
-            known: ["so", "etwas", "wie", "piete", "ignoriere", "den", "letzten", "satz", "sollte", "auch", "erkannt", "werden"]
+            known: ["so", "etwas", "wie", "piete", "übergehe", "die", "erste", "zeile", "muss", "ebenfalls", "erfasst", "werden"]
         )
         let edit = r.edits.first { $0.from == "Pitte" }
         XCTAssertEqual(edit?.accepted, true, "documents CURRENT (residual, not attempted) behavior — see SUMMARY Follow-up section")

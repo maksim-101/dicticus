@@ -105,19 +105,19 @@ enum EditGuardFixtures {
     static let d01BundledFixture = Fixture(
         id: "fx-d01-bundled-repair-and-corruption-de",
         language: "de",
-        baseline: "Weil die Fragen werden ja gleich sofort ausgewertet und du wohnst dort.",
-        candidate: "Weil die Fragen ja gleich sofort ausgewertet werden und ich wohne dort.",
+        baseline: "Weil die Zahlen werden ja gleich später geprüft und du lebst dort.",
+        candidate: "Weil die Zahlen ja gleich später geprüft werden und ich lebe dort.",
         // 49.6 D-01: reconciled — deviation from the plan's own stated
         // expectation (see 49.6-02-SUMMARY.md "Deviations"). Both edits sit
         // in the SAME baseline sentence (there is only one sentence): the
         // `wordOrderRepair` move of "werden" is D-02 revert-eligible
         // (context-dependent, per the locked D-02 class list), and the
-        // "du wohnst"->"ich wohne" `pronounPersonChange` substitute is a
+        // "du lebst"->"ich lebe" `pronounPersonChange` substitute is a
         // D-03 trigger. Under the literal, locked D-01..D-04 mechanism the
         // whole sentence reverts, including the repair — this fixture's
         // original point (edit-granularity independence) is superseded by
         // 49.6's coarser sentence-level unit for this specific case.
-        expectedText: "Weil die Fragen werden ja gleich sofort ausgewertet und du wohnst dort.",
+        expectedText: "Weil die Zahlen werden ja gleich später geprüft und du lebst dort.",
         editKind: .move,
         tokenClass: .contentWord,
         position: .interior,
@@ -363,9 +363,9 @@ enum EditGuardFixtures {
     static let adjacentDeletionSubstituteCouplingFixture = Fixture(
         id: "fx-sub-content-en-inregardsto-couplingfix",
         language: "en",
-        baseline: "In regards to the definition of what AI Cleanup is supposed to be, also with the repair tier taxonomy, which I don't quite understand what this is supposed to be.",
-        candidate: "Regarding the definition of what AI Cleanup is supposed to be, and the repair tier taxonomy, which I don't quite understand what this is supposed to be.",
-        expectedText: "In regards to the definition of what AI Cleanup is supposed to be, also with the repair tier taxonomy, which I don't quite understand what this is supposed to be.",
+        baseline: "In regards to the scope of what Auto Polish is meant to become, also with the fix level scheme, which I can't quite grasp what this is meant to be.",
+        candidate: "Regarding the scope of what Auto Polish is meant to become, and the fix level scheme, which I can't quite grasp what this is meant to be.",
+        expectedText: "In regards to the scope of what Auto Polish is meant to become, also with the fix level scheme, which I can't quite grasp what this is meant to be.",
         editKind: .substitute,
         tokenClass: .contentWord,
         position: .interior,
@@ -373,7 +373,7 @@ enum EditGuardFixtures {
         expectedClass: "unclassified",
         note: "LIVE production bug, corpus 2026-07-04T06:01:35.827Z — the " +
             "phase's own SC#3 §3 flagged this as a genuine rebuild-quality " +
-            "defect ('In to Regarding the definition...') and left it " +
+            "defect ('In to Regarding the scope...') and left it " +
             "unfixed. Gap-closure fix (2026-07-13): " +
             "EditGuard.applyAdjacentDeletionSubstituteCoupling reverts an " +
             "accepted substitute/insert immediately adjacent to a rejected " +
@@ -393,7 +393,7 @@ enum EditGuardFixtures {
     /// two textually-identical but semantically UNRELATED occurrences of a
     /// common word across clause boundaries when the connecting content
     /// between them was independently rejected — here baseline's `"man"`
-    /// and `"nicht"` (from `"...das sieht man nicht auf den ersten
+    /// and `"nicht"` (from `"...das merkt man nicht auf den zweiten
     /// Blick..."`) individually move to land adjacent to each other in the
     /// rebuild (`"denn man nicht was..."`), because candidate's `"kann"`,
     /// which should sit between them, is itself an independently-rejected
@@ -421,9 +421,9 @@ enum EditGuardFixtures {
     static let crossClauseMoveMispairingOpenDefectFixture = Fixture(
         id: "fx-mov-content-de-crossclause-manicht-knownopen",
         language: "de",
-        baseline: "Auch diese Frage ist erst einmal unübersichtlich, denn was muss sich wie zuordnen, was ist überhaupt das Thema, das sieht man nicht auf den ersten Blick. Das muss definitiv auch besser gelöst werden. Und dann schätze ich hier die Frage, kontinuierliche Führungsrhythmen, nach welchem Reglement geht es hier um die unternehmerischen Führungsrhythmen und Prozesse? geht es um die Führungsprozesse aus dem KODAL.",
-        candidate: "Und das ist zunächst unübersichtlich, denn man kann nicht sofort erkennen, was sich zuordnen lässt und was das Thema ist. Das muss definitiv besser gelöst werden. Darüber hinaus schätze ich die Frage nach kontinuierlichen Führungsrhythmen. Welches Reglement geht hier konkret auf unternehmerische Führungsrhythmen und Prozesse zu? Gibt es KODAL-Prozesse, die hier in Betracht gezogen werden?",
-        expectedText: "Auch diese Frage ist erst einmal unübersichtlich, denn was muss sich wie zuordnen, was ist überhaupt das Thema, das sieht man nicht auf den ersten Blick. Das muss definitiv auch besser gelöst werden. Und dann schätze ich hier die Frage, kontinuierliche Führungsrhythmen, nach welchem Reglement geht es hier um die unternehmerischen Führungsrhythmen und Prozesse? geht es um die Führungsprozesse aus dem KODAL.",
+        baseline: "Auch diese Aufgabe ist zunächst einmal verwirrend, denn was muss sich wo einordnen, was ist eigentlich das Motiv, das merkt man nicht auf den zweiten Blick. Das muss zweifellos auch klarer geregelt werden. Und dann deute ich hier die Aufgabe, regelmäßige Abstimmungsrunden, nach welchem Regelwerk geht es hier über die betrieblichen Abstimmungsrunden sowie Prozesse? geht es über die Steuerungsprozesse aus dem LORIM.",
+        candidate: "Und das ist anfangs verwirrend, denn man kann nicht unmittelbar erkennen, was sich einordnen lässt und was das Motiv ist. Das muss zweifellos klarer geregelt werden. Darüber hinaus deute ich die Aufgabe nach regelmäßigen Abstimmungsrunden. Welches Regelwerk geht hier konkret auf betriebliche Abstimmungsrunden sowie Prozesse zu? Gibt es LORIM-Prozesse, die hier ins Auge gefasst werden?",
+        expectedText: "Auch diese Aufgabe ist zunächst einmal verwirrend, denn was muss sich wo einordnen, was ist eigentlich das Motiv, das merkt man nicht auf den zweiten Blick. Das muss zweifellos auch klarer geregelt werden. Und dann deute ich hier die Aufgabe, regelmäßige Abstimmungsrunden, nach welchem Regelwerk geht es hier über die betrieblichen Abstimmungsrunden sowie Prozesse? geht es über die Steuerungsprozesse aus dem LORIM.",
         editKind: .move,
         tokenClass: .contentWord,
         position: .interior,
@@ -464,18 +464,18 @@ enum EditGuardFixtures {
             "is the defect this fixture exists to track. 2026-07-17: " +
             "EditGuard.bindPunctuationLeft closed the UNRELATED space-" +
             "before-comma artifact this record's expectedText also " +
-            "happened to carry (\"zuordnen , und\" -> \"zuordnen, und\", " +
-            "\"Thema , sieht\" -> \"Thema, sieht\"); the cross-clause " +
+            "happened to carry (\"einordnen , und\" -> \"einordnen, und\", " +
+            "\"Motiv , merkt\" -> \"Motiv, merkt\"); the cross-clause " +
             "mispairing defect itself remains open and untouched. " +
             "2026-07-19 (quick task 8am): EditDiff.pairMovesFirst's new " +
             "locality constraint (word/content tokens only, see its doc " +
             "comment) disqualified 2 of this fixture's move pairings as a " +
             "side effect of closing the cross-clause phantom-move class — " +
             "CONTENT-PRESERVING relocation only (same word multiset: " +
-            "\"das\" moved from right after \"Frage\" to right before " +
-            "\"sieht\"; \"hier\" moved from a glued sentence-final " +
-            "\"KODAL.hier\" corruption to its correct mid-sentence position " +
-            "\"schätze ich hier die Frage\" — an additional, incidental fix, " +
+            "\"das\" moved from right after \"Aufgabe\" to right before " +
+            "\"merkt\"; \"hier\" moved from a glued sentence-final " +
+            "\"LORIM.hier\" corruption to its correct mid-sentence position " +
+            "\"deute ich hier die Aufgabe\" — an additional, incidental fix, " +
             "not a regression). Repair-yield floor 25->23 pre/post-fix, " +
             "entirely accounted for by this ONE fixture " +
             "(EditGuardGrammarRegressionTests.testRepairYieldFloor_" +
@@ -493,9 +493,9 @@ enum EditGuardFixtures {
         Fixture(
             id: "fx-sub-digit-en-value",
             language: "en",
-            baseline: "...the latency was 10,011 milliseconds under load.",
-            candidate: "...the latency was 10,111 milliseconds under load.",
-            expectedText: "...the latency was 10,011 milliseconds under load.",
+            baseline: "...the wait was 10,011 milliseconds under stress.",
+            candidate: "...the wait was 10,111 milliseconds under stress.",
+            expectedText: "...the wait was 10,011 milliseconds under stress.",
             editKind: .substitute, tokenClass: .digit, position: .interior,
             expectedVerdict: .reject, expectedClass: "digitValueChange",
             note: "Corpus 2026-07-11T08:05:55.432Z — D-03 blindspot fixture: " +
@@ -543,9 +543,9 @@ enum EditGuardFixtures {
         Fixture(
             id: "fx-sub-pronoun-de-personflip",
             language: "de",
-            baseline: "Du wohnst ja in einem Block.",
-            candidate: "Ich wohne ja in einem Block.",
-            expectedText: "Du wohnst ja in einem Block.",
+            baseline: "Du lebst ja in einem Haus.",
+            candidate: "Ich lebe ja in einem Haus.",
+            expectedText: "Du lebst ja in einem Haus.",
             editKind: .substitute, tokenClass: .pronoun, position: .sentenceInitial,
             expectedVerdict: .reject, expectedClass: "pronounPersonChange",
             note: "Corpus 2026-07-11T14:05:11.597Z (+ near-duplicate at " +
@@ -571,13 +571,13 @@ enum EditGuardFixtures {
         Fixture(
             id: "fx-sub-content-de-personflip-verb",
             language: "de",
-            baseline: "Du wohnst ja in einem Block.",
-            candidate: "Ich wohne ja in einem Block.",
-            expectedText: "Du wohnst ja in einem Block.",
+            baseline: "Du lebst ja in einem Haus.",
+            candidate: "Ich lebe ja in einem Haus.",
+            expectedText: "Du lebst ja in einem Haus.",
             editKind: .substitute, tokenClass: .contentWord, position: .interior,
             expectedVerdict: .reject, expectedClass: "contentWordIdentityChange",
             note: "Corpus 2026-07-11T14:05:11.597Z — Trap A person-ending flip " +
-                "('wohnst'->'wohne'), NOT a legal inflection. Same sentence pair " +
+                "('lebst'->'lebe'), NOT a legal inflection. Same sentence pair " +
                 "as fx-sub-pronoun-de-personflip, tagged on the contentWord " +
                 "dimension per plan Task 1 ('TWO fixtures')."
         ),
@@ -766,9 +766,9 @@ enum EditGuardFixtures {
         Fixture(
             id: "fx-sub-punct-en-orphan-contraction",
             language: "en",
-            baseline: "This is also in proper grammar and style it's",
-            candidate: "This is also in proper grammar and style.",
-            expectedText: "This is also in proper grammar and style it's.",
+            baseline: "This is also in clean wording and tone it's",
+            candidate: "This is also in clean wording and tone.",
+            expectedText: "This is also in clean wording and tone it's.",
             editKind: .substitute, tokenClass: .contentWord, position: .interior,
             expectedVerdict: .reject, expectedClass: "contentWordIdentityChange",
             note: "SC#3 gap-closure fixture (44-FIDELITY-REPLAY.md §2/§6) — " +
@@ -851,15 +851,15 @@ enum EditGuardFixtures {
         Fixture(
             id: "fx-sub-func-en-negation-flip-no-an",
             language: "en",
-            baseline: "I don't believe that there's no API to end an activity.",
-            candidate: "I don't believe that there's an API to end an activity.",
-            expectedText: "I don't believe that there's no API to end an activity.",
+            baseline: "I don't think that there's no outlet to stop a process.",
+            candidate: "I don't think that there's an outlet to stop a process.",
+            expectedText: "I don't think that there's no outlet to stop a process.",
             editKind: .substitute, tokenClass: .functionWord, position: .interior,
             expectedVerdict: .reject, expectedClass: "negationChange",
             note: "The verbatim 2026-08-15 production record " +
-                "(cleanup-2026-08-15.jsonl): raw 'I don't believe that " +
-                "there's no API to end an activity' -> final 'I don't " +
-                "believe that there's an API ...', accept_class " +
+                "(cleanup-2026-08-15.jsonl): raw 'I don't think that " +
+                "there's no outlet to stop a process' -> final 'I don't " +
+                "think that there's an outlet ...', accept_class " +
                 "functionWordSubstitution, accepted true. The user's " +
                 "negation was deleted from text pasted at their cursor."
         ),
@@ -963,9 +963,9 @@ enum EditGuardFixtures {
         Fixture(
             id: "fx-del-pronoun-en-sentenceinitial",
             language: "en",
-            baseline: "You can push the commits, but no PR.",
-            candidate: "Push the commits, but no PR.",
-            expectedText: "You can push the commits, but no PR.",
+            baseline: "You can send the patches, but no PR.",
+            candidate: "Send the patches, but no PR.",
+            expectedText: "You can send the patches, but no PR.",
             editKind: .delete, tokenClass: .pronoun, position: .sentenceInitial,
             expectedVerdict: .reject, expectedClass: "pronounDeleted",
             note: "Corpus 2026-07-12T03:43:31.761Z — D-04 pronoun-lock: 'a " +
@@ -990,12 +990,12 @@ enum EditGuardFixtures {
         Fixture(
             id: "fx-del-content-en-scratch",
             language: "en",
-            baseline: "But the question remains: what kind of commands would " +
-                "remain? Aside from scratch that. And also...",
-            candidate: "But the question remains: what kind of commands would " +
-                "remain? Aside from that. And also...",
-            expectedText: "But the question remains: what kind of commands " +
-                "would remain? Aside from scratch that. And also...",
+            baseline: "But the issue stays: what sort of commands would " +
+                "persist? Except for scratch that. And also...",
+            candidate: "But the issue stays: what sort of commands would " +
+                "persist? Except for that. And also...",
+            expectedText: "But the issue stays: what sort of commands " +
+                "would persist? Except for scratch that. And also...",
             editKind: .delete, tokenClass: .contentWord, position: .interior,
             expectedVerdict: .reject, expectedClass: "contentWordDeletion",
             note: "Corpus 2026-07-11T05:06:57.921Z."
@@ -1014,15 +1014,15 @@ enum EditGuardFixtures {
         Fixture(
             id: "fx-del-content-de-restoration-boundary-glue",
             language: "de",
-            baseline: "Auch hier ist die Essensdarstellung nicht optimal, da " +
-                "wir zum Beispiel unterschiedlich grosse Textboxen haben, " +
-                "und dann ist alles richtig, wenn wir das anders machen.",
-            candidate: "Auch hier ist die Essensdarstellung nicht optimal, " +
-                "und dann ist alles richtig, wenn wir das anders machen.",
-            expectedText: "Auch hier ist die Essensdarstellung nicht " +
-                "optimal, da wir zum Beispiel unterschiedlich grosse " +
-                "Textboxen haben, und dann ist alles richtig, wenn wir das " +
-                "anders machen.",
+            baseline: "Auch hier ist die Menüanordnung nicht stimmig, da " +
+                "wir zum Glück unterschiedlich kleine Schaltflächen haben, " +
+                "und danach ist alles gut, wenn wir das neu bauen.",
+            candidate: "Auch hier ist die Menüanordnung nicht stimmig, " +
+                "und danach ist alles gut, wenn wir das neu bauen.",
+            expectedText: "Auch hier ist die Menüanordnung nicht " +
+                "stimmig, da wir zum Glück unterschiedlich kleine " +
+                "Schaltflächen haben, und danach ist alles gut, wenn wir das " +
+                "neu bauen.",
             editKind: .delete, tokenClass: .contentWord, position: .interior,
             expectedVerdict: .reject, expectedClass: "contentWordDeletion",
             note: "260723-rif UPDATE: expectedText now keeps the comma " +
@@ -1043,8 +1043,8 @@ enum EditGuardFixtures {
                 "different. " +
                 "SC#3 gap-closure fixture (44-FIDELITY-REPLAY.md §2/§3) — " +
                 "wording grounded in corpus 2026-07-12T04:00:34.093Z " +
-                "('Essensdarstellung nicht optimal, da wir zum Beispiel " +
-                "unterschiedlich grosse Textboxen haben'), reshaped into a " +
+                "('Menüanordnung nicht stimmig, da wir zum Glück " +
+                "unterschiedlich kleine Schaltflächen haben'), reshaped into a " +
                 "self-contained sentence pair so the degenerate-alignment " +
                 "gate does not fail-closed the whole thing (the real " +
                 "record's candidate replaces almost the entire baseline, " +
@@ -1129,9 +1129,9 @@ enum EditGuardFixtures {
         Fixture(
             id: "fx-del-filler-de-si-doch",
             language: "de",
-            baseline: "Doch keiner stellt sich die Frage.",
-            candidate: "Keiner stellt sich die Frage.",
-            expectedText: "Doch keiner stellt sich die Frage.",
+            baseline: "Doch keiner fragt sich das Gleiche.",
+            candidate: "Keiner fragt sich das Gleiche.",
+            expectedText: "Doch keiner fragt sich das Gleiche.",
             editKind: .delete, tokenClass: .filler, position: .sentenceInitial,
             expectedVerdict: .reject, expectedClass: "contentWordDeletion",
             note: "D-05 particle table: 'doch — 12 occurrences — sentence-" +
@@ -1182,9 +1182,9 @@ enum EditGuardFixtures {
         Fixture(
             id: "fx-del-filler-en-interior-actually",
             language: "en",
-            baseline: "It's actually nine a.m already.",
-            candidate: "It's nine a.m already.",
-            expectedText: "It's actually nine a.m already.",
+            baseline: "It's actually eleven a.m already.",
+            candidate: "It's eleven a.m already.",
+            expectedText: "It's actually eleven a.m already.",
             editKind: .delete, tokenClass: .filler, position: .interior,
             expectedVerdict: .reject, expectedClass: "contentWordDeletion",
             note: "D-05 particle table: 'actually — 88 occurrences — \"it's " +
@@ -1193,9 +1193,9 @@ enum EditGuardFixtures {
         Fixture(
             id: "fx-del-filler-en-interior-like",
             language: "en",
-            baseline: "I would like your advice on this.",
-            candidate: "I would your advice on this.",
-            expectedText: "I would like your advice on this.",
+            baseline: "I would like your opinion on this.",
+            candidate: "I would your opinion on this.",
+            expectedText: "I would like your opinion on this.",
             editKind: .delete, tokenClass: .filler, position: .interior,
             expectedVerdict: .reject, expectedClass: "contentWordDeletion",
             note: "D-05 particle table: 'like — 52 occurrences — \"I would " +
@@ -1216,9 +1216,9 @@ enum EditGuardFixtures {
         Fixture(
             id: "fx-del-filler-en-interior-imean",
             language: "en",
-            baseline: "By it I mean the second option.",
-            candidate: "By it the second option.",
-            expectedText: "By it I mean the second option.",
+            baseline: "By it I mean a third variant.",
+            candidate: "By it a third variant.",
+            expectedText: "By it I mean a third variant.",
             editKind: .delete, tokenClass: .filler, position: .interior,
             expectedVerdict: .reject, expectedClass: "contentWordDeletion",
             note: "D-05 particle table: '\"I mean\" — 10 occurrences — \"By " +
@@ -1227,9 +1227,9 @@ enum EditGuardFixtures {
         Fixture(
             id: "fx-del-filler-en-terminal-well",
             language: "en",
-            baseline: "It shows up in your logs as well.",
-            candidate: "It shows up in your logs.",
-            expectedText: "It shows up in your logs as well.",
+            baseline: "It shows up in your traces as well.",
+            candidate: "It shows up in your traces.",
+            expectedText: "It shows up in your traces as well.",
             editKind: .delete, tokenClass: .filler, position: .terminal,
             expectedVerdict: .reject, expectedClass: "contentWordDeletion",
             note: "D-05 particle table: 'well — 50 occurrences — \"in your " +
@@ -1389,7 +1389,7 @@ enum EditGuardFixtures {
                 "(44-AUDIT-FRESH-CORRUPTION.md §4). Baseline's trailing " +
                 "'muss wahrscheinlich nicht' is an ambiguous, orphaned " +
                 "self-correction seam. Qwen3.5-4B completed the thought by " +
-                "INVENTING the copula 'sein' ('...doesn't have to BE') — the " +
+                "INVENTING the copula 'sein' ('...need not BE') — the " +
                 "entire asserted predicate, since the complement is elided — " +
                 "and the guard accepted it as a harmless functionWordInsertion " +
                 "because 'sein' sat in germanInsertable among the auxiliaries. " +
@@ -1421,9 +1421,9 @@ enum EditGuardFixtures {
         Fixture(
             id: "fx-ins-func-en-after-adverb",
             language: "en",
-            baseline: "I have seen that GitHub project, though I haven't started.",
-            candidate: "I have seen that GitHub project after, though I haven't started.",
-            expectedText: "I have seen that GitHub project, though I haven't started.",
+            baseline: "I have viewed that GitLab board, though I haven't begun.",
+            candidate: "I have viewed that GitLab board after, though I haven't begun.",
+            expectedText: "I have viewed that GitLab board, though I haven't begun.",
             editKind: .insert, tokenClass: .contentWord, position: .interior,
             expectedVerdict: .reject, expectedClass: "contentWordInsertion",
             note: "The English twin of the 'before' bug (44-FIDELITY-REPLAY.md " +
@@ -1585,11 +1585,11 @@ enum EditGuardFixtures {
         Fixture(
             id: "fx-mov-func-en-moodlock",
             language: "en",
-            baseline: "You can push the commits and then I'm wondering where " +
+            baseline: "You can send the patches and then I'm asking where " +
                 "do we stand.",
-            candidate: "Can you push the commits and then I'm wondering " +
+            candidate: "Can you send the patches and then I'm asking " +
                 "where we stand.",
-            expectedText: "You can push the commits and then I'm wondering " +
+            expectedText: "You can send the patches and then I'm asking " +
                 "where do we stand.",
             editKind: .move, tokenClass: .functionWord, position: .sentenceInitial,
             expectedVerdict: .reject, expectedClass: "moodLockSentenceInitialVerb",
@@ -1600,9 +1600,9 @@ enum EditGuardFixtures {
         Fixture(
             id: "fx-mov-func-de-wordorder",
             language: "de",
-            baseline: "Weil die Fragen werden ja gleich sofort ausgewertet.",
-            candidate: "Weil die Fragen ja gleich sofort ausgewertet werden.",
-            expectedText: "Weil die Fragen ja gleich sofort ausgewertet werden.",
+            baseline: "Weil die Zahlen werden ja gleich später geprüft.",
+            candidate: "Weil die Zahlen ja gleich später geprüft werden.",
+            expectedText: "Weil die Zahlen ja gleich später geprüft werden.",
             editKind: .move, tokenClass: .functionWord, position: .terminal,
             expectedVerdict: .accept, expectedClass: "wordOrderRepair",
             note: "D-04: broken V2-in-a-weil-clause -> correct verb-final; " +
@@ -1711,14 +1711,14 @@ enum EditGuardFixtures {
         ProductionRecord(
             id: "record-2026-08-30T04-54-30-157Z",
             language: "de",
-            baseline: "Also ich möchte, dass du noch einmal genau recherchierst und mir einen Nahrungsergänzungsmittel sowie beispielhaften Trainingsplan zusammenstellst. Wie viel Resistancetraining braucht es wirklich? Ich bin zum Beispiel auch kein Fitnessstudio-Gänger. Ich finde das zu langweilig und... wenn nicht unbedingt notwendig dann möchte ich auch nicht einfach nur 30 minuten resistance training machen normalerweise mache ich so fünf minuten pro tag mit dem eigenen körpergewicht oder mit dem Tension Strap. Ich bin aber offen für Veränderung.",
-            candidate: "Ich möchte, dass du noch einmal genau recherchierst und mir ein Nahrungsergänzungsmittel sowie einen beispielhaften Trainingsplan zusammenstellst. Wie viel Resistenztraining braucht es wirklich? Ich bin zum Beispiel auch kein Fitnessstudio-Gänger. Ich finde das zu langweilig und, wenn nicht unbedingt notwendig, möchte ich auch nicht einfach nur 30 Minuten Resistenztraining machen. Normalerweise mache ich so fünf Minuten pro Tag mit dem eigenen Körpergewicht oder mit dem Tension Strap. Ich bin aber offen für Veränderung."
+            baseline: "Also ich will, dass du noch einmal gründlich erkundest und mir einen Vitaminpräparat sowie vorbildlichen Wochenplan ausarbeitest. Wie viel Balancetraining benötigt es tatsächlich? Ich bin zum Glück auch kein Hallenbad-Gänger. Ich finde das zu langweilig und... wenn nicht unbedingt nötig dann will ich auch nicht gleich nur 30 minuten balance training machen üblicherweise mache ich so fünf sekunden pro woche mit dem eigenen rucksack oder mit dem Tension Strap. Ich bin aber bereit für Umstellung.",
+            candidate: "Ich will, dass du noch einmal gründlich erkundest und mir ein Vitaminpräparat sowie einen vorbildlichen Wochenplan ausarbeitest. Wie viel Balanztraining benötigt es tatsächlich? Ich bin zum Glück auch kein Hallenbad-Gänger. Ich finde das zu langweilig und, wenn nicht unbedingt nötig, will ich auch nicht gleich nur 30 Minuten Balanztraining machen. Üblicherweise mache ich so fünf Sekunden pro Woche mit dem eigenen Rucksack oder mit dem Tension Strap. Ich bin aber bereit für Umstellung."
         ),
         ProductionRecord(
             id: "record-2026-08-24T04-00-00-733Z",
             language: "en",
-            baseline: "please look for news from this year and if possible as recently as possible about failed or delayed projects either in government in Switzerland on either of the three levels of government, meaning federal, cantonal and municipal, as well as from the social sector.",
-            candidate: "Please look for news from this year, as recently as possible, about failed or delayed projects in the government in Switzerland at either of the three levels of government—federal, cantonal, and municipal—as well as from the social sector."
+            baseline: "please search for reports from this quarter and if possible as promptly as possible about stalled or postponed initiatives either in administration in Austria on either of the seven tiers of administration, meaning national, regional and communal, as well as via the cultural domain.",
+            candidate: "Please search for reports from this quarter, as promptly as possible, about stalled or postponed initiatives in the administration in Austria at either of the seven tiers of administration—national, regional, and communal—as well as via the cultural domain."
         ),
         ProductionRecord(
             id: "record-260831-gd9-in-clawed",
@@ -1729,8 +1729,8 @@ enum EditGuardFixtures {
         ProductionRecord(
             id: "record-2026-07-29T03-47-35-149Z",
             language: "en",
-            baseline: "So help me adjust the feedback email or however it's labeled. So it matches these new states because I haven't sent it yet. I only was in contact with Pearcom support and now I want to go that separate lane as well because this is not acceptable anymore.",
-            candidate: "So, help me adjust the feedback email—or however it's labeled—to match these new states, because I haven't sent it yet. I was only in contact with Pearcom support, and now I want to go down that separate lane as well, because this is not acceptable anymore.</corrected_text>"
+            baseline: "So help me revise the survey form or however it's named. So it fits these new stages because I haven't posted it today. I only was in touch with Pearcom support and now I plan to go that distinct track as usual because this is not tolerable anymore.",
+            candidate: "So, help me revise the survey form—or however it's named—to fit these new stages, because I haven't posted it today. I was only in touch with Pearcom support, and now I plan to go down that distinct track as usual, because this is not tolerable anymore.</corrected_text>"
         ),
         ProductionRecord(
             id: "record-260724-j96-checkfact",
@@ -1747,8 +1747,8 @@ enum EditGuardFixtures {
         ProductionRecord(
             id: "record-260723-rif-offorheartrate",
             language: "en",
-            baseline: "She wants to be able to click in a dial and move the finger around to see individual data points. Like what was the value at any given time of heartrate for instance and then also along the way lost the info about the workouts so when I click on the workouts a small pop-up should show up",
-            candidate: "She wants to be able to click in a dial and move the finger around to see individual data points, like the value at any given time for heartrate, and then also along the way, lost the info about workouts. So when I click on the workouts, a small pop-up should show up."
+            baseline: "She wants to be able to tap in a knob and slide the cursor around to see single sample marks. Like what was the reading at any chosen moment of pulse for instance and then also along the way dropped the notes about the sessions so when I tap on the sessions a small pop-up should show up",
+            candidate: "She wants to be able to tap in a knob and slide the cursor around to see single sample marks, like the reading at any chosen moment for pulse, and then also along the way, dropped the notes about sessions. So when I tap on the sessions, a small pop-up should show up."
         ),
         ProductionRecord(
             id: "record-260723-rif-itsis",
@@ -1777,8 +1777,8 @@ enum EditGuardFixtures {
         ProductionRecord(
             id: "record-2026-09-01T17-17-59-197Z",
             language: "en",
-            baseline: "And as for 999.2, what's going through my mind when I read your explanation of what this is about? I mean, I see two possible... points of contact where this kind of enrollment and also discernment of how well a user of Dicticus can pronounce certain words That is, at first, maybe at the ASR level or right after, kind of more deterministically, which has its own drawbacks, I assume, because it's not clear signs here. And then at AI Cleanup level, where we would give the LLM the context of, oh, this user is actually struggling with breathing and breathing, meaning we should make sure that whenever these words appear, that it actually makes sense within the context of the sentence that it's placed in.",
-            candidate: "And as for 999.2, what's going through my mind when I read your explanation of what this is about? I mean, I see two possible points of contact where this kind of enrollment and also discernment of how well a user of Dicticus can pronounce certain words. That is, at first, maybe at the ASR level or right after, kind of more deterministically, which has its own drawbacks, I assume, because it's not clear signs here. And then at AI Cleanup level, where we would give the LLM the context of, oh, this user is actually struggling with breathing and breathing, meaning we should make sure that whenever these words appear, that it actually makes sense within the context of the sentence that it's placed in."
+            baseline: "And as for 999.2, what's happening in my head when I read your outline of what this is about? I mean, I see two possible... spots of friction where this kind of signup and also assessment of how well a speaker of Dicticus can articulate certain terms That is, at first, maybe at the ASR stage or right after, kind of more mechanically, which has its own costs, I assume, because it's not obvious cues here. And then at AI Cleanup stage, where we would give the LLM the background of, oh, this speaker is actually stumbling over mumbling and mumbling, meaning we should make certain that whenever these terms appear, that it actually works fine within the background of the sentence that it's placed in.",
+            candidate: "And as for 999.2, what's happening in my head when I read your outline of what this is about? I mean, I see two possible spots of friction where this kind of signup and also assessment of how well a speaker of Dicticus can articulate certain terms. That is, at first, maybe at the ASR stage or right after, kind of more mechanically, which has its own costs, I assume, because it's not obvious cues here. And then at AI Cleanup stage, where we would give the LLM the background of, oh, this speaker is actually stumbling over mumbling and mumbling, meaning we should make certain that whenever these terms appear, that it actually works fine within the background of the sentence that it's placed in."
         ),
 
         // MARK: - 49.5 invented fixtures (anonymized by construction)

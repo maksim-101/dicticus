@@ -36,7 +36,7 @@ final class DictionaryRealWordVetoTests: XCTestCase {
 
     func testSafeguardNotRewrittenViaSalGuardKey() {
         makeDict([("SalGuard", "Cellguard")])
-        let input = "And how would you evaluate this safeguard in terms of what other users are doing in terms of the risk profile, probability, and actual implementation of it?"
+        let input = "And how would you rate this safeguard with regard to how other people are handling in terms of the failure profile, likelihood, and actual rollout of it?"
         XCTAssertEqual(dictionaryService.apply(to: input), input)
         XCTAssertEqual(dictionaryService.applyWithTrace(to: input).replacements.count, 0)
     }

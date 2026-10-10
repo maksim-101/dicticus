@@ -14,10 +14,10 @@ final class EditGuardSeamSpacingTests: XCTestCase {
 
     /// The folded todo's exact record (same baseline/candidate as
     /// `EditGuardDanglingPunctuationTests.testNoCommaDashAdjacency_governmentLevels_2026_08_24`):
-    /// baseline has a trailing comma after "municipal", candidate drops it in
+    /// baseline has a trailing comma after "communal", candidate drops it in
     /// favor of an em-dash. Before this fix, `trailingFor`'s forced-space
     /// bridge stranded a space in front of the surviving em-dash
-    /// ("municipal —as") — a sequence in NEITHER input. `deriveSeamSpacing`
+    /// ("communal —as") — a sequence in NEITHER input. `deriveSeamSpacing`
     /// derives that seam from the candidate's own (glued) adjacency instead.
     /// UPDATED (Phase 49.6, D-01/D-05, deviation — see 49.6-02-SUMMARY.md
     /// "Deviations"): this baseline is a single run-on sentence (no
@@ -30,12 +30,12 @@ final class EditGuardSeamSpacingTests: XCTestCase {
     /// em-dash) is unaffected; there is simply no surviving em-dash left
     /// to bind in this specific fixture anymore.
     func testNoStraySpaceBeforeSurvivingEmDash_2026_08_24() {
-        let baseline = "please look for news from this year and if possible as recently as possible about failed or delayed projects either in government in Switzerland on either of the three levels of government, meaning federal, cantonal and municipal, as well as from the social sector."
-        let candidate = "Please look for news from this year, as recently as possible, about failed or delayed projects in the government in Switzerland at either of the three levels of government—federal, cantonal, and municipal—as well as from the social sector."
+        let baseline = "please search for reports from this quarter and if possible as promptly as possible about stalled or postponed initiatives either in administration in Austria on either of the seven tiers of administration, meaning national, regional and communal, as well as via the cultural domain."
+        let candidate = "Please search for reports from this quarter, as promptly as possible, about stalled or postponed initiatives in the administration in Austria at either of the seven tiers of administration—national, regional, and communal—as well as via the cultural domain."
 
         let out = guardOut(baseline, candidate, "en")
         XCTAssertEqual(out, baseline, "full sentence-coupled revert to baseline under 49.6 D-01/D-05: \(out)")
-        XCTAssertFalse(out.contains("municipal —"), "a space before an em-dash exists in NEITHER input: \(out)")
+        XCTAssertFalse(out.contains("communal —"), "a space before an em-dash exists in NEITHER input: \(out)")
     }
 
     /// `deriveSeamSpacing` only ever writes `""` (glued) or `" "` (spaced) —

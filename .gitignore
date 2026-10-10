@@ -74,3 +74,7 @@ xcuserdata/
 
 # Local ops tool with op:// item refs — never commit to this PUBLIC repo (2026-07-31 reboot rule)
 scripts/refresh_preflight.sh
+
+# Local-only evidence corpus (200 verbatim dictation sentences) and its probe tests: kept on disk, not published (privacy, 2026-10-10).
+Shared/DicticusTests/GermanPosProbeFixtures.swift
+Shared/DicticusTests/PosTaggerProbeTests.swift

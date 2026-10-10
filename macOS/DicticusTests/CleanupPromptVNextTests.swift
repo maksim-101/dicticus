@@ -21,7 +21,7 @@ final class CleanupPromptVNextTests: XCTestCase {
 
     func testEnPromptIsFewShotFree() {
         let prompt = CleanupPrompt.build(
-            text: "Visually speaking, I liked your variants C, D and E the best.",
+            text: "Frankly speaking, I preferred your drafts B, F and G the most.",
             language: "en"
         )
         XCTAssertFalse(prompt.contains("In: "), "v-next EN prompt must contain NO In:/Out: few-shot exemplar lines")
@@ -30,7 +30,7 @@ final class CleanupPromptVNextTests: XCTestCase {
     }
 
     func testEnPromptContainsDictatedTextExactlyOnce() {
-        let text = "Visually speaking, I liked your variants C, D and E the best."
+        let text = "Frankly speaking, I preferred your drafts B, F and G the most."
         let prompt = CleanupPrompt.build(text: text, language: "en")
         let occurrences = prompt.components(separatedBy: text).count - 1
         XCTAssertEqual(occurrences, 1, "Dictated text must appear exactly once in the ChatML user turn")
