@@ -45,9 +45,9 @@ final class BrandDigitParityTests: XCTestCase {
 
     func testUsb5AndSonnet5BothSurviveBothGuards() {
         XCTAssertEqual(
-            makeMatcher().apply(to: "So if you have a USB-5 or reversely a Sonnet 5 a task, it would delegate.",
+            makeMatcher().apply(to: "So when you own a USB-5 or alternatively a Sonnet 5 a chore, it would forward.",
                                  language: "en"),
-            "So if you have a USB-5 or reversely a Sonnet 5 a task, it would delegate.")
+            "So when you own a USB-5 or alternatively a Sonnet 5 a chore, it would forward.")
     }
 
     func testITerm2NotCollapsedToITerm() {
