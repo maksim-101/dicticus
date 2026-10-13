@@ -23,9 +23,9 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")/iOS"
 
 # Verify environment variables
-if [ -z "${APP_STORE_CONNECT_KEY_ID:-}" ] || [ -z "${APP_STORE_CONNECT_ISSUER_ID:-}" ]; then
+if [ -z "${APP_STORE_CONNECT_KEY_ID:-}" ] || [ -z "${APP_STORE_CONNECT_ISSUER_ID:-}" ] || [ -z "${DEVELOPER_TEAM_ID:-}" ]; then
     echo "ERROR: Missing required environment variables."
-    echo "Expected: APP_STORE_CONNECT_KEY_ID, APP_STORE_CONNECT_ISSUER_ID"
+    echo "Expected: APP_STORE_CONNECT_KEY_ID, APP_STORE_CONNECT_ISSUER_ID, DEVELOPER_TEAM_ID"
     echo "Use 'op run --env-file=.env.build -- $0' to inject them safely."
     exit 1
 fi
@@ -40,6 +40,7 @@ fi
 
 echo "=== Step 1: Generate Xcode project ==="
 cd "$PROJECT_DIR"
+export DEVELOPER_TEAM_ID
 xcodegen generate
 
 echo "=== Step 2: Archive Release build ==="
@@ -53,6 +54,22 @@ xcodebuild -scheme Dicticus \
     archive
 
 echo "=== Step 3: Export and upload to App Store Connect ==="
+cat > exportOptions.plist <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>method</key>
+	<string>app-store-connect</string>
+	<key>destination</key>
+	<string>upload</string>
+	<key>teamID</key>
+	<string>${DEVELOPER_TEAM_ID}</string>
+	<key>signingStyle</key>
+	<string>automatic</string>
+</dict>
+</plist>
+PLIST
 xcodebuild -exportArchive \
     -archivePath build/Dicticus.xcarchive \
     -exportOptionsPlist exportOptions.plist \

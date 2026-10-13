@@ -78,3 +78,4 @@ scripts/refresh_preflight.sh
 # Local-only evidence corpus (200 verbatim dictation sentences) and its probe tests: kept on disk, not published (privacy, 2026-10-10).
 Shared/DicticusTests/GermanPosProbeFixtures.swift
 Shared/DicticusTests/PosTaggerProbeTests.swift
+iOS/exportOptions.plist

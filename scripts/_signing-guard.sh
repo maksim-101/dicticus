@@ -3,13 +3,13 @@
 # Source this file; do not run it directly.
 # Requires: op (1Password CLI), security, interactive terminal for Touch ID.
 #
-# Env vars (set in the untracked .env.build, then `source .env.build` or
+# Env vars (DEVID_SIGNING_HASH = SHA-1 of the Developer ID Application identity; set in the untracked .env.build, then `source .env.build` or
 # invoke via `op run --env-file=.env.build -- <script>` before running):
 #   OP_DEVID_P12_REF - 1Password item ID/reference (AI vault, since 2026-09-13
 #                       migration off TrueNAS) for the Developer ID Application
 #                       "Certificates.p12" file.
 
-_SIGNING_HASH="0000000000000000000000000000000000000000"
+_SIGNING_HASH="${DEVID_SIGNING_HASH:?DEVID_SIGNING_HASH is not set (see env.build.example)}"
 _KEYCHAIN="$HOME/Library/Keychains/Apple Development.keychain-db"
 _TMP_P12="/tmp/devid-guard-$$.p12"
 

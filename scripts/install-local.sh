@@ -12,7 +12,7 @@
 #      (project build/ subdir + Xcode DerivedData).
 #   4. Wipes the specific Dicticus DerivedData folder to prevent identity confusion.
 #   5. Copies the freshly-built Release .app from macOS/build/ to /Applications/.
-#   6. Re-signs the app with Developer ID Developer Name (${DEVELOPER_TEAM_ID}) for TCC persistence.
+#   6. Re-signs the app with the Developer ID identity in DEVID_SIGNING_HASH for TCC persistence.
 #   7. Re-launches via explicit `open "$CANONICAL_APP"` path and verifies the running process.
 #
 # Dev-only — do not run on end-user machines.
@@ -25,7 +25,7 @@ CANONICAL_APP="/Applications/Dicticus.app"
 BUILD_APP="$PROJECT_DIR/build/Build/Products/Release/Dicticus.app"
 RECORDER_APP="$PROJECT_DIR/build/Build/Products/Debug-Recorder/Dicticus.app"
 DEBUG_APP="$PROJECT_DIR/build/Build/Products/Debug/Dicticus.app"
-SIGNING_ID="0000000000000000000000000000000000000000" # Developer ID Developer Name
+SIGNING_ID="${DEVID_SIGNING_HASH:?DEVID_SIGNING_HASH is not set (see env.build.example)}"
 ENTITLEMENTS="$PROJECT_DIR/Dicticus/Dicticus.entitlements"
 TRASH_DIR="$HOME/.Trash"
 TIMESTAMP="$(date +%s)"
