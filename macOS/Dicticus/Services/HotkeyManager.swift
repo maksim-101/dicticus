@@ -104,6 +104,14 @@ class HotkeyManager: ObservableObject {
     /// dlopen happens once at construction; guard inside MediaController handles missing framework.
     private let mediaController = MediaController()
 
+    /// Live transcript overlay (Phase 51). Shown after a successful recording start when the
+    /// preview toggle is on; hidden before the paste and on every discard path.
+    private let overlay: LiveOverlayPresenting
+
+    init(overlay: LiveOverlayPresenting? = nil) {
+        self.overlay = overlay ?? LiveOverlayController()
+    }
+
     /// Reference to ModifierHotkeyListener — set via setupModifierListener().
     /// Retains the listener for the app lifetime; closures route events to push-to-talk state machine.
     private var modifierListener: ModifierHotkeyListener?
@@ -412,6 +420,14 @@ class HotkeyManager: ObservableObject {
             activeRecordingMode = mode
             activeRecordingBundleID = bundleID
             activeRecordingContext = resolvedContext
+            // Phase 51 D-14: the toggle is read at press time through the test-redirected suite;
+            // when off, no panel and no preview loop exist at all.
+            if LivePreviewSession.isEnabled(DicticusDefaults.suite) {
+                overlay.show()
+                service.startLivePreview(cadence: LivePreviewSession.productionCadence) { [weak self] text in
+                    self?.overlay.update(text)
+                }
+            }
             // Phase 30 MEDIA-PAUSE-01: pause media after a successful recording start.
             // Gated on the user toggle; treat absent key as true (default ON).
             let pauseEnabled = UserDefaults.standard.object(forKey: "pauseMediaDuringDictation") == nil
@@ -473,11 +489,17 @@ class HotkeyManager: ObservableObject {
             activeRecordingMode = nil
             activeRecordingBundleID = nil
             activeRecordingContext = nil
+            overlay.hide(reason: .earlyReturn)
             return
         }
 
         isRecording = false
         activeRecordingMode = nil
+        // D-06: the panel stays up through the final decode and text processing.
+        overlay.setProcessing()
+        // A new press during the previous paste's clipboard-restore window shows a newer panel;
+        // this dictation must only hide the panel it started with.
+        let overlaySeq = overlay.currentSeq
 
         // Phase 38 Plan 01 (D-02): capture the press-time-resolved context
         // and bundle ID into locals BEFORE clearing session state, so the
@@ -501,6 +523,10 @@ class HotkeyManager: ObservableObject {
         // so self.textInjector access is safe without crossing isolation boundaries.
         Task { [weak self] in
             guard let self else { return }
+            // D-06: covers every throw and discard path below; hide is idempotent.
+            defer {
+                if self.overlay.currentSeq == overlaySeq { self.overlay.hide(reason: .taskEnd) }
+            }
             do {
                 let result = try await service.stopRecordingAndTranscribe()
 
@@ -537,6 +563,9 @@ class HotkeyManager: ObservableObject {
 
                 // Phase 50 D-02: Inject final processed text into the active app; consume the
                 // outcome instead of discarding it (was: Bool result thrown away, HotkeyManager:438).
+                // injectText sleeps for the clipboard restore, so hiding after it would leave the
+                // panel up after the text landed. Never awaits the fade.
+                if self.overlay.currentSeq == overlaySeq { self.overlay.hide(reason: .pasting) }
                 let outcome = await self.textInjector.injectText(finalOutput, expectedFrontmostBundleID: releaseFrontmostBundleID)
                 #if DEBUG_RECORDER
                 // 261003-jvq: observe post-paste edits; unstructured, never awaited by this dictation Task.
