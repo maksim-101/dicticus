@@ -52,13 +52,14 @@ final class LiveOverlayPanel: NSPanel {
         isReleasedWhenClosed = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
 
-        // D-18: dictated text stays out of screen sharing and recording.
-        sharingType = .none
+        // D-18: dictated text stays out of screen sharing and recording. AppKit keeps `.none`
+        // for good once it is set, so the one DEBUG exception must be decided before the first set.
         #if DEBUG
-        if capturable || DicticusDefaults.suite.bool(forKey: "debugOverlayCapturable") {
-            sharingType = .readOnly
-        }
+        let allowCapture = capturable || DicticusDefaults.suite.bool(forKey: "debugOverlayCapturable")
+        #else
+        let allowCapture = false
         #endif
+        sharingType = allowCapture ? .readOnly : .none
 
         let host = NSHostingView(rootView: LiveOverlayView(model: model))
         host.sizingOptions = []
@@ -77,6 +78,7 @@ final class LiveOverlayController: LiveOverlayPresenting {
     private let model = LiveOverlayModel()
     private var panel: LiveOverlayPanel?
     private var visible = false
+    private var shownAt = ContinuousClock.now
 
     #if DEBUG
     var debugCapturable = false
@@ -104,8 +106,15 @@ final class LiveOverlayController: LiveOverlayPresenting {
         panel.alphaValue = 0
         visible = true
         currentSeq += 1
+        shownAt = ContinuousClock.now
         panel.orderFrontRegardless()
         fade(panel, to: targetAlpha)
+        #if DEBUG_RECORDER
+        let seq = currentSeq
+        let frame = Self.rect(panel.frame)
+        let visibleFrame = Self.rect(NSScreen.main?.visibleFrame ?? .zero)
+        Task { await OverlayProbe.shared.recordShow(seq: seq, anchorSource: "fallback", frame: frame, visibleFrame: visibleFrame) }
+        #endif
     }
 
     func update(_ text: String) {
@@ -122,6 +131,11 @@ final class LiveOverlayController: LiveOverlayPresenting {
         guard visible, let panel else { return }
         visible = false
         model.text = ""
+        #if DEBUG_RECORDER
+        let seq = currentSeq
+        let shownMs = OverlayProbe.milliseconds(ContinuousClock.now - shownAt)
+        Task { await OverlayProbe.shared.recordHide(seq: seq, reason: reason.rawValue, shownMs: shownMs) }
+        #endif
         fade(panel, to: 0) { [weak self, weak panel] in
             guard let self, let panel, !self.visible else { return }
             panel.orderOut(nil)
@@ -147,6 +161,12 @@ final class LiveOverlayController: LiveOverlayPresenting {
             completion?()
         }
     }
+
+    #if DEBUG_RECORDER
+    private static func rect(_ r: CGRect) -> [Double] {
+        [r.origin.x, r.origin.y, r.size.width, r.size.height].map { Double($0) }
+    }
+    #endif
 
     /// Bottom-centre of the main screen's visible frame; plan 05 swaps in the caret anchor here.
     private static func placement(for size: CGSize) -> CGPoint {

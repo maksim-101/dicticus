@@ -185,6 +185,7 @@
 		B2C818DD60CDC78170E62DFA /* DicticusDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A4789E8EDFC7BAC885FA83F /* DicticusDefaults.swift */; };
 		B3B9E9B8177619B59EE6FC1C /* ContextResolverTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97E6581C1D0ADCEE22CCB20E /* ContextResolverTests.swift */; };
 		B53328CADB7BDE802B1D1470 /* EditGuardConnectorSplitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D11A76297230EACFAECD179 /* EditGuardConnectorSplitTests.swift */; };
+		B563D1A7805448D9323081D4 /* OverlayProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = 663811651619BD1A2D6C60BE /* OverlayProbe.swift */; };
 		B56FA6D5E8A634CCECBC47B9 /* DictationMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BA4FFDE53E7BC06A5A214D2 /* DictationMode.swift */; };
 		B6676509A8F22E2B5AD9D74C /* DicticusApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 00A6403E7E893BEB40EABCBD /* DicticusApp.swift */; };
 		B740367ACE9F28A444DEAD7F /* InMemoryUserDefaults.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2586E1752BAB530E1D162B18 /* InMemoryUserDefaults.swift */; };
@@ -365,6 +366,7 @@
 		638A67B887F78A58D60A8FD7 /* LiveOverlayPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveOverlayPanel.swift; sourceTree = "<group>"; };
 		649BB50B71580F884F936B6F /* BrandLoggedRewriteReplayTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrandLoggedRewriteReplayTests.swift; sourceTree = "<group>"; };
 		65F840B6DAF4061FED6C7E20 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		663811651619BD1A2D6C60BE /* OverlayProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlayProbe.swift; sourceTree = "<group>"; };
 		66BF5BACDC7437ABA6D177B9 /* TextInjector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextInjector.swift; sourceTree = "<group>"; };
 		67764286365EDC1D228B863E /* PersonalLexicon.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalLexicon.swift; sourceTree = "<group>"; };
 		67E8F41AEFC9688C93191DD0 /* PermissionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PermissionManager.swift; sourceTree = "<group>"; };
@@ -921,6 +923,7 @@
 			isa = PBXGroup;
 			children = (
 				E15BD28687EA00B00127FFF7 /* LlmLifecycleProbe.swift */,
+				663811651619BD1A2D6C60BE /* OverlayProbe.swift */,
 				581D101921D572E116C6A241 /* PasteProbe.swift */,
 				C8F8B7747F35412791E28FAF /* PostEditDiff.swift */,
 				6D72715BACF5E80C062DC1FD /* PostEditProbe.swift */,
@@ -1166,6 +1169,7 @@
 				A3A4BEBDBF4D7D882DB83332 /* NumberRevert.swift in Sources */,
 				DCE6FEB9117C3D3A4AC2893C /* OnboardingView.swift in Sources */,
 				98BFCAA6D56789E24714FCC7 /* OutputLevelSampler.swift in Sources */,
+				B563D1A7805448D9323081D4 /* OverlayProbe.swift in Sources */,
 				E95F2079082597A0ABF52F78 /* PasteProbe.swift in Sources */,
 				D3C834B96567A3972B2AC116 /* PermissionManager.swift in Sources */,
 				2A0BC6A9E3318985B054375B /* PermissionRow.swift in Sources */,

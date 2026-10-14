@@ -164,6 +164,20 @@ final class HotkeyManagerTests: XCTestCase {
         XCTAssertNil(HotkeyManager.notification(for: .blocked))
     }
 
+    // MARK: - Phase 51 D-06: the overlay is shown only after a recording actually started
+
+    func testFailedKeyDownNeverShowsTheOverlay() {
+        let spy = SpyOverlay()
+        let manager = HotkeyManager(overlay: spy)
+        // No warm-up service: both modes stop at the readiness guard before startRecording().
+        manager.handleKeyDown(mode: .plain)
+        manager.handleKeyUp(mode: .plain)
+        manager.handleKeyDown(mode: .aiCleanup)
+        manager.handleKeyUp(mode: .aiCleanup)
+        XCTAssertEqual(spy.showCount, 0)
+        XCTAssertTrue(spy.updates.isEmpty)
+    }
+
     // MARK: - Integration test (requires WhisperKit model)
 
     func testFullPushToTalkCycle() async throws {

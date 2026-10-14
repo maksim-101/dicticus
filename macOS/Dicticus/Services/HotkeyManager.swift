@@ -58,6 +58,9 @@ class HotkeyManager: ObservableObject {
     private var activeRecordingBundleID: String?
     private var activeRecordingContext: DictationContext?
 
+    /// Phase 51: true when this recording started a live preview (toggle was on at press).
+    private var activeRecordingHasPreview = false
+
     /// Phase 38 Plan 04 (D-09, CTXFMT-03): the popover's session-scoped
     /// Auto/Code/Prose/Default pin. `nil` == Auto (no pin, resolve normally).
     /// In-memory `@Published` ONLY — never written to `DicticusDefaults` or
@@ -424,6 +427,7 @@ class HotkeyManager: ObservableObject {
             // when off, no panel and no preview loop exist at all.
             if LivePreviewSession.isEnabled(DicticusDefaults.suite) {
                 overlay.show()
+                activeRecordingHasPreview = true
                 service.startLivePreview(cadence: LivePreviewSession.productionCadence) { [weak self] text in
                     self?.overlay.update(text)
                 }
@@ -489,6 +493,7 @@ class HotkeyManager: ObservableObject {
             activeRecordingMode = nil
             activeRecordingBundleID = nil
             activeRecordingContext = nil
+            activeRecordingHasPreview = false
             overlay.hide(reason: .earlyReturn)
             return
         }
@@ -500,6 +505,10 @@ class HotkeyManager: ObservableObject {
         // A new press during the previous paste's clipboard-restore window shows a newer panel;
         // this dictation must only hide the panel it started with.
         let overlaySeq = overlay.currentSeq
+        #if DEBUG_RECORDER
+        let recordPreviewSession = activeRecordingHasPreview
+        #endif
+        activeRecordingHasPreview = false
 
         // Phase 38 Plan 01 (D-02): capture the press-time-resolved context
         // and bundle ID into locals BEFORE clearing session state, so the
@@ -526,6 +535,11 @@ class HotkeyManager: ObservableObject {
             // D-06: covers every throw and discard path below; hide is idempotent.
             defer {
                 if self.overlay.currentSeq == overlaySeq { self.overlay.hide(reason: .taskEnd) }
+                #if DEBUG_RECORDER
+                if recordPreviewSession, let stats = service.lastLivePreviewStats {
+                    Task { await OverlayProbe.shared.recordSession(stats: stats, seq: overlaySeq) }
+                }
+                #endif
             }
             do {
                 let result = try await service.stopRecordingAndTranscribe()
