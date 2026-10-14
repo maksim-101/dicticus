@@ -22,7 +22,7 @@ A fully local dictation app for macOS and iOS. Hold a key or trigger a shortcut,
 ## Requirements
 
 ### macOS
-- macOS 15+ (Sequoia)
+- macOS 26+ (Tahoe)
 - Apple Silicon Mac (Intel Macs launch the universal binary, but transcription without the Neural Engine is too slow to recommend)
 - ~1 GB disk for the ASR model, plus ~2.7 GB for the optional AI-cleanup model (downloaded only if you enable AI cleanup)
 

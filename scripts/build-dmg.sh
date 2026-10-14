@@ -127,6 +127,7 @@ else
     echo "Sparkle Enclosure Metadata:"
     echo "$SPARKLE_PRIVATE_KEY" | "$SIGN_UPDATE_TOOL" "$OUTPUT_DIR/$DMG_NAME"
 fi
+echo "Built LSMinimumSystemVersion: $(plutil -extract LSMinimumSystemVersion raw "$APP_DIR/Dicticus.app/Contents/Info.plist")"
 
 echo "=== Done ==="
 echo "DMG created and notarized: $OUTPUT_DIR/$DMG_NAME"
@@ -140,3 +141,4 @@ echo "Next Steps for Update Distribution:"
 echo "  1. Upload $DMG_NAME AND $DMG_NAME.sha256 to the GitHub Release (gh release create <tag> --latest --notes-file … $DMG_NAME $DMG_NAME.sha256)."
 echo "  2. Paste the sha256 line above into the release notes (\"SHA-256: <hash>  $DMG_NAME\"; verify with: shasum -c $DMG_NAME.sha256)."
 echo "  3. Update the appcast.xml on GitHub Pages using the Sparkle metadata printed above."
+echo "  4. The new appcast <item> must carry <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion> (Phase 51 D-08); older items keep none."

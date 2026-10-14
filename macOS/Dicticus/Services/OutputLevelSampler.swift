@@ -7,7 +7,7 @@ import Foundation
 /// `MediaController`, which stays `true` through confirmed silence (spike 003
 /// step 3) — this samples the actual output signal and computes RMS instead.
 ///
-/// Pipeline (macOS 14.2+ API; app targets macOS 15, no `@available` guard
+/// Pipeline (macOS 14.2+ API; app targets macOS 26, no `@available` guard
 /// needed): translate our own PID to an `AudioObjectID` so the tap excludes
 /// Dicticus's own output -> a mono, global, exclude-self `CATapDescription`
 /// (`privateTap = true`, `muteBehavior = .unmuted` so the user's playback is
