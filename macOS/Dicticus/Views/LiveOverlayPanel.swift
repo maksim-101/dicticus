@@ -177,3 +177,47 @@ final class LiveOverlayController: LiveOverlayPresenting {
         )
     }
 }
+
+#if DEBUG
+/// Launch-argument demo for the VM render check: `-DicticusOverlayDemo YES` shows the panel
+/// through the same placement path as a real press, with fixed neutral sample text.
+/// `-DicticusOverlayDemoAppearance light|dark` pins the appearance for the screenshot only.
+extension LiveOverlayController {
+
+    private static var demoController: LiveOverlayController?
+
+    static var isDemoRequested: Bool {
+        UserDefaults.standard.bool(forKey: "DicticusOverlayDemo")
+    }
+
+    static func runDemoIfRequested() {
+        guard isDemoRequested else { return }
+        let controller = LiveOverlayController()
+        controller.debugCapturable = true
+        switch UserDefaults.standard.string(forKey: "DicticusOverlayDemoAppearance") {
+        case "light": controller.debugAppearance = NSAppearance(named: .aqua)
+        case "dark": controller.debugAppearance = NSAppearance(named: .darkAqua)
+        default: break
+        }
+        demoController = controller
+
+        let sample = [
+            "The quarterly report is ready for review and the figures match last month.",
+            "Please move the meeting to Thursday afternoon if the room is free.",
+            "We still need to confirm the delivery date with the supplier.",
+            "After that I will send the updated schedule to everyone on the team.",
+            "Let me know if anything in the plan looks unclear or missing."
+        ].joined(separator: " ")
+
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(2))
+            controller.show()
+            controller.update(sample)
+            try? await Task.sleep(for: .seconds(4))
+            controller.setProcessing()
+            try? await Task.sleep(for: .seconds(3))
+            controller.hide(reason: .demo)
+        }
+    }
+}
+#endif

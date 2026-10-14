@@ -87,7 +87,16 @@ struct DicticusApp: App {
                     // (prevents mic.slash showing when permissions are already granted but
                     // status is still .pending from init)
                     permissionManager.checkAll()
+                    #if DEBUG
+                    // Overlay render check (VM): the demo needs no model, so skip the download.
+                    if LiveOverlayController.isDemoRequested {
+                        LiveOverlayController.runDemoIfRequested()
+                    } else {
+                        warmupService.warmup()
+                    }
+                    #else
                     warmupService.warmup()
+                    #endif
 
                     // R-06: optional single-fire revert-to-raw hotkey (default: nil —
                     // never claims a combo unprompted). Independent of ASR/LLM warmup;
