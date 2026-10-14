@@ -125,7 +125,7 @@ final class AsrReplayHarnessTests: XCTestCase {
 
     /// Read a WAV into mono Float32 at its native rate. Resampling is deliberately left
     /// to the production path so the replay exercises it too.
-    private static func readWav(_ url: URL) -> ([Float], Double)? {
+    static func readWav(_ url: URL) -> ([Float], Double)? {
         guard let file = try? AVAudioFile(forReading: url) else { return nil }
         let format = file.processingFormat
         let frames = AVAudioFrameCount(file.length)

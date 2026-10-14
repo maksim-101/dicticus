@@ -51,6 +51,21 @@ final class AudioSampleBuffer: @unchecked Sendable {
         samples.removeAll()
         lock.unlock()
     }
+
+    /// Non-destructive copy of the newest `maxSamples` samples. The lock is held for
+    /// the one array copy only; callers resample after it is released.
+    func snapshotTail(maxSamples: Int) -> [Float] {
+        lock.lock()
+        let result = Array(samples.suffix(max(0, maxSamples)))
+        lock.unlock()
+        return result
+    }
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return samples.count
+    }
 }
 
 /// Core ASR pipeline: record audio via AVAudioEngine, apply silence-discard
@@ -226,17 +241,65 @@ class TranscriptionService: ObservableObject {
         // Ensure state always resets to .idle even if transcription throws
         defer { if state == .transcribing { state = .idle } }
 
-        let samples = sampleBuffer.drain()
         let inputSampleRate = audioEngine.inputNode.outputFormat(forBus: 0).sampleRate
+        let session = livePreview
+        livePreview = nil
 
-        let transcriptionResult = try await transcribe(
-            rawSamples: samples,
+        let buffer = sampleBuffer
+        let transcriptionResult = try await finishTranscription(
+            previewSession: session,
+            takeSamples: { buffer.drain() },
             inputSampleRate: inputSampleRate
         ).result
 
         lastResult = transcriptionResult
         state = .idle
         return transcriptionResult
+    }
+
+    // MARK: - Live preview (Phase 51)
+
+    /// The running live-preview session, if any. Inert unless `startLivePreview` is called.
+    private var livePreview: LivePreviewSession?
+
+    /// Stats of the most recent preview session, captured at release.
+    private(set) var lastLivePreviewStats: LivePreviewSession.Stats?
+
+    /// Start the interim decode loop for the current recording (D-04). Previews feed
+    /// `publish` only; nothing from a preview reaches the final transcription (D-01).
+    func startLivePreview(
+        cadence: Duration,
+        publish: @escaping @MainActor (String) -> Void
+    ) {
+        guard state == .recording, livePreview == nil else { return }
+        let decoder = LivePreviewDecoder(
+            whisperKit: whisperKit,
+            buffer: sampleBuffer,
+            inputSampleRate: audioEngine.inputNode.outputFormat(forBus: 0).sampleRate
+        )
+        let session = LivePreviewSession(
+            cadence: cadence,
+            isActive: { [weak self] in self?.state == .recording },
+            decode: { await decoder.decodeTail() },
+            publish: publish
+        )
+        livePreview = session
+        session.start()
+    }
+
+    /// Release path shared by the hotkey and the spike harness: the preview is cancelled
+    /// and awaited FIRST (D-02; WhisperKit is one non-Sendable instance), then the buffer
+    /// is drained and the unchanged final decode runs (D-01).
+    private func finishTranscription(
+        previewSession: LivePreviewSession?,
+        takeSamples: () -> [Float],
+        inputSampleRate: Double
+    ) async throws -> (result: DicticusTranscriptionResult, avgLogprobs: [Float], compressionRatios: [Float]) {
+        if let previewSession {
+            lastLivePreviewStats = await previewSession.cancelAndDrain()
+        }
+        let samples = takeSamples()
+        return try await transcribe(rawSamples: samples, inputSampleRate: inputSampleRate)
     }
 
     /// The transcription path proper, from raw captured samples to a result:
@@ -261,7 +324,7 @@ class TranscriptionService: ObservableObject {
         // WhisperKit requires 16kHz Float32 mono input.
         let resampledSamples: [Float]
         if abs(inputSampleRate - sampleRate) > 1.0 {
-            resampledSamples = resampleAudio(samples, from: inputSampleRate, to: sampleRate)
+            resampledSamples = Self.resampleAudio(samples, from: inputSampleRate, to: sampleRate)
         } else {
             resampledSamples = samples
         }
@@ -698,7 +761,7 @@ class TranscriptionService: ObservableObject {
     /// - Parameter samples: Input audio samples at sourceSampleRate
     /// - Parameter sourceSampleRate: Native hardware sample rate (typically 44.1kHz or 48kHz)
     /// - Parameter targetSampleRate: Parakeet's required rate (16kHz)
-    private func resampleAudio(_ samples: [Float], from sourceSampleRate: Double, to targetSampleRate: Double) -> [Float] {
+    nonisolated static func resampleAudio(_ samples: [Float], from sourceSampleRate: Double, to targetSampleRate: Double) -> [Float] {
         // Primary path: AVAudioConverter
         guard let sourceFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
@@ -716,7 +779,7 @@ class TranscriptionService: ObservableObject {
         let sourceBuffer = AVAudioPCMBuffer(pcmFormat: sourceFormat, frameCapacity: AVAudioFrameCount(samples.count))
         else {
             // Fallback to linear interpolation if AVAudioConverter setup fails
-            return resampleLinear(samples, from: sourceSampleRate, to: targetSampleRate)
+            return Self.resampleLinear(samples, from: sourceSampleRate, to: targetSampleRate)
         }
 
         // Copy samples into source buffer
@@ -730,7 +793,7 @@ class TranscriptionService: ObservableObject {
         let ratio = targetSampleRate / sourceSampleRate
         let outputFrameCount = AVAudioFrameCount(Double(samples.count) * ratio)
         guard let outputBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: outputFrameCount) else {
-            return resampleLinear(samples, from: sourceSampleRate, to: targetSampleRate)
+            return Self.resampleLinear(samples, from: sourceSampleRate, to: targetSampleRate)
         }
 
         var conversionError: NSError?
@@ -751,19 +814,19 @@ class TranscriptionService: ObservableObject {
         }
 
         if conversionError != nil {
-            return resampleLinear(samples, from: sourceSampleRate, to: targetSampleRate)
+            return Self.resampleLinear(samples, from: sourceSampleRate, to: targetSampleRate)
         }
 
         let frameCount = Int(outputBuffer.frameLength)
         guard let outputData = outputBuffer.floatChannelData?[0] else {
-            return resampleLinear(samples, from: sourceSampleRate, to: targetSampleRate)
+            return Self.resampleLinear(samples, from: sourceSampleRate, to: targetSampleRate)
         }
         return Array(UnsafeBufferPointer(start: outputData, count: frameCount))
     }
 
     /// Fallback resampler using linear interpolation.
     /// Used when AVAudioConverter setup fails (e.g., invalid format parameters).
-    private func resampleLinear(_ samples: [Float], from sourceSampleRate: Double, to targetSampleRate: Double) -> [Float] {
+    nonisolated static func resampleLinear(_ samples: [Float], from sourceSampleRate: Double, to targetSampleRate: Double) -> [Float] {
         let ratio = targetSampleRate / sourceSampleRate
         let outputLength = Int(Double(samples.count) * ratio)
         var output = [Float](repeating: 0, count: outputLength)
@@ -946,6 +1009,26 @@ extension TranscriptionService {
         inputSampleRate: Double
     ) async throws -> (result: DicticusTranscriptionResult, avgLogprobs: [Float], compressionRatios: [Float]) {
         try await transcribe(rawSamples: samples, inputSampleRate: inputSampleRate)
+    }
+
+    /// Preview decoder on this service's own WhisperKit instance, as production wires it.
+    func testMakeLivePreviewDecoder(buffer: AudioSampleBuffer, inputSampleRate: Double) -> LivePreviewDecoder {
+        LivePreviewDecoder(whisperKit: whisperKit, buffer: buffer, inputSampleRate: inputSampleRate)
+    }
+
+    /// Runs the same `finishTranscription` the hotkey release path runs, so the spike
+    /// measures the release path that ships.
+    func testReleaseAndTranscribe(
+        previewSession: LivePreviewSession?,
+        samples: [Float],
+        inputSampleRate: Double
+    ) async throws -> (result: DicticusTranscriptionResult, stats: LivePreviewSession.Stats?) {
+        let out = try await finishTranscription(
+            previewSession: previewSession,
+            takeSamples: { samples },
+            inputSampleRate: inputSampleRate
+        )
+        return (out.result, previewSession == nil ? nil : lastLivePreviewStats)
     }
 }
 #endif
