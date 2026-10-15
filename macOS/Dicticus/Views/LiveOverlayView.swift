@@ -8,14 +8,15 @@ import AppKit
 struct LiveOverlayView: View {
     @ObservedObject var model: LiveOverlayModel
 
-    static let width: CGFloat = 360
+    static let width: CGFloat = 320
     static let padding: CGFloat = 16
-    static let spacing: CGFloat = 8
-    static let visibleLines = 4
-    static let transcriptFont = NSFont.systemFont(ofSize: 15)
+    static let spacing: CGFloat = 4
+    static let visibleLines = 3
+    static let cornerRadius: CGFloat = 20
+    static let transcriptFont = NSFont.systemFont(ofSize: 14)
 
     static let transcriptLineHeight: CGFloat = lineHeight(of: transcriptFont)
-    static let statusLineHeight: CGFloat = lineHeight(of: NSFont.preferredFont(forTextStyle: .caption1))
+    static let statusLineHeight: CGFloat = lineHeight(of: NSFont.preferredFont(forTextStyle: .caption2))
     static let transcriptHeight: CGFloat = transcriptLineHeight * CGFloat(visibleLines)
     static let height: CGFloat = padding * 2 + statusLineHeight + spacing + transcriptHeight
 
@@ -26,11 +27,12 @@ struct LiveOverlayView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Self.spacing) {
             Text(model.phase == .listening ? "Listening" : "Processing")
-                .font(.caption)
+                .font(.caption2)
                 .foregroundStyle(.secondary)
 
             Text(Self.displayTail(model.text))
-                .font(.system(size: 15))
+                .font(.system(size: 14))
+                .foregroundStyle(Color(nsColor: .labelColor))
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .frame(height: Self.transcriptHeight, alignment: .bottomLeading)
@@ -50,8 +52,18 @@ struct LiveOverlayView: View {
         }
         .padding(Self.padding)
         .frame(width: Self.width, height: Self.height, alignment: .topLeading)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16))
+        .background(Self.darkModeFill, in: RoundedRectangle(cornerRadius: Self.cornerRadius))
+        .glassEffect(.clear.tint(Self.glassTint), in: RoundedRectangle(cornerRadius: Self.cornerRadius))
     }
+
+    // Clear glass keeps the pane light and borderless; a tint on clear glass barely darkens it,
+    // so dark mode gets a separate fill (tone matched to the 2026-10-15 design review).
+    private static let glassTint = Color(nsColor: NSColor(name: nil) { appearance in
+        NSColor.black.withAlphaComponent(appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? 0.35 : 0.06)
+    })
+    private static let darkModeFill = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor.black.withAlphaComponent(0.30) : .clear
+    })
 
     /// Bounded tail of the transcript: keeps layout cost constant for long dictations.
     /// The cut moves forward to the next word start so no partial word leads.
