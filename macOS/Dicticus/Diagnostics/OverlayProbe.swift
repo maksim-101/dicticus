@@ -39,11 +39,12 @@ public actor OverlayProbe {
             .appendingPathComponent("DebugRecordings", isDirectory: true)
     }
 
-    public func recordShow(seq: Int, anchorSource: String, frame: [Double], visibleFrame: [Double]) {
+    public func recordShow(seq: Int, anchorSource: String, flipped: Bool, frame: [Double], visibleFrame: [Double]) {
         write([
             "event": "overlay_show",
             "seq": seq,
             "anchor_source": anchorSource,
+            "flipped": flipped,
             "frame": frame,
             "visible_frame": visibleFrame
         ])

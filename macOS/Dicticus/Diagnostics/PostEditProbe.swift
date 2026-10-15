@@ -88,7 +88,7 @@ public actor PostEditProbe {
             write(base, outcome: .noFocusedElement, axMs: elapsed())
             return
         }
-        let (focusedOrNil, app) = Self.focusedElement(pid: pid)
+        let (focusedOrNil, app) = CaretAnchor.focusedElement(pid: pid, timeout: PostEditDiff.axMessagingTimeoutSeconds)
         guard let focused = focusedOrNil else {
             write(base, outcome: .noFocusedElement, axMs: elapsed())
             return
@@ -202,32 +202,16 @@ public actor PostEditProbe {
 
     // MARK: - Accessibility reads (read-only; no attribute is ever set)
 
-    private static func focusedElement(pid: pid_t) -> (element: AXUIElement?, app: AXUIElement) {
-        let app = AXUIElementCreateApplication(pid)
-        AXUIElementSetMessagingTimeout(app, PostEditDiff.axMessagingTimeoutSeconds)
-        guard let v = copy(app, kAXFocusedUIElementAttribute), CFGetTypeID(v) == AXUIElementGetTypeID() else {
-            return (nil, app)
-        }
-        let el = v as! AXUIElement
-        AXUIElementSetMessagingTimeout(el, PostEditDiff.axMessagingTimeoutSeconds)
-        return (el, app)
-    }
-
-    private static func copy(_ e: AXUIElement, _ name: String) -> CFTypeRef? {
-        var v: CFTypeRef?
-        return AXUIElementCopyAttributeValue(e, name as CFString, &v) == .success ? v : nil
-    }
-
     private static func stringAttr(_ e: AXUIElement, _ name: String) -> String? {
-        copy(e, name) as? String
+        CaretAnchor.attribute(e, name) as? String
     }
 
     private static func intAttr(_ e: AXUIElement, _ name: String) -> Int? {
-        (copy(e, name) as? NSNumber)?.intValue
+        (CaretAnchor.attribute(e, name) as? NSNumber)?.intValue
     }
 
     private static func caretLocation(_ e: AXUIElement) -> Int? {
-        guard let v = copy(e, kAXSelectedTextRangeAttribute), CFGetTypeID(v) == AXValueGetTypeID() else { return nil }
+        guard let v = CaretAnchor.attribute(e, kAXSelectedTextRangeAttribute), CFGetTypeID(v) == AXValueGetTypeID() else { return nil }
         var r = CFRange()
         return AXValueGetValue(v as! AXValue, .cfRange, &r) ? r.location : nil
     }
@@ -243,9 +227,9 @@ public actor PostEditProbe {
             tokens = PostEditDiff.tokenize(s)
         }
         let caret = caretLocation(element)
-        let frontmost = (copy(app, kAXFrontmostAttribute) as? Bool) ?? false
+        let frontmost = (CaretAnchor.attribute(app, kAXFrontmostAttribute) as? Bool) ?? false
         var stillFocused = false
-        if frontmost, let f = copy(app, kAXFocusedUIElementAttribute) {
+        if frontmost, let f = CaretAnchor.attribute(app, kAXFocusedUIElementAttribute) {
             stillFocused = CFEqual(f, element)
         }
         return .read(tokens: tokens, caretUTF16: caret, stillFocused: stillFocused)

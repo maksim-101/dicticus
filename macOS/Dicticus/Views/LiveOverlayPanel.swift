@@ -141,7 +141,8 @@ final class LiveOverlayController: LiveOverlayPresenting {
         let frame = Self.rect(panel.frame)
         let visibleFrame = Self.rect(placement.visibleFrame)
         let source = placement.source.rawValue
-        Task { await OverlayProbe.shared.recordShow(seq: seq, anchorSource: source, frame: frame, visibleFrame: visibleFrame) }
+        let flipped = placement.flipped
+        Task { await OverlayProbe.shared.recordShow(seq: seq, anchorSource: source, flipped: flipped, frame: frame, visibleFrame: visibleFrame) }
         #endif
     }
 
