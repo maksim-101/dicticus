@@ -1,0 +1,83 @@
+import CoreGraphics
+
+/// Pure placement math for the live overlay panel (Phase 51, D-10/D-11).
+/// Works in AppKit coordinates (bottom-left origin) once `appKitRect(fromAX:)` has run.
+enum OverlayPlacement {
+
+    struct ScreenGeometry: Sendable, Equatable {
+        var frame: CGRect
+        var visibleFrame: CGRect
+    }
+
+    enum Source: String, Sendable {
+        case caret, element, window, screen
+    }
+
+    struct Placement: Sendable, Equatable {
+        var origin: CGPoint
+        var source: Source
+        var flipped: Bool
+        var visibleFrame: CGRect
+    }
+
+    nonisolated static func appKitRect(fromAX ax: CGRect, primaryScreenHeight: CGFloat) -> CGRect {
+        CGRect(x: ax.minX, y: primaryScreenHeight - ax.maxY, width: ax.width, height: ax.height)
+    }
+
+    nonisolated static func screen(containing point: CGPoint, in screens: [ScreenGeometry]) -> ScreenGeometry? {
+        screens.first { $0.frame.contains(point) }
+    }
+
+    nonisolated static func caretOrigin(
+        anchor: CGRect, panel: CGSize, visible: CGRect, gap: CGFloat = 8, textInset: CGFloat = 16
+    ) -> (origin: CGPoint, flipped: Bool) {
+        var y = anchor.maxY + gap
+        var flipped = false
+        if y + panel.height > visible.maxY {
+            y = anchor.minY - gap - panel.height
+            flipped = true
+        }
+        return (clamp(CGPoint(x: anchor.minX - textInset, y: y), panel: panel, visible: visible), flipped)
+    }
+
+    nonisolated static func bottomCentreOrigin(
+        on frame: CGRect, panel: CGSize, visible: CGRect, inset: CGFloat = 16
+    ) -> CGPoint {
+        clamp(CGPoint(x: frame.midX - panel.width / 2, y: frame.minY + inset), panel: panel, visible: visible)
+    }
+
+    nonisolated static func place(
+        candidates: CaretAnchor.Candidates,
+        panel: CGSize,
+        screens: [ScreenGeometry],
+        primaryScreenHeight: CGFloat,
+        fallback: ScreenGeometry
+    ) -> Placement {
+        func converted(_ ax: CGRect?) -> CGRect? {
+            guard let ax, [ax.origin.x, ax.origin.y, ax.width, ax.height].allSatisfy(\.isFinite) else { return nil }
+            return appKitRect(fromAX: ax, primaryScreenHeight: primaryScreenHeight)
+        }
+
+        if let caret = converted(candidates.caret), caret.height > 0,
+           let target = screen(containing: CGPoint(x: caret.midX, y: caret.midY), in: screens) {
+            let (origin, flipped) = caretOrigin(anchor: caret, panel: panel, visible: target.visibleFrame)
+            return Placement(origin: origin, source: .caret, flipped: flipped, visibleFrame: target.visibleFrame)
+        }
+        for (rect, source) in [(converted(candidates.element), Source.element), (converted(candidates.window), .window)] {
+            guard let rect, rect.width > 0, rect.height > 0,
+                  let target = screen(containing: CGPoint(x: rect.midX, y: rect.midY), in: screens) else { continue }
+            let origin = bottomCentreOrigin(on: rect, panel: panel, visible: target.visibleFrame)
+            return Placement(origin: origin, source: source, flipped: false, visibleFrame: target.visibleFrame)
+        }
+        let origin = bottomCentreOrigin(on: fallback.visibleFrame, panel: panel, visible: fallback.visibleFrame, inset: 48)
+        return Placement(origin: origin, source: .screen, flipped: false, visibleFrame: fallback.visibleFrame)
+    }
+
+    /// The lower bound wins when the panel is larger than the visible frame.
+    private nonisolated static func clamp(_ p: CGPoint, panel: CGSize, visible: CGRect) -> CGPoint {
+        CGPoint(
+            x: max(visible.minX, min(p.x, visible.maxX - panel.width)),
+            y: max(visible.minY, min(p.y, visible.maxY - panel.height))
+        )
+    }
+}

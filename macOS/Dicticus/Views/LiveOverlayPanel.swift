@@ -72,7 +72,6 @@ final class LiveOverlayPanel: NSPanel {
 final class LiveOverlayController: LiveOverlayPresenting {
 
     private static let fadeDuration: TimeInterval = 0.18  // DESIGN motion `fast`
-    private static let bottomInset: CGFloat = 48
 
     private let targetAlpha: CGFloat
     private let model = LiveOverlayModel()
@@ -102,18 +101,47 @@ final class LiveOverlayController: LiveOverlayPresenting {
 
         let panel = self.panel ?? makePanel()
         self.panel = panel
-        panel.setFrameOrigin(Self.placement(for: panel.frame.size))
-        panel.alphaValue = 0
         visible = true
         currentSeq += 1
         shownAt = ContinuousClock.now
+        let seq = currentSeq
+
+        // AX is read off the main actor; the panel appears once the anchor resolves. A hide
+        // (or a newer show) before that means this press never shows a panel.
+        let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let ownPid = ProcessInfo.processInfo.processIdentifier
+        Task { [weak self] in
+            var candidates = CaretAnchor.Candidates()
+            if let pid, pid != ownPid {
+                candidates = await Task.detached { CaretAnchor.resolve(pid: pid) }.value
+            }
+            self?.present(seq: seq, candidates: candidates)
+        }
+    }
+
+    private func present(seq: Int, candidates: CaretAnchor.Candidates) {
+        guard visible, currentSeq == seq, let panel else { return }
+        let screens = NSScreen.screens.map {
+            OverlayPlacement.ScreenGeometry(frame: $0.frame, visibleFrame: $0.visibleFrame)
+        }
+        guard let primary = screens.first else { return }
+        let main = NSScreen.main.map { OverlayPlacement.ScreenGeometry(frame: $0.frame, visibleFrame: $0.visibleFrame) }
+        let placement = OverlayPlacement.place(
+            candidates: candidates,
+            panel: panel.frame.size,
+            screens: screens,
+            primaryScreenHeight: primary.frame.height,
+            fallback: main ?? primary
+        )
+        panel.setFrameOrigin(placement.origin)
+        panel.alphaValue = 0
         panel.orderFrontRegardless()
         fade(panel, to: targetAlpha)
         #if DEBUG_RECORDER
-        let seq = currentSeq
         let frame = Self.rect(panel.frame)
-        let visibleFrame = Self.rect(NSScreen.main?.visibleFrame ?? .zero)
-        Task { await OverlayProbe.shared.recordShow(seq: seq, anchorSource: "fallback", frame: frame, visibleFrame: visibleFrame) }
+        let visibleFrame = Self.rect(placement.visibleFrame)
+        let source = placement.source.rawValue
+        Task { await OverlayProbe.shared.recordShow(seq: seq, anchorSource: source, frame: frame, visibleFrame: visibleFrame) }
         #endif
     }
 
@@ -167,15 +195,6 @@ final class LiveOverlayController: LiveOverlayPresenting {
         [r.origin.x, r.origin.y, r.size.width, r.size.height].map { Double($0) }
     }
     #endif
-
-    /// Bottom-centre of the main screen's visible frame; plan 05 swaps in the caret anchor here.
-    private static func placement(for size: CGSize) -> CGPoint {
-        guard let visibleFrame = NSScreen.main?.visibleFrame else { return .zero }
-        return CGPoint(
-            x: (visibleFrame.midX - size.width / 2).rounded(),
-            y: visibleFrame.minY + bottomInset
-        )
-    }
 }
 
 #if DEBUG
