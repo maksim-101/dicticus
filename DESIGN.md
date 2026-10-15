@@ -199,6 +199,7 @@ Default spring: `.spring(response: 0.45, dampingFraction: 0.85)` for non-modal g
 | **Status pill** | `status-pill` | Tiny SHORT/LONG-form labels in history rows; `brand-accent` opacity 0.1 background. |
 | **History row** | `history-row` | 3-line collapsed by default; tap to expand and reveal full transcript. Highlight FTS5 search matches with `brand-accent` opacity 0.2 underline (UAT U6). |
 | **Live transcript pane** | wrap content in `ScrollView` with `.defaultScrollAnchor(.bottom)` | Auto-scrolls to end during recording (UAT U4). |
+| **Live transcript overlay** *(macOS)* | `.glassEffect(.clear.tint(black 6% light / 35% dark))`, dark-mode fill black 30%, corner radius 20, padding 16, spacing 4, 14 pt system text, 320 pt wide, 3 visible lines, top fade to opaque at ~35%, status line `.caption2` secondary, no border, no shadow | Floating, unobtrusive, still visible enough to follow along. Shows "Listening" / "Processing" with the interim transcript above the caret (fallbacks per Phase 51 D-11). Non-activating borderless panel, hidden from screen capture, fades in/out over `fast` (180 ms). Scoped exception to the no-glassmorphism Don't. |
 | **Permission status row** *(macOS)* | platform-specific | Microphone, Accessibility, Input Monitoring — each shows ✓/⚠ and a Repair button when missing (UAT M3). |
 
 ## Do's and Don'ts
@@ -206,7 +207,7 @@ Default spring: `.spring(response: 0.45, dampingFraction: 0.85)` for non-modal g
 - **Do** use `AccentColor` (the asset) instead of hardcoding `brand-accent` hex in views — a single asset drives both `.tint` and macOS system-wide accent override.
 - **Do** layer the brand pair (forest + sage) only on **brand surfaces**: app icon, onboarding hero, "What's New" splash. Standard chrome stays Apple-semantic.
 - **Do** use `recording` (red) for the mic-active state only. Never for delete buttons.
-- **Don't** introduce gradients or glassmorphism. Dicticus signals trust through restraint, not visual flair.
+- **Don't** introduce gradients or glassmorphism. Dicticus signals trust through restraint, not visual flair. One scoped exception: the macOS live transcript overlay uses native Liquid Glass and a top fade mask (Phase 51, user-approved after a rendered design review on 2026-10-15); nothing else.
 - **Don't** animate the actual text-insertion path. Animations are for state framing, never for content arrival.
 - **Don't** override Dynamic Type. All typography respects user accessibility settings.
 - **Don't** add a third typeface. SF Pro + SF Mono cover everything.
@@ -268,6 +269,7 @@ Menu bar utility shell. Phase 19.7 hygiene work happens here (UAT M1–M3, D1).
 ## macOS Component Specifics
 
 - **Permission Status Row** (UAT M3): rendered in the menu-bar dropdown. Shows three rows — Microphone, Accessibility, Input Monitoring — each with state indicator (`ready` ✓ / `warning` ⚠) and an inline "Repair" button when any is missing. Repair opens the relevant `x-apple.systempreferences:` URL.
+- **Live transcript overlay**: floating clear-glass panel during dictation; tokens in the Components table (Settings → General toggle, on by default).
 - **Hotkey row**: `KeyboardShortcuts.Recorder` with conflict detection. No custom styling needed.
 - **Model download progress**: same `ProgressView` styling as iOS, but inline in the Models tab.
 

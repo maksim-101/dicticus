@@ -6,6 +6,13 @@ Dicticus is a fully local, on-device dictation app (ASR via WhisperKit/Whisper l
 
 ---
 
+## Unreleased — Live Transcript Overlay (macOS)
+
+- **Added: a live transcript panel while you hold the dictation key** — a small clear-glass panel appears above the text cursor (with fallbacks when the cursor position cannot be read) and shows the words as you speak under a "Listening" label; it switches to "Processing" when you release the key and disappears before the paste. The pasted text still comes from the unchanged end-of-recording decode, so the panel is a preview only. It never takes keyboard focus and is hidden from screen sharing and recording. Turn it off in Settings → General → "Show live transcript while dictating"; it is on by default and, when off, no preview decodes run. Cost, measured on 36 logged long recordings (mean 29.7 s, content-biased towards clipped captures, so a latency check and not an accuracy claim) with the preview refreshing every 500 ms: the final text arrives a median of 129.8 ms later after you release the key than without the panel (p90 284 ms). That is 20 ms inside the 150 ms limit set for this feature, and AI cleanup was not part of the measurement. macOS.
+- **Changed: Dicticus for macOS now requires macOS 26** — the panel uses the system's Liquid Glass, which exists from macOS 26. Macs on macOS 15 to 25 stay on 1.3.0 and are not offered this version by the update feed. macOS.
+
+---
+
 ## 1.3.0 — Spoken Punctuation & Cleanup Fidelity — 2026-10-10
 
 - **Fixed: a dictation that starts with a number no longer capitalizes the word after it** — the finishing capitalization uppercased the first letter wherever it stood, so "4 oder 5 genügen" came out "4 Oder 5 genügen" and a leading "1st" or "10am" became "1St" or "10Am". Now the first letter is capitalized only when no number comes before it; the word after a leading number keeps the case the speech recognizer wrote (a German noun keeps its capital), a numbered start such as "3. dann" still becomes "3. Dann", and plain and AI-cleanup output behave the same. Replayed over 4569 logged dictations (27 June to 10 October 2026): 3 outputs changed, each by that one capital, all 3 hand-read as better and none worse; a lowercase word after a sentence-ending period and a number stayed lowercase in all 4 logged cases. Known residue: a lowercase "3d" or "4k" at the very start of a dictation now stays lowercase. macOS + iOS.
