@@ -3,7 +3,7 @@ import LaunchAtLogin
 
 /// Settings → General pane.
 ///
-/// Group "Startup & behavior": Launch at login + Media pause toggle + Clipboard fallback toggle.
+/// Group "Startup & behavior": Launch at login + Media pause toggle + Clipboard fallback toggle + Live transcript toggle.
 /// Group "History": Copy-mode (Raw/Polished) picker with footer.
 /// Last row (Q-01 fallback): Quit Dicticus.
 ///
@@ -18,6 +18,8 @@ struct GeneralPane: View {
                 MediaPauseToggleRow()
 
                 ClipboardFallbackToggleRow()
+
+                LiveOverlayToggleRow()
             }
 
             Section {
