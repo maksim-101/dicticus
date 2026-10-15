@@ -78,6 +78,9 @@ final class LiveOverlayController: LiveOverlayPresenting {
     private var panel: LiveOverlayPanel?
     private var visible = false
     private var shownAt = ContinuousClock.now
+    #if DEBUG_RECORDER
+    private var recordedShowSeq = 0
+    #endif
 
     #if DEBUG
     var debugCapturable = false
@@ -101,6 +104,15 @@ final class LiveOverlayController: LiveOverlayPresenting {
 
         let panel = self.panel ?? makePanel()
         self.panel = panel
+        #if DEBUG_RECORDER
+        // A press during the previous paste's restore window re-shows the same panel; close the
+        // superseded show so every recorded show keeps exactly one hide.
+        if visible, recordedShowSeq == currentSeq {
+            let shownMs = OverlayProbe.milliseconds(ContinuousClock.now - shownAt)
+            let superseded = currentSeq
+            Task { await OverlayProbe.shared.recordHide(seq: superseded, reason: "superseded", shownMs: shownMs) }
+        }
+        #endif
         visible = true
         currentSeq += 1
         shownAt = ContinuousClock.now
@@ -142,6 +154,7 @@ final class LiveOverlayController: LiveOverlayPresenting {
         let visibleFrame = Self.rect(placement.visibleFrame)
         let source = placement.source.rawValue
         let flipped = placement.flipped
+        recordedShowSeq = seq
         Task { await OverlayProbe.shared.recordShow(seq: seq, anchorSource: source, flipped: flipped, frame: frame, visibleFrame: visibleFrame) }
         #endif
     }
@@ -161,9 +174,12 @@ final class LiveOverlayController: LiveOverlayPresenting {
         visible = false
         model.text = ""
         #if DEBUG_RECORDER
-        let seq = currentSeq
-        let shownMs = OverlayProbe.milliseconds(ContinuousClock.now - shownAt)
-        Task { await OverlayProbe.shared.recordHide(seq: seq, reason: reason.rawValue, shownMs: shownMs) }
+        // A release before the anchor resolved never showed the panel, so it has no show to pair.
+        if recordedShowSeq == currentSeq {
+            let seq = currentSeq
+            let shownMs = OverlayProbe.milliseconds(ContinuousClock.now - shownAt)
+            Task { await OverlayProbe.shared.recordHide(seq: seq, reason: reason.rawValue, shownMs: shownMs) }
+        }
         #endif
         fade(panel, to: 0) { [weak self, weak panel] in
             guard let self, let panel, !self.visible else { return }
@@ -236,6 +252,20 @@ extension LiveOverlayController {
             try? await Task.sleep(for: .seconds(4))
             controller.setProcessing()
             try? await Task.sleep(for: .seconds(3))
+            controller.hide(reason: .demo)
+
+            // `-DicticusOverlayDemoEdges YES`: the two lifecycle shapes a real press can produce,
+            // so the DEBUG_RECORDER log can be checked for show/hide pairing without a hotkey.
+            guard UserDefaults.standard.bool(forKey: "DicticusOverlayDemoEdges") else { return }
+            try? await Task.sleep(for: .seconds(1))
+            controller.show()
+            controller.hide(reason: .earlyReturn)
+            try? await Task.sleep(for: .seconds(1))
+            controller.show()
+            controller.update("Edge sample.")
+            try? await Task.sleep(for: .seconds(1))
+            controller.show()
+            try? await Task.sleep(for: .seconds(1))
             controller.hide(reason: .demo)
         }
     }
