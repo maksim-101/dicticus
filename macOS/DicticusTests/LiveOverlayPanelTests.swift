@@ -151,7 +151,8 @@ final class LiveOverlayPanelTests: XCTestCase {
 
     private func makeStage(
         flags: OverlayAccessibilityFlags = OverlayAccessibilityFlags(reduceMotion: true),
-        caretAppKit: (OverlayPlacement.ScreenGeometry) -> CGRect
+        caretAppKit: (OverlayPlacement.ScreenGeometry) -> CGRect,
+        windowAppKit: ((OverlayPlacement.ScreenGeometry) -> CGRect)? = nil
     ) throws -> (Stage, CaretAnchor.Candidates) {
         let screens = NSScreen.screens.map {
             OverlayPlacement.ScreenGeometry(frame: $0.frame, visibleFrame: $0.visibleFrame)
@@ -159,7 +160,11 @@ final class LiveOverlayPanelTests: XCTestCase {
         guard let primary = screens.first else { throw XCTSkip("no screen") }
         let caret = caretAppKit(primary)
         let ax = CGRect(x: caret.minX, y: primary.frame.height - caret.maxY, width: caret.width, height: caret.height)
-        let candidates = CaretAnchor.Candidates(caret: ax, element: nil, window: nil)
+        let window = windowAppKit.map { make -> CGRect in
+            let r = make(primary)
+            return CGRect(x: r.minX, y: primary.frame.height - r.maxY, width: r.width, height: r.height)
+        }
+        let candidates = CaretAnchor.Candidates(caret: ax, element: nil, window: window)
         let controller = LiveOverlayController(
             targetAlpha: 0, accessibility: { flags },
             candidateProvider: { _ in candidates })
@@ -196,14 +201,18 @@ final class LiveOverlayPanelTests: XCTestCase {
 
     func testPaneIsClampedFlushToTheVisibleFrameAtBothScreenEdges() async throws {
         for atRight in [false, true] {
-            let (stage, _) = try makeStage { s in
+            // The window is a narrow strip at the edge, so its centre lies inside the margin the pane would need.
+            let (stage, _) = try makeStage(caretAppKit: { s in
                 CGRect(x: atRight ? s.visibleFrame.maxX - 4 : s.visibleFrame.minX + 4,
                        y: s.visibleFrame.midY, width: 2, height: 18)
-            }
+            }, windowAppKit: { s in
+                CGRect(x: atRight ? s.visibleFrame.maxX - 100 : s.visibleFrame.minX,
+                       y: s.visibleFrame.minY, width: 100, height: s.visibleFrame.height)
+            })
             let pane = try await presentedPaneRect(stage.controller)
             stage.controller.hide(reason: .demo)
             let visible = stage.primary.visibleFrame
-            // The caret sits inside the edge, so the clamp pins the pane flush to it.
+            // The window sits at the edge, so the clamp pins the pane flush to it.
             if atRight {
                 XCTAssertEqual(pane.maxX, visible.maxX, accuracy: 0.5, "pane is clamped flush right")
             } else {

@@ -28,8 +28,9 @@ enum OverlayPlacement {
         screens.first { $0.frame.contains(point) }
     }
 
+    /// Vertical position follows the caret line; horizontal position is `centreX`.
     nonisolated static func caretOrigin(
-        anchor: CGRect, panel: CGSize, visible: CGRect, gap: CGFloat = 8, textInset: CGFloat = 16
+        anchor: CGRect, centreX: CGFloat, panel: CGSize, visible: CGRect, gap: CGFloat = 8
     ) -> (origin: CGPoint, flipped: Bool) {
         var y = anchor.maxY + gap
         var flipped = false
@@ -37,13 +38,13 @@ enum OverlayPlacement {
             y = anchor.minY - gap - panel.height
             flipped = true
         }
-        return (clamp(CGPoint(x: anchor.minX - textInset, y: y), panel: panel, visible: visible), flipped)
+        return (clamp(CGPoint(x: centreX - panel.width / 2, y: y), panel: panel, visible: visible), flipped)
     }
 
     nonisolated static func bottomCentreOrigin(
-        on frame: CGRect, panel: CGSize, visible: CGRect, inset: CGFloat = 16
+        on frame: CGRect, centreX: CGFloat? = nil, panel: CGSize, visible: CGRect, inset: CGFloat = 16
     ) -> CGPoint {
-        clamp(CGPoint(x: frame.midX - panel.width / 2, y: frame.minY + inset), panel: panel, visible: visible)
+        clamp(CGPoint(x: (centreX ?? frame.midX) - panel.width / 2, y: frame.minY + inset), panel: panel, visible: visible)
     }
 
     nonisolated static func place(
@@ -58,15 +59,31 @@ enum OverlayPlacement {
             return appKitRect(fromAX: ax, primaryScreenHeight: primaryScreenHeight)
         }
 
+        let window = converted(candidates.window)
+        let element = converted(candidates.element)
+
+        /// The panel is centred on the focused window in every app (host session 1). A window or
+        /// element whose midpoint lies on another display does not count, so a stale rect cannot
+        /// drag the panel away from the screen the user is typing on.
+        func centreX(on target: ScreenGeometry) -> CGFloat {
+            for rect in [window, element] {
+                if let rect, rect.width > 0, rect.height > 0,
+                   rect.midX >= target.frame.minX, rect.midX < target.frame.maxX { return rect.midX }
+            }
+            return target.visibleFrame.midX
+        }
+
         if let caret = converted(candidates.caret), caret.height > 0,
            let target = screen(containing: CGPoint(x: caret.midX, y: caret.midY), in: screens) {
-            let (origin, flipped) = caretOrigin(anchor: caret, panel: panel, visible: target.visibleFrame)
+            let (origin, flipped) = caretOrigin(
+                anchor: caret, centreX: centreX(on: target), panel: panel, visible: target.visibleFrame)
             return Placement(origin: origin, source: .caret, flipped: flipped, visibleFrame: target.visibleFrame)
         }
-        for (rect, source) in [(converted(candidates.element), Source.element), (converted(candidates.window), .window)] {
+        for (rect, source) in [(element, Source.element), (window, .window)] {
             guard let rect, rect.width > 0, rect.height > 0,
                   let target = screen(containing: CGPoint(x: rect.midX, y: rect.midY), in: screens) else { continue }
-            let origin = bottomCentreOrigin(on: rect, panel: panel, visible: target.visibleFrame)
+            let origin = bottomCentreOrigin(
+                on: rect, centreX: centreX(on: target), panel: panel, visible: target.visibleFrame)
             return Placement(origin: origin, source: source, flipped: false, visibleFrame: target.visibleFrame)
         }
         let origin = bottomCentreOrigin(on: fallback.visibleFrame, panel: panel, visible: fallback.visibleFrame, inset: 48)

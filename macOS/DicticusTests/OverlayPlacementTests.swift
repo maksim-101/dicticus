@@ -35,14 +35,14 @@ final class OverlayPlacementTests: XCTestCase {
         let s = screen()
         let ax = CGRect(x: 400, y: 500, width: 2, height: 18)
         let placement = OverlayPlacement.place(
-            candidates: .init(caret: ax), panel: panel, screens: [s],
+            candidates: .init(caret: ax, window: CGRect(x: 200, y: 100, width: 800, height: 700)), panel: panel, screens: [s],
             primaryScreenHeight: 1000, fallback: s
         )
         let caret = OverlayPlacement.appKitRect(fromAX: ax, primaryScreenHeight: 1000)
         XCTAssertEqual(placement.source, .caret)
         XCTAssertFalse(placement.flipped)
         XCTAssertEqual(placement.origin.y, caret.maxY + 8)
-        XCTAssertEqual(placement.origin.x, caret.minX - 16)
+        XCTAssertEqual(placement.origin.x, 600 - panel.width / 2)
     }
 
     // MARK: - Behaviour (pure inputs)
@@ -74,25 +74,29 @@ final class OverlayPlacementTests: XCTestCase {
         assertInside(p)
     }
 
-    func testCaretAtRightEdgeClampsHorizontally() {
-        let p = place(.init(caret: CGRect(x: 1590, y: 500, width: 2, height: 18)), screens: [screen()])
+    func testWindowAtRightEdgeClampsHorizontally() {
+        let p = place(.init(caret: CGRect(x: 1590, y: 500, width: 2, height: 18),
+                            window: CGRect(x: 1500, y: 100, width: 100, height: 700)), screens: [screen()])
         XCTAssertEqual(p.origin.x, 1600 - panel.width)
         assertInside(p)
     }
 
     func testCaretOnLeftHandDisplayWithNegativeCoordinates() {
         let screens = [screen(), screen(-1600, 0)]
-        let p = place(.init(caret: CGRect(x: -1590, y: 500, width: 2, height: 18)), screens: screens)
+        let p = place(.init(caret: CGRect(x: -1590, y: 500, width: 2, height: 18),
+                            window: CGRect(x: -1400, y: 100, width: 800, height: 700)), screens: screens)
         XCTAssertEqual(p.source, .caret)
-        XCTAssertEqual(p.origin.x, -1600)
+        XCTAssertEqual(p.origin.x, -1000 - panel.width / 2)
         XCTAssertEqual(p.visibleFrame, screens[1].visibleFrame)
         assertInside(p)
     }
 
     func testCaretOnSecondScreenUsesThatScreensVisibleFrame() {
         let screens = [screen(), screen(1600, 0)]
-        let p = place(.init(caret: CGRect(x: 2000, y: 500, width: 2, height: 18)), screens: screens)
+        let p = place(.init(caret: CGRect(x: 2000, y: 500, width: 2, height: 18),
+                            window: CGRect(x: 1800, y: 100, width: 600, height: 700)), screens: screens)
         XCTAssertEqual(p.visibleFrame, screens[1].visibleFrame)
+        XCTAssertEqual(p.origin.x, 2100 - panel.width / 2)
         assertInside(p)
     }
 
@@ -108,8 +112,60 @@ final class OverlayPlacementTests: XCTestCase {
 
     func testPanelWiderThanVisibleFrameKeepsLeftEdgeOnScreen() {
         let wide = CGSize(width: 2000, height: 120)
-        let p = place(.init(caret: CGRect(x: 800, y: 500, width: 2, height: 18)), screens: [screen()], panel: wide)
+        let p = place(.init(caret: CGRect(x: 800, y: 500, width: 2, height: 18),
+                            window: CGRect(x: 100, y: 100, width: 600, height: 700)), screens: [screen()], panel: wide)
         XCTAssertEqual(p.origin.x, 0)
+    }
+
+    // MARK: - Window centring (plan 51-12, user decision in host session 1)
+
+    func testPanelIsCentredOnTheWindowWhereverTheCaretIs() {
+        let window = CGRect(x: 100, y: 100, width: 1200, height: 700)
+        let atStart = place(.init(caret: CGRect(x: 120, y: 500, width: 2, height: 18), window: window), screens: [screen()])
+        let atEnd = place(.init(caret: CGRect(x: 1250, y: 500, width: 2, height: 18), window: window), screens: [screen()])
+        XCTAssertEqual(atStart.source, .caret)
+        XCTAssertEqual(atStart.origin.x, 700 - panel.width / 2)
+        XCTAssertEqual(atEnd.origin.x, atStart.origin.x)
+        XCTAssertEqual(atEnd.origin.y, atStart.origin.y)
+    }
+
+    func testCaretLineStillDecidesTheHeightWhenCentredOnTheWindow() {
+        let window = CGRect(x: 100, y: 100, width: 1200, height: 700)
+        let ax = CGRect(x: 120, y: 300, width: 2, height: 18)
+        let p = place(.init(caret: ax, window: window), screens: [screen()])
+        XCTAssertEqual(p.origin.y, OverlayPlacement.appKitRect(fromAX: ax, primaryScreenHeight: 1000).maxY + 8)
+        let top = place(.init(caret: CGRect(x: 120, y: 20, width: 2, height: 18), window: window), screens: [screen()])
+        XCTAssertTrue(top.flipped)
+        XCTAssertEqual(top.origin.x, 700 - panel.width / 2)
+    }
+
+    func testWithoutWindowTheElementCentresTheCaretPanel() {
+        let p = place(.init(caret: CGRect(x: 300, y: 500, width: 2, height: 18),
+                            element: CGRect(x: 200, y: 400, width: 800, height: 200)), screens: [screen()])
+        XCTAssertEqual(p.source, .caret)
+        XCTAssertEqual(p.origin.x, 600 - panel.width / 2)
+    }
+
+    func testWithoutWindowOrElementTheCaretScreenCentresTheCaretPanel() {
+        let screens = [screen(), screen(1600, 0, inset: (top: 25, bottom: 70))]
+        let p = place(.init(caret: CGRect(x: 1700, y: 500, width: 2, height: 18)), screens: screens)
+        XCTAssertEqual(p.origin.x, screens[1].visibleFrame.midX - panel.width / 2)
+        assertInside(p)
+    }
+
+    func testWindowOnAnotherDisplayDoesNotPullThePanelAwayFromTheCaret() {
+        let screens = [screen(), screen(1600, 0)]
+        let p = place(.init(caret: CGRect(x: 1700, y: 500, width: 2, height: 18),
+                            window: CGRect(x: 100, y: 100, width: 800, height: 700)), screens: screens)
+        XCTAssertEqual(p.visibleFrame, screens[1].visibleFrame)
+        XCTAssertEqual(p.origin.x, screens[1].visibleFrame.midX - panel.width / 2)
+    }
+
+    func testFallbackOnElementCentresOnTheWindowWhenThereIsOne() {
+        let p = place(.init(element: CGRect(x: 200, y: 100, width: 300, height: 600),
+                            window: CGRect(x: 100, y: 50, width: 1000, height: 800)), screens: [screen()])
+        XCTAssertEqual(p.source, .element)
+        XCTAssertEqual(p.origin.x, 600 - panel.width / 2)
     }
 
     func testNoCaretFallsBackToBottomCentreOnElement() {
