@@ -23,6 +23,28 @@ final class LiveOverlayModel: ObservableObject {
 
     @Published var text = ""
     @Published var phase: Phase = .listening
+    /// Read at every `show()`: an opaque fill replaces the glass sheen.
+    @Published var reduceTransparency = false
+    /// Read at every `show()`: no rise and no line slide, fade only.
+    @Published var reduceMotion = false
+}
+
+/// The system accessibility settings the overlay honours, sampled once per `show()`.
+struct OverlayAccessibilityFlags: Equatable {
+    var reduceTransparency = false
+    var reduceMotion = false
+
+    @MainActor static func system() -> OverlayAccessibilityFlags {
+        let workspace = NSWorkspace.shared
+        return OverlayAccessibilityFlags(
+            reduceTransparency: workspace.accessibilityDisplayShouldReduceTransparency,
+            reduceMotion: workspace.accessibilityDisplayShouldReduceMotion)
+    }
+}
+
+/// `NSHostingView` reports itself as an accessibility element regardless of `setAccessibilityElement`.
+private final class SilentHostingView<Content: View>: NSHostingView<Content> {
+    override func isAccessibilityElement() -> Bool { false }
 }
 
 /// Borderless, non-activating panel (D-12). It never becomes key or main and is only
@@ -69,7 +91,7 @@ final class LiveOverlayPanel: NSPanel {
         shadow.layer?.shadowRadius = Self.shadowRadius
         shadow.layer?.shadowOffset = Self.shadowOffset
 
-        let host = NSHostingView(rootView: LiveOverlayView(model: model))
+        let host = SilentHostingView(rootView: LiveOverlayView(model: model))
         host.sizingOptions = []
 
         let glass = NSGlassEffectView(frame: paneRect)
@@ -81,6 +103,8 @@ final class LiveOverlayPanel: NSPanel {
         let root = NSView(frame: CGRect(origin: .zero, size: Self.size))
         root.addSubview(shadow)
         root.addSubview(glass)
+        // The panel is non-activating and never focused; VoiceOver must not announce it.
+        for view in [root, shadow, glass, host] { view.setAccessibilityElement(false) }
 
         shadowView = shadow
         glassView = glass
@@ -116,7 +140,10 @@ final class LiveOverlayPanel: NSPanel {
 @MainActor
 final class LiveOverlayController: LiveOverlayPresenting {
 
-    private static let fadeDuration: TimeInterval = 0.18  // DESIGN motion `fast`
+    private static let entryDuration: TimeInterval = 0.42
+    private static let exitDuration: TimeInterval = 0.36
+    private static let riseDistance: CGFloat = 8
+    private static let easing = CAMediaTimingFunction(controlPoints: 0.2, 0.8, 0.2, 1)
 
     private let targetAlpha: CGFloat
     private let model = LiveOverlayModel()
@@ -144,9 +171,15 @@ final class LiveOverlayController: LiveOverlayPresenting {
     }
 
     private let candidateProvider: CandidateProvider
+    private let accessibility: () -> OverlayAccessibilityFlags
 
-    init(targetAlpha: CGFloat = 1, candidateProvider: @escaping CandidateProvider = LiveOverlayController.resolveCandidates) {
+    init(
+        targetAlpha: CGFloat = 1,
+        accessibility: @escaping () -> OverlayAccessibilityFlags = { OverlayAccessibilityFlags.system() },
+        candidateProvider: @escaping CandidateProvider = LiveOverlayController.resolveCandidates
+    ) {
         self.targetAlpha = targetAlpha
+        self.accessibility = accessibility
         self.candidateProvider = candidateProvider
     }
 
@@ -156,11 +189,15 @@ final class LiveOverlayController: LiveOverlayPresenting {
     var panelForTesting: LiveOverlayPanel? { panel }
 
     func show() {
+        let flags = accessibility()
         model.text = ""
         model.phase = .listening
+        model.reduceTransparency = flags.reduceTransparency
+        model.reduceMotion = flags.reduceMotion
 
         let panel = self.panel ?? makePanel()
         self.panel = panel
+        panel.shadowView.isHidden = flags.reduceTransparency
         #if DEBUG_RECORDER
         // A press during the previous paste's restore window re-shows the same panel; close the
         // superseded show so every recorded show keeps exactly one hide.
@@ -201,10 +238,12 @@ final class LiveOverlayController: LiveOverlayPresenting {
             primaryScreenHeight: primary.frame.height,
             fallback: main ?? primary
         )
-        panel.setFrameOrigin(LiveOverlayPanel.windowOrigin(forPaneOrigin: placement.origin))
+        let target = LiveOverlayPanel.windowOrigin(forPaneOrigin: placement.origin)
+        let rise = model.reduceMotion ? 0 : Self.riseDistance
+        panel.setFrameOrigin(CGPoint(x: target.x, y: target.y - rise))
         panel.alphaValue = 0
         panel.orderFrontRegardless()
-        fade(panel, to: targetAlpha)
+        animate(panel, alpha: targetAlpha, origin: target, duration: Self.entryDuration)
         #if DEBUG_RECORDER
         let frame = Self.rect(CGRect(origin: placement.origin, size: LiveOverlayPanel.paneSize))
         let visibleFrame = Self.rect(placement.visibleFrame)
@@ -232,7 +271,6 @@ final class LiveOverlayController: LiveOverlayPresenting {
     func hide(reason: LiveOverlayHideReason) {
         guard visible, let panel else { return }
         visible = false
-        model.text = ""
         #if DEBUG_RECORDER
         // A release before the anchor resolved never showed the panel, so it has no show to pair.
         if recordedShowSeq == currentSeq {
@@ -241,7 +279,8 @@ final class LiveOverlayController: LiveOverlayPresenting {
             Task { await OverlayProbe.shared.recordHide(seq: seq, reason: reason.rawValue, shownMs: shownMs) }
         }
         #endif
-        fade(panel, to: 0) { [weak self, weak panel] in
+        // The text stays until the next `show()` so the fade-out still has something to show.
+        animate(panel, alpha: 0, origin: nil, duration: Self.exitDuration) { [weak self, weak panel] in
             guard let self, let panel, !self.visible else { return }
             panel.orderOut(nil)
         }
@@ -257,11 +296,18 @@ final class LiveOverlayController: LiveOverlayPresenting {
         return panel
     }
 
-    /// Fades without ever being awaited: the paste does not wait for the panel.
-    private func fade(_ panel: NSPanel, to alpha: CGFloat, completion: (@MainActor () -> Void)? = nil) {
+    /// Never awaited: the paste does not wait for the panel.
+    private func animate(
+        _ panel: NSPanel, alpha: CGFloat, origin: CGPoint?, duration: TimeInterval,
+        completion: (@MainActor () -> Void)? = nil
+    ) {
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = Self.fadeDuration
+            context.duration = duration
+            context.timingFunction = Self.easing
             panel.animator().alphaValue = alpha
+            if let origin {
+                panel.animator().setFrame(CGRect(origin: origin, size: panel.frame.size), display: true)
+            }
         } completionHandler: {
             completion?()
         }

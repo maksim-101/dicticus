@@ -1,5 +1,6 @@
 import XCTest
 import AppKit
+import SwiftUI
 @testable import Dicticus
 
 @MainActor
@@ -7,7 +8,7 @@ final class LiveOverlayPanelTests: XCTestCase {
 
     // MARK: - Tracer: session -> overlay -> hide
 
-    func testSessionPublishesIntoOverlayThenHideClears() async throws {
+    func testSessionPublishesIntoOverlayThenHideKeepsTextThroughTheFade() async throws {
         let controller = LiveOverlayController(targetAlpha: 0)
         controller.show()
         XCTAssertTrue(controller.isVisible)
@@ -32,7 +33,7 @@ final class LiveOverlayPanelTests: XCTestCase {
         XCTAssertEqual(controller.modelForTesting.phase, .processing)
 
         controller.hide(reason: .pasting)
-        XCTAssertEqual(controller.modelForTesting.text, "")
+        XCTAssertEqual(controller.modelForTesting.text, "hello world", "the exit fade still shows the text (IN-04)")
         XCTAssertFalse(controller.isVisible)
     }
 
@@ -99,7 +100,7 @@ final class LiveOverlayPanelTests: XCTestCase {
         let glass = try glassView(of: panel)
 
         let hosting = try XCTUnwrap(glass.contentView)
-        XCTAssertTrue(hosting.className.contains("NSHostingView"), "SwiftUI content is the glass contentView, got \(hosting.className)")
+        XCTAssertTrue(hosting is NSHostingView<LiveOverlayView>, "SwiftUI content is the glass contentView, got \(hosting.className)")
         XCTAssertEqual(hosting.frame, glass.bounds)
 
         let left = glass.frame.minX, bottom = glass.frame.minY
@@ -145,7 +146,10 @@ final class LiveOverlayPanelTests: XCTestCase {
         var primary: OverlayPlacement.ScreenGeometry { screens[0] }
     }
 
-    private func makeStage(caretAppKit: (OverlayPlacement.ScreenGeometry) -> CGRect) throws -> (Stage, CaretAnchor.Candidates) {
+    private func makeStage(
+        flags: OverlayAccessibilityFlags = OverlayAccessibilityFlags(reduceMotion: true),
+        caretAppKit: (OverlayPlacement.ScreenGeometry) -> CGRect
+    ) throws -> (Stage, CaretAnchor.Candidates) {
         let screens = NSScreen.screens.map {
             OverlayPlacement.ScreenGeometry(frame: $0.frame, visibleFrame: $0.visibleFrame)
         }
@@ -153,7 +157,9 @@ final class LiveOverlayPanelTests: XCTestCase {
         let caret = caretAppKit(primary)
         let ax = CGRect(x: caret.minX, y: primary.frame.height - caret.maxY, width: caret.width, height: caret.height)
         let candidates = CaretAnchor.Candidates(caret: ax, element: nil, window: nil)
-        let controller = LiveOverlayController(targetAlpha: 0, candidateProvider: { _ in candidates })
+        let controller = LiveOverlayController(
+            targetAlpha: 0, accessibility: { flags },
+            candidateProvider: { _ in candidates })
         return (Stage(controller: controller, screens: screens), candidates)
     }
 
@@ -205,6 +211,85 @@ final class LiveOverlayPanelTests: XCTestCase {
         }
     }
 
+    // MARK: - Accessibility and motion (scene A, 2026-10-15)
+
+    private func midScreenCaret(_ s: OverlayPlacement.ScreenGeometry) -> CGRect {
+        CGRect(x: s.visibleFrame.midX, y: s.visibleFrame.midY, width: 2, height: 18)
+    }
+
+    func testReduceTransparencyHidesTheShadowAndSwitchesTheModelToTheOpaqueFill() async throws {
+        let (reduced, _) = try makeStage(flags: OverlayAccessibilityFlags(reduceTransparency: true, reduceMotion: true),
+                                         caretAppKit: midScreenCaret)
+        _ = try await presentedPaneRect(reduced.controller)
+        defer { reduced.controller.hide(reason: .demo) }
+        XCTAssertTrue(try XCTUnwrap(reduced.controller.panelForTesting).shadowView.isHidden)
+        XCTAssertTrue(reduced.controller.modelForTesting.reduceTransparency)
+
+        let (normal, _) = try makeStage(caretAppKit: midScreenCaret)
+        _ = try await presentedPaneRect(normal.controller)
+        defer { normal.controller.hide(reason: .demo) }
+        XCTAssertFalse(try XCTUnwrap(normal.controller.panelForTesting).shadowView.isHidden)
+        XCTAssertFalse(normal.controller.modelForTesting.reduceTransparency)
+    }
+
+    func testFlagsAreReadAtEveryShow() async throws {
+        var reduce = false
+        let (_, candidates) = try makeStage(caretAppKit: midScreenCaret)
+        let controller = LiveOverlayController(
+            targetAlpha: 0, accessibility: { OverlayAccessibilityFlags(reduceTransparency: reduce, reduceMotion: true) },
+            candidateProvider: { _ in candidates })
+        _ = try await presentedPaneRect(controller)
+        XCTAssertFalse(controller.modelForTesting.reduceTransparency)
+        controller.hide(reason: .demo)
+        reduce = true
+        controller.show()
+        XCTAssertTrue(controller.modelForTesting.reduceTransparency, "the setting changed between presses")
+        XCTAssertTrue(try XCTUnwrap(controller.panelForTesting).shadowView.isHidden)
+        controller.hide(reason: .demo)
+    }
+
+    func testReduceMotionPlacesThePaneAtItsFinalPositionImmediately() async throws {
+        let (stage, candidates) = try makeStage(flags: OverlayAccessibilityFlags(reduceMotion: true),
+                                                caretAppKit: midScreenCaret)
+        defer { stage.controller.hide(reason: .demo) }
+        let pane = try await presentedPaneRect(stage.controller)
+        let expected = OverlayPlacement.place(
+            candidates: candidates, panel: pane.size, screens: stage.screens,
+            primaryScreenHeight: stage.primary.frame.height, fallback: stage.primary)
+        XCTAssertEqual(pane.minY, expected.origin.y, accuracy: 0.5)
+        XCTAssertTrue(stage.controller.modelForTesting.reduceMotion)
+    }
+
+    func testEntryRisesFromBelowTheFinalPositionUnlessMotionIsReduced() async throws {
+        let (stage, candidates) = try makeStage(flags: OverlayAccessibilityFlags(reduceMotion: false),
+                                                caretAppKit: midScreenCaret)
+        defer { stage.controller.hide(reason: .demo) }
+        let pane = try await presentedPaneRect(stage.controller)
+        let expected = OverlayPlacement.place(
+            candidates: candidates, panel: pane.size, screens: stage.screens,
+            primaryScreenHeight: stage.primary.frame.height, fallback: stage.primary)
+        XCTAssertLessThan(pane.minY, expected.origin.y - 0.5, "the pane starts below its target and rises")
+        XCTAssertGreaterThanOrEqual(pane.minY, expected.origin.y - 8.5, "the rise is 8 pt")
+
+        let deadline = ContinuousClock.now + .seconds(2)
+        var settled = pane
+        while abs(settled.minY - expected.origin.y) > 0.5, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+            let panel = try XCTUnwrap(stage.controller.panelForTesting)
+            settled = panel.convertToScreen(panel.glassView.convert(panel.glassView.bounds, to: nil))
+        }
+        XCTAssertEqual(settled.minY, expected.origin.y, accuracy: 0.5, "the rise ends on the placement target")
+    }
+
+    func testThePanelIsSilentToVoiceOver() throws {
+        let panel = LiveOverlayPanel(model: LiveOverlayModel())
+        let hosting = try XCTUnwrap(panel.glassView.contentView)
+        for (name, view) in [("wrapper", try XCTUnwrap(panel.contentView)), ("shadow", panel.shadowView),
+                             ("glass", panel.glassView), ("hosting", hosting)] {
+            XCTAssertFalse(view.isAccessibilityElement(), "\(name) view is announced")
+        }
+    }
+
     // MARK: - Controller lifecycle
 
     func testHideTwiceIsSafeAndShowResetsTheModel() {
@@ -214,7 +299,7 @@ final class LiveOverlayPanelTests: XCTestCase {
         controller.setProcessing()
         controller.hide(reason: .pasting)
         controller.hide(reason: .taskEnd)
-        XCTAssertEqual(controller.modelForTesting.text, "")
+        XCTAssertEqual(controller.modelForTesting.text, "old text")
         XCTAssertFalse(controller.isVisible)
 
         controller.show()
@@ -226,9 +311,14 @@ final class LiveOverlayPanelTests: XCTestCase {
     func testUpdateWhileHiddenDoesNotLeakIntoNextShow() {
         let controller = LiveOverlayController(targetAlpha: 0)
         controller.show()
+        controller.update("kept")
         controller.hide(reason: .earlyReturn)
         controller.update("late preview result")
-        XCTAssertEqual(controller.modelForTesting.text, "")
+        XCTAssertEqual(controller.modelForTesting.text, "kept", "a late preview result never reaches the fading panel")
+
+        controller.show()
+        XCTAssertEqual(controller.modelForTesting.text, "", "the next show starts empty")
+        controller.hide(reason: .demo)
     }
 
     func testCurrentSeqCountsRealShowsOnly() {
