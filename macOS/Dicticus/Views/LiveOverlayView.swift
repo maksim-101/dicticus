@@ -8,6 +8,7 @@ import AppKit
 /// through the top, faded by a gradient mask. Appearance follows the system.
 struct LiveOverlayView: View {
     @ObservedObject var model: LiveOverlayModel
+    @Environment(\.colorSchemeContrast) private var contrast
 
     static let width: CGFloat = 420
     static let horizontalPadding: CGFloat = 18
@@ -51,7 +52,7 @@ struct LiveOverlayView: View {
             .font(.caption2)
             .foregroundStyle(.secondary)
 
-            Text(Self.displayTail(model.text))
+            transcript
                 .font(Font(Self.transcriptFont))
                 .foregroundStyle(Color(nsColor: .labelColor))
                 .fixedSize(horizontal: false, vertical: true)
@@ -70,11 +71,31 @@ struct LiveOverlayView: View {
                     )
                 )
                 .opacity(processing ? 0.6 : 1)
-                .animation(model.reduceMotion ? nil : .easeOut(duration: 0.3), value: model.text)
+                .animation(model.reduceMotion ? nil : .easeOut(duration: 0.3), value: model.combined)
         }
         .padding(.horizontal, Self.horizontalPadding)
         .padding(.vertical, Self.verticalPadding)
         .frame(width: Self.width, height: Self.height, alignment: .topLeading)
+    }
+
+    /// Settled words in the label colour, tentative words pale; Increase Contrast shows both at full strength.
+    private var transcript: Text {
+        let parts = Self.displayParts(settled: model.settled, tentative: model.tentative)
+        let labelStyle = Color(nsColor: .labelColor)
+        let tentativeStyle: AnyShapeStyle = contrast == .increased ? AnyShapeStyle(labelStyle) : AnyShapeStyle(.secondary)
+        let settled = Text(parts.settled).foregroundStyle(labelStyle)
+        let tentative = Text(parts.tentative).foregroundStyle(tentativeStyle)
+        if parts.tentative.isEmpty { return Text("\(settled)") }
+        if parts.settled.isEmpty { return Text("\(tentative)") }
+        return Text("\(settled) \(tentative)")
+    }
+
+    /// Both runs bounded to `maxCharacters` together. Only the settled run is cut, from the front,
+    /// so a tentative word is never cut away.
+    static func displayParts(settled: String, tentative: String, maxCharacters: Int = 400) -> (settled: String, tentative: String) {
+        let separator = settled.isEmpty || tentative.isEmpty ? 0 : 1
+        let budget = max(0, maxCharacters - tentative.count - separator)
+        return (displayTail(settled, maxCharacters: budget), tentative)
     }
 
     /// Bounded tail of the transcript: keeps layout cost constant for long dictations.

@@ -9,6 +9,8 @@ protocol LiveOverlayPresenting: AnyObject {
     var currentSeq: Int { get }
     func show()
     func update(_ text: String)
+    /// Every word still pale becomes settled: the speaker paused (voice gate) or released.
+    func settle()
     func setProcessing()
     func hide(reason: LiveOverlayHideReason)
 }
@@ -21,12 +23,20 @@ enum LiveOverlayHideReason: String {
 final class LiveOverlayModel: ObservableObject {
     enum Phase { case listening, processing }
 
-    @Published var text = ""
+    /// Words two consecutive previews agreed on, in the label colour.
+    @Published var settled = ""
+    /// The newest words, in the secondary colour until the next preview confirms them.
+    @Published var tentative = ""
     @Published var phase: Phase = .listening
     /// Read at every `show()`: an opaque fill replaces the glass sheen.
     @Published var reduceTransparency = false
     /// Read at every `show()`: no rise and no line slide, fade only.
     @Published var reduceMotion = false
+
+    /// The whole line, for animation keys and tests.
+    var combined: String {
+        tentative.isEmpty ? settled : settled.isEmpty ? tentative : settled + " " + tentative
+    }
 }
 
 /// The system accessibility settings the overlay honours, sampled once per `show()`.
@@ -149,6 +159,7 @@ final class LiveOverlayController: LiveOverlayPresenting {
     private let model = LiveOverlayModel()
     private var panel: LiveOverlayPanel?
     private var visible = false
+    private var stabilizer = PreviewStabilizer()
     private var shownAt = ContinuousClock.now
     #if DEBUG_RECORDER
     private var recordedShowSeq = 0
@@ -190,7 +201,8 @@ final class LiveOverlayController: LiveOverlayPresenting {
 
     func show() {
         let flags = accessibility()
-        model.text = ""
+        stabilizer = PreviewStabilizer()
+        publishStabilizer()
         model.phase = .listening
         model.reduceTransparency = flags.reduceTransparency
         model.reduceMotion = flags.reduceMotion
@@ -260,12 +272,27 @@ final class LiveOverlayController: LiveOverlayPresenting {
 
     func update(_ text: String) {
         guard visible else { return }
-        model.text = text
+        stabilizer.ingest(text)
+        publishStabilizer()
+    }
+
+    func settle() {
+        guard visible else { return }
+        stabilizer.settleAll()
+        publishStabilizer()
     }
 
     func setProcessing() {
         guard visible else { return }
+        stabilizer.settleAll()
+        publishStabilizer()
         model.phase = .processing
+    }
+
+    private func publishStabilizer() {
+        let settled = stabilizer.settledText, tentative = stabilizer.tentativeText
+        if model.settled != settled { model.settled = settled }
+        if model.tentative != tentative { model.tentative = tentative }
     }
 
     func hide(reason: LiveOverlayHideReason) {
@@ -354,6 +381,10 @@ extension LiveOverlayController {
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(2))
             controller.show()
+            // The shorter preview comes first, so the second one settles the shared part and leaves the rest pale.
+            let sampleWords = sample.split(separator: " ")
+            let early = sampleWords.prefix(sampleWords.count - 5).joined(separator: " ")
+            controller.update(early)
             controller.update(sample)
             try? await Task.sleep(for: .seconds(4))
             controller.setProcessing()

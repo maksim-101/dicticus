@@ -22,18 +22,21 @@ final class LiveOverlayPanelTests: XCTestCase {
         session.start()
 
         let deadline = ContinuousClock.now + .seconds(1)
-        while controller.modelForTesting.text != "hello world", ContinuousClock.now < deadline {
+        while controller.modelForTesting.combined != "hello world", ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(20))
         }
-        XCTAssertEqual(controller.modelForTesting.text, "hello world")
+        XCTAssertEqual(controller.modelForTesting.combined, "hello world")
+        XCTAssertEqual(controller.modelForTesting.tentative, "hello world", "a two-word preview is all pale")
 
         await session.cancelAndDrain()
 
         controller.setProcessing()
         XCTAssertEqual(controller.modelForTesting.phase, .processing)
+        XCTAssertEqual(controller.modelForTesting.settled, "hello world", "release settles every word")
+        XCTAssertEqual(controller.modelForTesting.tentative, "")
 
         controller.hide(reason: .pasting)
-        XCTAssertEqual(controller.modelForTesting.text, "hello world", "the exit fade still shows the text (IN-04)")
+        XCTAssertEqual(controller.modelForTesting.combined, "hello world", "the exit fade still shows the text (IN-04)")
         XCTAssertFalse(controller.isVisible)
     }
 
@@ -299,11 +302,11 @@ final class LiveOverlayPanelTests: XCTestCase {
         controller.setProcessing()
         controller.hide(reason: .pasting)
         controller.hide(reason: .taskEnd)
-        XCTAssertEqual(controller.modelForTesting.text, "old text")
+        XCTAssertEqual(controller.modelForTesting.combined, "old text")
         XCTAssertFalse(controller.isVisible)
 
         controller.show()
-        XCTAssertEqual(controller.modelForTesting.text, "")
+        XCTAssertEqual(controller.modelForTesting.combined, "")
         XCTAssertEqual(controller.modelForTesting.phase, .listening)
         controller.hide(reason: .demo)
     }
@@ -314,10 +317,10 @@ final class LiveOverlayPanelTests: XCTestCase {
         controller.update("kept")
         controller.hide(reason: .earlyReturn)
         controller.update("late preview result")
-        XCTAssertEqual(controller.modelForTesting.text, "kept", "a late preview result never reaches the fading panel")
+        XCTAssertEqual(controller.modelForTesting.combined, "kept", "a late preview result never reaches the fading panel")
 
         controller.show()
-        XCTAssertEqual(controller.modelForTesting.text, "", "the next show starts empty")
+        XCTAssertEqual(controller.modelForTesting.combined, "", "the next show starts empty")
         controller.hide(reason: .demo)
     }
 
@@ -332,7 +335,81 @@ final class LiveOverlayPanelTests: XCTestCase {
         XCTAssertEqual(controller.currentSeq, 2)
     }
 
+    // MARK: - Settled / tentative (plan 51-10)
+
+    func testUpdatesSplitTheLineIntoSettledAndTentativeWords() {
+        let controller = LiveOverlayController(targetAlpha: 0)
+        controller.show()
+        controller.update("one two three four")
+        XCTAssertEqual(controller.modelForTesting.settled, "")
+        XCTAssertEqual(controller.modelForTesting.tentative, "one two three four")
+        controller.update("one two three four five")
+        XCTAssertEqual(controller.modelForTesting.settled, "one two three")
+        XCTAssertEqual(controller.modelForTesting.tentative, "four five")
+        controller.hide(reason: .demo)
+    }
+
+    func testSettleAndProcessingSettleEveryTentativeWord() {
+        let controller = LiveOverlayController(targetAlpha: 0)
+        controller.show()
+        controller.update("one two three four")
+        controller.update("one two three four five")
+        controller.settle()
+        XCTAssertEqual(controller.modelForTesting.settled, "one two three four five")
+        XCTAssertEqual(controller.modelForTesting.tentative, "")
+        XCTAssertEqual(controller.modelForTesting.phase, .listening, "a pause settles words but is not processing")
+
+        controller.update("one two three four five six seven")
+        XCTAssertEqual(controller.modelForTesting.combined, "one two three four five six seven", "words after the pause continue the same line")
+        controller.setProcessing()
+        XCTAssertEqual(controller.modelForTesting.tentative, "")
+        XCTAssertEqual(controller.modelForTesting.settled, "one two three four five six seven")
+        controller.hide(reason: .demo)
+    }
+
+    func testANewShowStartsAFreshStabilizer() {
+        let controller = LiveOverlayController(targetAlpha: 0)
+        controller.show()
+        controller.update("old words that were said")
+        controller.update("old words that were said before")
+        controller.hide(reason: .pasting)
+
+        controller.show()
+        XCTAssertEqual(controller.modelForTesting.settled, "")
+        XCTAssertEqual(controller.modelForTesting.tentative, "")
+        controller.update("old words that were said before")
+        XCTAssertEqual(controller.modelForTesting.settled, "", "nothing carries over: the first preview is all pale")
+        XCTAssertEqual(controller.modelForTesting.tentative, "old words that were said before")
+        controller.hide(reason: .demo)
+    }
+
+    func testSettleWhileHiddenIsIgnored() {
+        let controller = LiveOverlayController(targetAlpha: 0)
+        controller.show()
+        controller.update("one two three")
+        controller.hide(reason: .pasting)
+        controller.settle()
+        XCTAssertEqual(controller.modelForTesting.tentative, "one two three")
+    }
+
     // MARK: - displayTail
+
+    func testDisplayPartsCutOnlyTheSettledRunAndKeepTheTotalBounded() {
+        let settled = (0..<200).map { "s\($0)x" }.joined(separator: " ")
+        let tentative = "pale words"
+        let parts = LiveOverlayView.displayParts(settled: settled, tentative: tentative)
+        XCTAssertEqual(parts.tentative, tentative)
+        XCTAssertLessThanOrEqual(parts.settled.count + 1 + parts.tentative.count, 400)
+        XCTAssertEqual(parts.settled.last, settled.last)
+        XCTAssertTrue(settled.hasSuffix(parts.settled))
+    }
+
+    func testDisplayPartsNeverCutAnOverlongTentativeRun() {
+        let tentative = (0..<150).map { "t\($0)x" }.joined(separator: " ")
+        let parts = LiveOverlayView.displayParts(settled: "settled words", tentative: tentative)
+        XCTAssertEqual(parts.settled, "")
+        XCTAssertEqual(parts.tentative, tentative)
+    }
 
     func testDisplayTailBoundsLongTextOnAWordStart() {
         let words = (0..<200).map { "w\($0)x" }
@@ -358,11 +435,13 @@ final class SpyOverlay: LiveOverlayPresenting {
     private(set) var showCount = 0
     private(set) var hideReasons: [LiveOverlayHideReason] = []
     private(set) var processingCount = 0
+    private(set) var settleCount = 0
     private(set) var updates: [String] = []
     var currentSeq: Int { showCount }
 
     func show() { showCount += 1 }
     func update(_ text: String) { updates.append(text) }
+    func settle() { settleCount += 1 }
     func setProcessing() { processingCount += 1 }
     func hide(reason: LiveOverlayHideReason) { hideReasons.append(reason) }
 }
