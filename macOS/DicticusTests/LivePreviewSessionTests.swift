@@ -111,4 +111,104 @@ final class LivePreviewSessionTests: XCTestCase {
 
         XCTAssertEqual(stats.ticks, 2)
     }
+
+    // MARK: - decode budget (review WR-02)
+
+    private func budgetSession(
+        decodeMs: [Int],
+        ranModel: @escaping @MainActor () -> Bool = { true },
+        publish: @escaping @MainActor (String) -> Void = { _ in }
+    ) -> LivePreviewSession {
+        var call = 0
+        return LivePreviewSession(
+            cadence: .milliseconds(10),
+            isActive: { true },
+            decode: {
+                let ms = decodeMs[min(call, decodeMs.count - 1)]
+                call += 1
+                try? await Task.sleep(for: .milliseconds(ms))
+                return "x"
+            },
+            publish: publish,
+            decodeBudget: .milliseconds(200),
+            ranModel: ranModel
+        )
+    }
+
+    func testASlowDecodeEndsPreviewsForTheHoldAndStillPublishesItsText() async {
+        let session = budgetSession(decodeMs: [50, 300])
+        session.start()
+        try? await Task.sleep(for: .seconds(1))
+        let stats = await session.cancelAndDrain()
+
+        XCTAssertEqual(stats.ticks, 2)
+        XCTAssertEqual(stats.published, 2)
+        XCTAssertTrue(stats.overBudget)
+        XCTAssertFalse(session.isRunning)
+    }
+
+    func testDecodesWithinTheBudgetKeepRunning() async {
+        let session = budgetSession(decodeMs: [50])
+        session.start()
+        try? await Task.sleep(for: .seconds(1))
+        let stats = await session.cancelAndDrain()
+
+        XCTAssertGreaterThanOrEqual(stats.ticks, 3)
+        XCTAssertFalse(stats.overBudget)
+    }
+
+    func testTheFirstDecodeOfAHoldIsExemptFromTheBudget() async {
+        let session = budgetSession(decodeMs: [300, 50])
+        session.start()
+        try? await Task.sleep(for: .seconds(1))
+        let stats = await session.cancelAndDrain()
+
+        XCTAssertGreaterThanOrEqual(stats.ticks, 3)
+        XCTAssertFalse(stats.overBudget)
+    }
+
+    func testTheExemptionBelongsToTheFirstTickThatRanTheModelNotTheFirstTick() async {
+        // Ticks 1-2 return early like a hold shorter than 1.2 s; the first model run is
+        // tick 3 and is slow. Only the second slow model run ends the previews.
+        var tick = 0
+        let session = LivePreviewSession(
+            cadence: .milliseconds(10),
+            isActive: { true },
+            decode: {
+                tick += 1
+                if tick > 2 { try? await Task.sleep(for: .milliseconds(300)) }
+                return nil
+            },
+            publish: { _ in },
+            decodeBudget: .milliseconds(200),
+            ranModel: { tick > 2 }
+        )
+        session.start()
+        try? await Task.sleep(for: .seconds(1.5))
+        let stats = await session.cancelAndDrain()
+
+        XCTAssertEqual(stats.ticks, 4)
+        XCTAssertTrue(stats.overBudget)
+        XCTAssertEqual(stats.decodeDurations.count, 2, "skipped ticks were timed as decodes")
+    }
+
+    func testStatsCarrySkippedTicksFromTheProvider() async {
+        let session = LivePreviewSession(
+            cadence: .milliseconds(10),
+            isActive: { true },
+            decode: { nil },
+            publish: { _ in },
+            skippedNoVoice: { 7 }
+        )
+        session.start()
+        try? await Task.sleep(for: .milliseconds(50))
+        let stats = await session.cancelAndDrain()
+
+        XCTAssertEqual(stats.skippedNoVoice, 7)
+        XCTAssertFalse(stats.overBudget)
+    }
+
+    func testTheProductionBudgetIsTwoSeconds() {
+        XCTAssertEqual(LivePreviewSession.productionDecodeBudget, .seconds(2))
+    }
 }

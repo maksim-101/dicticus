@@ -58,6 +58,11 @@ final class LivePreviewDecoder {
     /// Ticks the voice gate skipped because no new voiced audio had arrived.
     private(set) var skippedNoVoice = 0
 
+    /// True when the last `decodeTail()` call reached the model; false for ticks that
+    /// returned early (too little audio, gate skip). The session's budget counts only
+    /// ticks that ran the model.
+    private(set) var lastTickRanModel = false
+
     init(
         whisperKit: WhisperKit,
         buffer: AudioSampleBuffer,
@@ -88,6 +93,7 @@ final class LivePreviewDecoder {
     func decodeTail() async -> String? {
         let clock = ContinuousClock()
         let t0 = clock.now
+        lastTickRanModel = false
 
         let rate = inputSampleRate
         // Before the gate: a short opening word must not be consumed without a decode.
@@ -100,7 +106,7 @@ final class LivePreviewDecoder {
             if signalPause { onSilence?() }
             return nil
         case .decode:
-            break
+            lastTickRanModel = true
         }
 
         let tail = buffer.snapshotTail(maxSamples: Int(Self.tailSeconds * rate))

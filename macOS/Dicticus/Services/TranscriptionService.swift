@@ -294,7 +294,9 @@ class TranscriptionService: ObservableObject {
             cadence: cadence,
             isActive: { [weak self] in self?.state == .recording },
             decode: { await decoder.decodeTail() },
-            publish: publish
+            publish: publish,
+            ranModel: { decoder.lastTickRanModel },
+            skippedNoVoice: { decoder.skippedNoVoice }
         )
         livePreview = session
         session.start()

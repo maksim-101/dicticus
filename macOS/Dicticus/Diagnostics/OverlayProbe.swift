@@ -95,7 +95,9 @@ public actor OverlayProbe {
         cancelledInFlight: Bool,
         drainMs: Double,
         decodeMsP50: Double,
-        decodeMsMax: Double
+        decodeMsMax: Double,
+        skippedNoVoice: Int = 0,
+        overBudget: Bool = false
     ) {
         write([
             "event": "preview_session",
@@ -105,7 +107,9 @@ public actor OverlayProbe {
             "cancelled_in_flight": cancelledInFlight,
             "drain_ms": drainMs,
             "decode_ms_p50": decodeMsP50,
-            "decode_ms_max": decodeMsMax
+            "decode_ms_max": decodeMsMax,
+            "skipped_no_voice": skippedNoVoice,
+            "over_budget": overBudget
         ])
     }
 
@@ -118,7 +122,9 @@ public actor OverlayProbe {
             cancelledInFlight: stats.cancelledInFlight,
             drainMs: Self.milliseconds(stats.drainDuration),
             decodeMsP50: ms.isEmpty ? 0 : ms[ms.count / 2],
-            decodeMsMax: ms.last ?? 0
+            decodeMsMax: ms.last ?? 0,
+            skippedNoVoice: stats.skippedNoVoice,
+            overBudget: stats.overBudget
         )
     }
 
