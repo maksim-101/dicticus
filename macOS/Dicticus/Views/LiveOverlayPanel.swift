@@ -120,18 +120,20 @@ final class LiveOverlayController: LiveOverlayPresenting {
 
         // AX is read off the main actor; the panel appears once the anchor resolves. A hide
         // (or a newer show) before that means this press never shows a panel.
-        let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let frontmost = NSWorkspace.shared.frontmostApplication
+        let pid = frontmost?.processIdentifier
+        let bundleID = frontmost?.bundleIdentifier
         let ownPid = ProcessInfo.processInfo.processIdentifier
         Task { [weak self] in
             var candidates = CaretAnchor.Candidates()
             if let pid, pid != ownPid {
                 candidates = await Task.detached { CaretAnchor.resolve(pid: pid) }.value
             }
-            self?.present(seq: seq, candidates: candidates)
+            self?.present(seq: seq, candidates: candidates, bundleID: bundleID)
         }
     }
 
-    private func present(seq: Int, candidates: CaretAnchor.Candidates) {
+    private func present(seq: Int, candidates: CaretAnchor.Candidates, bundleID: String?) {
         guard visible, currentSeq == seq, let panel else { return }
         let screens = NSScreen.screens.map {
             OverlayPlacement.ScreenGeometry(frame: $0.frame, visibleFrame: $0.visibleFrame)
@@ -155,7 +157,11 @@ final class LiveOverlayController: LiveOverlayPresenting {
         let source = placement.source.rawValue
         let flipped = placement.flipped
         recordedShowSeq = seq
-        Task { await OverlayProbe.shared.recordShow(seq: seq, anchorSource: source, flipped: flipped, frame: frame, visibleFrame: visibleFrame) }
+        Task {
+            await OverlayProbe.shared.recordShow(
+                seq: seq, anchorSource: source, flipped: flipped, frame: frame, visibleFrame: visibleFrame,
+                bundleId: bundleID, candidates: candidates)
+        }
         #endif
     }
 

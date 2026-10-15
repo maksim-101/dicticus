@@ -15,7 +15,45 @@ enum CaretAnchor {
         var caret: CGRect?
         var element: CGRect?
         var window: CGRect?
+        #if DEBUG_RECORDER
+        var trace: Trace?
+        #endif
     }
+
+    /// Where `Candidates.caret` came from.
+    enum CaretSource: String, Sendable {
+        case range
+        case prevChar = "prev_char"
+        case none
+    }
+
+    /// The caret rect chosen from the range bounds and, for an empty range after text, the
+    /// previous character's trailing edge. `previousBounds` is only evaluated when needed.
+    nonisolated static func chooseCaret(
+        range: CFRange, rangeBounds: CGRect?, previousBounds: () -> CGRect?
+    ) -> (rect: CGRect?, source: CaretSource) {
+        if let rangeBounds, usableCaret(rangeBounds) { return (rangeBounds, .range) }
+
+        // End-of-text carets often report no bounds: use the previous character's trailing edge.
+        if range.length == 0, range.location > 0, let prev = previousBounds(), usableCaret(prev) {
+            return (CGRect(x: prev.maxX, y: prev.minY, width: 0, height: prev.height), .prevChar)
+        }
+        return (nil, .none)
+    }
+
+    #if DEBUG_RECORDER
+    /// Raw Accessibility evidence behind one caret (Phase 51 plan 08). Rects, indices and a
+    /// role identifier only: no attribute that returns document text is ever read.
+    struct Trace: Sendable, Equatable {
+        var caretSource: String?
+        var rangeRect: CGRect?
+        var previousCharacterRect: CGRect?
+        var selectionLocation: Int?
+        var selectionLength: Int?
+        var lineStart: Int?
+        var elementRole: String?
+    }
+    #endif
 
     nonisolated static func focusedElement(
         pid: pid_t, timeout: Float = messagingTimeoutSeconds
@@ -39,7 +77,16 @@ enum CaretAnchor {
         let (element, app) = focusedElement(pid: pid)
         var result = Candidates()
         if let element {
+            #if DEBUG_RECORDER
+            var trace = Trace()
+            result.caret = caretRect(element, trace: &trace)
+            if let role = attribute(element, kAXRoleAttribute), CFGetTypeID(role) == CFStringGetTypeID() {
+                trace.elementRole = role as? String
+            }
+            result.trace = trace
+            #else
             result.caret = caretRect(element)
+            #endif
             result.element = frame(of: element)
         }
         if let w = attribute(app, kAXFocusedWindowAttribute), CFGetTypeID(w) == AXUIElementGetTypeID() {
@@ -55,23 +102,58 @@ enum CaretAnchor {
 
     // MARK: - Caret
 
-    private nonisolated static func caretRect(_ element: AXUIElement) -> CGRect? {
+    private nonisolated static func selectedRange(of element: AXUIElement) -> CFRange? {
         guard let v = attribute(element, kAXSelectedTextRangeAttribute),
               CFGetTypeID(v) == AXValueGetTypeID(),
               AXValueGetType(v as! AXValue) == .cfRange else { return nil }
         var range = CFRange()
-        guard AXValueGetValue(v as! AXValue, .cfRange, &range) else { return nil }
-
-        if let rect = bounds(of: range, in: element), usableCaret(rect) { return rect }
-
-        // End-of-text carets often report no bounds: use the previous character's trailing edge.
-        if range.length == 0, range.location > 0,
-           let prev = bounds(of: CFRange(location: range.location - 1, length: 1), in: element),
-           usableCaret(prev) {
-            return CGRect(x: prev.maxX, y: prev.minY, width: 0, height: prev.height)
-        }
-        return nil
+        return AXValueGetValue(v as! AXValue, .cfRange, &range) ? range : nil
     }
+
+    #if !DEBUG_RECORDER
+    private nonisolated static func caretRect(_ element: AXUIElement) -> CGRect? {
+        guard let range = selectedRange(of: element) else { return nil }
+        return chooseCaret(
+            range: range,
+            rangeBounds: bounds(of: range, in: element),
+            previousBounds: { bounds(of: CFRange(location: range.location - 1, length: 1), in: element) }
+        ).rect
+    }
+    #else
+    /// Same decision as the release path, but every read happens eagerly and is kept in `trace`.
+    private nonisolated static func caretRect(_ element: AXUIElement, trace: inout Trace) -> CGRect? {
+        guard let range = selectedRange(of: element) else {
+            trace.caretSource = CaretSource.none.rawValue
+            return nil
+        }
+        trace.selectionLocation = range.location
+        trace.selectionLength = range.length
+        let rangeBounds = bounds(of: range, in: element)
+        let previous = range.location > 0
+            ? bounds(of: CFRange(location: range.location - 1, length: 1), in: element) : nil
+        trace.rangeRect = rangeBounds
+        trace.previousCharacterRect = previous
+        trace.lineStart = lineStart(containing: range.location, in: element)
+        let chosen = chooseCaret(range: range, rangeBounds: rangeBounds, previousBounds: { previous })
+        trace.caretSource = chosen.source.rawValue
+        return chosen.rect
+    }
+
+    private nonisolated static func lineStart(containing index: Int, in element: AXUIElement) -> Int? {
+        var line: CFTypeRef?
+        guard AXUIElementCopyParameterizedAttributeValue(
+            element, kAXLineForIndexParameterizedAttribute as CFString, NSNumber(value: index), &line
+        ) == .success, let line, CFGetTypeID(line) == CFNumberGetTypeID(), let lineNo = (line as? NSNumber)?.intValue
+        else { return nil }
+        var out: CFTypeRef?
+        guard AXUIElementCopyParameterizedAttributeValue(
+            element, kAXRangeForLineParameterizedAttribute as CFString, NSNumber(value: lineNo), &out
+        ) == .success, let out, CFGetTypeID(out) == AXValueGetTypeID(),
+              AXValueGetType(out as! AXValue) == .cfRange else { return nil }
+        var range = CFRange()
+        return AXValueGetValue(out as! AXValue, .cfRange, &range) ? range.location : nil
+    }
+    #endif
 
     private nonisolated static func bounds(of range: CFRange, in element: AXUIElement) -> CGRect? {
         var r = range
@@ -85,7 +167,7 @@ enum CaretAnchor {
         return AXValueGetValue(out as! AXValue, .cgRect, &rect) ? rect : nil
     }
 
-    private nonisolated static func usableCaret(_ r: CGRect) -> Bool {
+    nonisolated static func usableCaret(_ r: CGRect) -> Bool {
         r.origin.x.isFinite && r.origin.y.isFinite && r.width.isFinite && r.height.isFinite && r.height > 0
     }
 

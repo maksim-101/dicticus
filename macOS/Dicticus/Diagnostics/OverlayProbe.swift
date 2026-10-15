@@ -4,7 +4,8 @@
 // carrying the same seq, and each dictation with a preview writes one preview_session row.
 //
 // PROBE ONLY — no retry, no fallback, no user-facing alert. Records sequence numbers,
-// reasons, frames, counts and timings. NEVER the preview text (privacy).
+// reasons, counts, timings, AX geometry and identifiers (bundle id, element role).
+// NEVER the preview text or any document text (privacy).
 //
 // COMPILED OUT unless built with `-D DEBUG_RECORDER` (same gate as LlmLifecycleProbe).
 //
@@ -39,15 +40,40 @@ public actor OverlayProbe {
             .appendingPathComponent("DebugRecordings", isDirectory: true)
     }
 
-    public func recordShow(seq: Int, anchorSource: String, flipped: Bool, frame: [Double], visibleFrame: [Double]) {
+    func recordShow(
+        seq: Int,
+        anchorSource: String,
+        flipped: Bool,
+        frame: [Double],
+        visibleFrame: [Double],
+        bundleId: String?,
+        candidates: CaretAnchor.Candidates
+    ) {
+        let trace = candidates.trace
         write([
             "event": "overlay_show",
             "seq": seq,
             "anchor_source": anchorSource,
             "flipped": flipped,
             "frame": frame,
-            "visible_frame": visibleFrame
+            "visible_frame": visibleFrame,
+            "bundle_id": bundleId ?? NSNull(),
+            "caret_source": trace?.caretSource ?? NSNull(),
+            "caret_ax": Self.array(candidates.caret),
+            "range_ax": Self.array(trace?.rangeRect),
+            "prev_char_ax": Self.array(trace?.previousCharacterRect),
+            "sel_loc": trace?.selectionLocation ?? NSNull(),
+            "sel_len": trace?.selectionLength ?? NSNull(),
+            "line_start": trace?.lineStart ?? NSNull(),
+            "element_role": trace?.elementRole ?? NSNull(),
+            "element_ax": Self.array(candidates.element),
+            "window_ax": Self.array(candidates.window)
         ])
+    }
+
+    private nonisolated static func array(_ r: CGRect?) -> Any {
+        guard let r else { return NSNull() }
+        return [r.origin.x, r.origin.y, r.size.width, r.size.height].map { Double($0) }
     }
 
     public func recordHide(seq: Int, reason: String, shownMs: Double) {
