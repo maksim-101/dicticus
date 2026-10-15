@@ -29,13 +29,61 @@ final class LiveOverlayModel: ObservableObject {
 /// ever ordered front with `orderFrontRegardless()`, so the paste target keeps focus.
 final class LiveOverlayPanel: NSPanel {
 
-    static let size = CGSize(width: LiveOverlayView.width, height: LiveOverlayView.height)
+    /// The visible glass pane. `OverlayPlacement` and the probe work on this rect.
+    static let paneSize = CGSize(width: LiveOverlayView.width, height: LiveOverlayView.height)
+    /// Transparent room around the pane so its radius-14, offset-7 shadow is never clipped.
+    static let shadowMargin: CGFloat = 32
+    static let size = CGSize(width: paneSize.width + shadowMargin * 2, height: paneSize.height + shadowMargin * 2)
+
+    static let shadowRadius: CGFloat = 14
+    static let shadowOffset = CGSize(width: 0, height: -7)
+    static let shadowOpacity: Float = 0.28
+
+    /// Black 8% in dark, 3.2% in light.
+    static let glassTint = NSColor(name: nil) { appearance in
+        let dark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return NSColor.black.withAlphaComponent(dark ? 0.08 : 0.08 * 0.4)
+    }
+
+    static func windowOrigin(forPaneOrigin origin: CGPoint) -> CGPoint {
+        CGPoint(x: origin.x - shadowMargin, y: origin.y - shadowMargin)
+    }
+
+    let shadowView: NSView
+    let glassView: NSGlassEffectView
 
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 
     @MainActor
     init(model: LiveOverlayModel, capturable: Bool = false) {
+        let paneRect = CGRect(origin: CGPoint(x: Self.shadowMargin, y: Self.shadowMargin), size: Self.paneSize)
+
+        let shadow = NSView(frame: paneRect)
+        shadow.wantsLayer = true
+        shadow.layer?.shadowPath = CGPath(
+            roundedRect: shadow.bounds, cornerWidth: LiveOverlayView.cornerRadius,
+            cornerHeight: LiveOverlayView.cornerRadius, transform: nil)
+        shadow.layer?.shadowColor = NSColor.black.cgColor
+        shadow.layer?.shadowOpacity = Self.shadowOpacity
+        shadow.layer?.shadowRadius = Self.shadowRadius
+        shadow.layer?.shadowOffset = Self.shadowOffset
+
+        let host = NSHostingView(rootView: LiveOverlayView(model: model))
+        host.sizingOptions = []
+
+        let glass = NSGlassEffectView(frame: paneRect)
+        glass.cornerRadius = LiveOverlayView.cornerRadius
+        glass.tintColor = Self.glassTint
+        host.frame = glass.bounds
+        glass.contentView = host
+
+        let root = NSView(frame: CGRect(origin: .zero, size: Self.size))
+        root.addSubview(shadow)
+        root.addSubview(glass)
+
+        shadowView = shadow
+        glassView = glass
         super.init(
             contentRect: CGRect(origin: .zero, size: Self.size),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -61,10 +109,7 @@ final class LiveOverlayPanel: NSPanel {
         #endif
         sharingType = allowCapture ? .readOnly : .none
 
-        let host = NSHostingView(rootView: LiveOverlayView(model: model))
-        host.sizingOptions = []
-        host.frame = CGRect(origin: .zero, size: Self.size)
-        contentView = host
+        contentView = root
     }
 }
 
@@ -89,8 +134,20 @@ final class LiveOverlayController: LiveOverlayPresenting {
 
     private(set) var currentSeq = 0
 
-    init(targetAlpha: CGFloat = 1) {
+    /// Resolves the caret anchor for the frontmost app's pid. Injectable so a test gets a
+    /// deterministic placement whichever app is frontmost.
+    typealias CandidateProvider = @Sendable (pid_t?) async -> CaretAnchor.Candidates
+
+    static let resolveCandidates: CandidateProvider = { pid in
+        guard let pid, pid != ProcessInfo.processInfo.processIdentifier else { return CaretAnchor.Candidates() }
+        return await Task.detached { CaretAnchor.resolve(pid: pid) }.value
+    }
+
+    private let candidateProvider: CandidateProvider
+
+    init(targetAlpha: CGFloat = 1, candidateProvider: @escaping CandidateProvider = LiveOverlayController.resolveCandidates) {
         self.targetAlpha = targetAlpha
+        self.candidateProvider = candidateProvider
     }
 
     var isVisible: Bool { visible }
@@ -123,12 +180,9 @@ final class LiveOverlayController: LiveOverlayPresenting {
         let frontmost = NSWorkspace.shared.frontmostApplication
         let pid = frontmost?.processIdentifier
         let bundleID = frontmost?.bundleIdentifier
-        let ownPid = ProcessInfo.processInfo.processIdentifier
+        let provider = candidateProvider
         Task { [weak self] in
-            var candidates = CaretAnchor.Candidates()
-            if let pid, pid != ownPid {
-                candidates = await Task.detached { CaretAnchor.resolve(pid: pid) }.value
-            }
+            let candidates = await provider(pid)
             self?.present(seq: seq, candidates: candidates, bundleID: bundleID)
         }
     }
@@ -142,17 +196,17 @@ final class LiveOverlayController: LiveOverlayPresenting {
         let main = NSScreen.main.map { OverlayPlacement.ScreenGeometry(frame: $0.frame, visibleFrame: $0.visibleFrame) }
         let placement = OverlayPlacement.place(
             candidates: candidates,
-            panel: panel.frame.size,
+            panel: LiveOverlayPanel.paneSize,
             screens: screens,
             primaryScreenHeight: primary.frame.height,
             fallback: main ?? primary
         )
-        panel.setFrameOrigin(placement.origin)
+        panel.setFrameOrigin(LiveOverlayPanel.windowOrigin(forPaneOrigin: placement.origin))
         panel.alphaValue = 0
         panel.orderFrontRegardless()
         fade(panel, to: targetAlpha)
         #if DEBUG_RECORDER
-        let frame = Self.rect(panel.frame)
+        let frame = Self.rect(CGRect(origin: placement.origin, size: LiveOverlayPanel.paneSize))
         let visibleFrame = Self.rect(placement.visibleFrame)
         let source = placement.source.rawValue
         let flipped = placement.flipped

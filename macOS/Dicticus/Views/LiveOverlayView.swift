@@ -1,7 +1,8 @@
 import SwiftUI
 import AppKit
 
-/// Glass pane of the live transcript overlay (Phase 51, D-07, D-13).
+/// Content of the live transcript overlay pane (Phase 51, D-07, D-13). The glass behind it is an
+/// AppKit `NSGlassEffectView` owned by `LiveOverlayPanel`.
 ///
 /// The newest text sits at the bottom of a fixed-height clipped area; older lines leave
 /// through the top, faded by a gradient mask. Appearance follows the system.
@@ -12,7 +13,7 @@ struct LiveOverlayView: View {
     static let padding: CGFloat = 16
     static let spacing: CGFloat = 4
     static let visibleLines = 3
-    static let cornerRadius: CGFloat = 20
+    static let cornerRadius: CGFloat = 22
     static let transcriptFont = NSFont.systemFont(ofSize: 14)
 
     static let transcriptLineHeight: CGFloat = lineHeight(of: transcriptFont)
@@ -52,18 +53,7 @@ struct LiveOverlayView: View {
         }
         .padding(Self.padding)
         .frame(width: Self.width, height: Self.height, alignment: .topLeading)
-        .background(Self.darkModeFill, in: RoundedRectangle(cornerRadius: Self.cornerRadius))
-        .glassEffect(.clear.tint(Self.glassTint), in: RoundedRectangle(cornerRadius: Self.cornerRadius))
     }
-
-    // Clear glass keeps the pane light and borderless; a tint on clear glass barely darkens it,
-    // so dark mode gets a separate fill (tone matched to the 2026-10-15 design review).
-    private static let glassTint = Color(nsColor: NSColor(name: nil) { appearance in
-        NSColor.black.withAlphaComponent(appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? 0.35 : 0.06)
-    })
-    private static let darkModeFill = Color(nsColor: NSColor(name: nil) { appearance in
-        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor.black.withAlphaComponent(0.30) : .clear
-    })
 
     /// Bounded tail of the transcript: keeps layout cost constant for long dictations.
     /// The cut moves forward to the next word start so no partial word leads.
