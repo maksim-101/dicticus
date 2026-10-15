@@ -201,8 +201,6 @@ final class LiveOverlayController: LiveOverlayPresenting {
 
     func show() {
         let flags = accessibility()
-        stabilizer = PreviewStabilizer()
-        publishStabilizer()
         model.phase = .listening
         model.reduceTransparency = flags.reduceTransparency
         model.reduceMotion = flags.reduceMotion
@@ -216,9 +214,16 @@ final class LiveOverlayController: LiveOverlayPresenting {
         if visible, recordedShowSeq == currentSeq {
             let shownMs = OverlayProbe.milliseconds(ContinuousClock.now - shownAt)
             let superseded = currentSeq
-            Task { await OverlayProbe.shared.recordHide(seq: superseded, reason: "superseded", shownMs: shownMs) }
+            let conflicts = stabilizer.conflicts, gaps = stabilizer.gaps
+            Task {
+                await OverlayProbe.shared.recordHide(
+                    seq: superseded, reason: "superseded", shownMs: shownMs,
+                    stabilizerConflicts: conflicts, stabilizerGaps: gaps)
+            }
         }
         #endif
+        stabilizer = PreviewStabilizer()
+        publishStabilizer()
         visible = true
         currentSeq += 1
         shownAt = ContinuousClock.now
@@ -303,7 +308,12 @@ final class LiveOverlayController: LiveOverlayPresenting {
         if recordedShowSeq == currentSeq {
             let seq = currentSeq
             let shownMs = OverlayProbe.milliseconds(ContinuousClock.now - shownAt)
-            Task { await OverlayProbe.shared.recordHide(seq: seq, reason: reason.rawValue, shownMs: shownMs) }
+            let conflicts = stabilizer.conflicts, gaps = stabilizer.gaps
+            Task {
+                await OverlayProbe.shared.recordHide(
+                    seq: seq, reason: reason.rawValue, shownMs: shownMs,
+                    stabilizerConflicts: conflicts, stabilizerGaps: gaps)
+            }
         }
         #endif
         // The text stays until the next `show()` so the fade-out still has something to show.

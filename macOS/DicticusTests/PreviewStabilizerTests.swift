@@ -131,6 +131,61 @@ final class PreviewStabilizerTests: XCTestCase {
         XCTAssertEqual(s.gaps, 0)
     }
 
+    func testRevisedSettledWordKeepsSettledAndRepeatsNothing() {
+        var s = PreviewStabilizer()
+        s.ingest("we go to the meet at noon")
+        s.ingest("we go to the meet at noon")
+        XCTAssertEqual(s.settledText, "we go to the meet")
+        XCTAssertEqual(s.tentativeText, "at noon")
+
+        s.ingest("we go to the meeting at noon")
+        XCTAssertEqual(s.settledText, "we go to the meet", "settled text never shrinks or changes")
+        XCTAssertEqual(s.tentativeText, "at noon")
+        XCTAssertEqual(s.conflicts, 1)
+        XCTAssertEqual(s.gaps, 0)
+        assertNoRepeatedWord(s)
+    }
+
+    func testRecoveryAfterARevisionSettlesNewWordsAndTheConflictCountStopsRising() {
+        var s = PreviewStabilizer()
+        s.ingest("we go to the meet at noon")
+        s.ingest("we go to the meet at noon")
+        let revised = "we go to the meeting at noon today please send it now"
+        s.ingest(revised)
+        XCTAssertEqual(s.conflicts, 1)
+
+        var previous = s.settled.count
+        var counts: [Int] = []
+        for _ in 0..<8 {
+            s.ingest(revised)
+            XCTAssertGreaterThanOrEqual(s.settled.count, previous, "settled never shrinks")
+            previous = s.settled.count
+            counts.append(s.conflicts)
+        }
+        XCTAssertEqual(s.settledText.hasPrefix("we go to the meet"), true)
+        XCTAssertGreaterThan(s.settled.count, 5, "new words settled after the revision")
+        XCTAssertEqual(counts.last, counts[counts.count - 2], "the count stops rising once anchored again")
+        assertNoRepeatedWord(s)
+    }
+
+    func testLongPauseKeepsSettledAndStartsTheNewSpeechAfterIt() {
+        var s = PreviewStabilizer()
+        s.ingest("a b c d e f g h")
+        s.ingest("a b c d e f g h")
+        XCTAssertEqual(s.settledText, "a b c d e f")
+
+        // Resumed after a pause longer than the window: nothing of the old words is in the decode.
+        s.ingest("completely new words")
+        XCTAssertEqual(s.settledText, "a b c d e f", "settled is not replaced on a gap")
+        XCTAssertEqual(s.tentativeText, "completely new words")
+        XCTAssertEqual(s.gaps, 1)
+        XCTAssertEqual(s.conflicts, 0)
+
+        s.ingest("completely new words here")
+        XCTAssertEqual(s.settledText, "a b c d e f completely new")
+        XCTAssertEqual(s.tentativeText, "words here")
+    }
+
     // MARK: - Invariants
 
     func testSettledOnlyEverGrowsAcrossRevisionsSlidesAndGaps() {

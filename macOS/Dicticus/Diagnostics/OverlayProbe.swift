@@ -76,12 +76,15 @@ public actor OverlayProbe {
         return [r.origin.x, r.origin.y, r.size.width, r.size.height].map { Double($0) }
     }
 
-    public func recordHide(seq: Int, reason: String, shownMs: Double) {
+    /// `stabilizerConflicts` / `stabilizerGaps` are counts of preview alignment fallbacks (plan 51-10).
+    public func recordHide(seq: Int, reason: String, shownMs: Double, stabilizerConflicts: Int, stabilizerGaps: Int) {
         write([
             "event": "overlay_hide",
             "seq": seq,
             "reason": reason,
-            "shown_ms": shownMs
+            "shown_ms": shownMs,
+            "stabilizer_conflicts": stabilizerConflicts,
+            "stabilizer_gaps": stabilizerGaps
         ])
     }
 

@@ -51,6 +51,27 @@ struct PreviewStabilizer {
         if let index = Self.rightmost(of: anchor, in: normalized) {
             return index + Self.anchorLength
         }
+        return fallbackStart(in: normalized)
+    }
+
+    /// The settled tail is missing from the hypothesis. Look for the most recent pair of settled
+    /// words that still occurs: Whisper revised a word after it settled (conflict). With no shared
+    /// pair the hypothesis is new speech beyond the window, for example after a long pause (gap).
+    /// Settled words are never touched; only the agreement baseline restarts.
+    private mutating func fallbackStart(in normalized: [String]) -> Int {
+        let settledNormalized = settled.map(Self.normalize)
+        let oldest = max(0, settled.count - (normalized.count + Self.anchorLength))
+        var pairStart = settled.count - 2
+        while pairStart >= oldest {
+            let pair = Array(settledNormalized[pairStart..<pairStart + 2])
+            if let hit = Self.rightmost(of: pair, in: normalized) {
+                conflicts += 1
+                let wordsAfterPair = settled.count - (pairStart + 2)
+                return min(hit + 2 + wordsAfterPair, normalized.count)
+            }
+            pairStart -= 1
+        }
+        gaps += 1
         return 0
     }
 
