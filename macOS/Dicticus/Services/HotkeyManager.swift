@@ -428,9 +428,11 @@ class HotkeyManager: ObservableObject {
             if LivePreviewSession.isEnabled(DicticusDefaults.suite) {
                 overlay.show()
                 activeRecordingHasPreview = true
-                service.startLivePreview(cadence: LivePreviewSession.productionCadence) { [weak self] text in
-                    self?.overlay.update(text)
-                }
+                service.startLivePreview(
+                    cadence: LivePreviewSession.productionCadence,
+                    publish: { [weak self] text in self?.overlay.update(text) },
+                    silence: { [weak self] in self?.overlay.settle() }
+                )
             }
             // Phase 30 MEDIA-PAUSE-01: pause media after a successful recording start.
             // Gated on the user toggle; treat absent key as true (default ON).

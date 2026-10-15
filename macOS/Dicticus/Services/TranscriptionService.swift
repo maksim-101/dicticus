@@ -61,6 +61,17 @@ final class AudioSampleBuffer: @unchecked Sendable {
         return result
     }
 
+    /// Non-destructive copy of every sample at or after `index`, with the buffer length at
+    /// the moment of the copy. Both come from one critical section, so `end` is exactly
+    /// where `samples` stops even while the audio thread keeps appending.
+    func snapshot(from index: Int) -> (samples: [Float], end: Int) {
+        lock.lock()
+        let end = samples.count
+        let result = index >= end ? [] : Array(samples[max(0, index)..<end])
+        lock.unlock()
+        return (result, end)
+    }
+
     var count: Int {
         lock.lock()
         defer { lock.unlock() }
@@ -269,13 +280,15 @@ class TranscriptionService: ObservableObject {
     /// `publish` only; nothing from a preview reaches the final transcription (D-01).
     func startLivePreview(
         cadence: Duration,
-        publish: @escaping @MainActor (String) -> Void
+        publish: @escaping @MainActor (String) -> Void,
+        silence: (@MainActor () -> Void)? = nil
     ) {
         guard state == .recording, livePreview == nil else { return }
         let decoder = LivePreviewDecoder(
             whisperKit: whisperKit,
             buffer: sampleBuffer,
-            inputSampleRate: audioEngine.inputNode.outputFormat(forBus: 0).sampleRate
+            inputSampleRate: audioEngine.inputNode.outputFormat(forBus: 0).sampleRate,
+            onSilence: silence
         )
         let session = LivePreviewSession(
             cadence: cadence,

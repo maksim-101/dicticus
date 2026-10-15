@@ -9,7 +9,10 @@ import WhisperKit
 /// else; the pasted text always comes from the end-of-recording decode.
 ///
 /// The energy gates and the short-clip rules of the final path are deliberately not
-/// applied here (D-03), and this type writes no diagnostic records.
+/// applied to decoded text (D-03), and this type writes no diagnostic records. A voice
+/// gate (`LivePreviewVoiceGate`) only decides whether a tick decodes at all: ticks with
+/// no new voiced audio since the last decode are skipped. Spike 018's latency figures
+/// predate that gate.
 @MainActor
 final class LivePreviewDecoder {
 
@@ -47,20 +50,27 @@ final class LivePreviewDecoder {
     private let buffer: AudioSampleBuffer
     private let inputSampleRate: Double
     private let dictionary: @MainActor (String) -> String
-    private var lastDecodedCount = -1
+    private let onSilence: (@MainActor () -> Void)?
+    private var gate: LivePreviewVoiceGate
 
     private(set) var lastTiming: Timing?
+
+    /// Ticks the voice gate skipped because no new voiced audio had arrived.
+    private(set) var skippedNoVoice = 0
 
     init(
         whisperKit: WhisperKit,
         buffer: AudioSampleBuffer,
         inputSampleRate: Double,
-        dictionary: @escaping @MainActor (String) -> String = { DictionaryService.shared.apply(to: $0) }
+        dictionary: @escaping @MainActor (String) -> String = { DictionaryService.shared.apply(to: $0) },
+        onSilence: (@MainActor () -> Void)? = nil
     ) {
         self.whisperKit = whisperKit
         self.buffer = buffer
         self.inputSampleRate = inputSampleRate
         self.dictionary = dictionary
+        self.onSilence = onSilence
+        self.gate = LivePreviewVoiceGate(inputSampleRate: inputSampleRate)
     }
 
     /// The one WhisperKit call of this file. Takes 16 kHz samples and explicit options
@@ -69,20 +79,32 @@ final class LivePreviewDecoder {
         try await whisperKit.transcribe(audioArray: samples16k, decodeOptions: options)
     }
 
-    /// One preview tick. Returns nil when there is no new audio, too little audio, a
-    /// decode error, a cancellation, or when the filters reject the text.
+    /// One preview tick. Returns nil when the voice gate skips the tick, when there is too
+    /// little audio, on a decode error, a cancellation, or when the filters reject the text.
+    ///
+    /// The gate decides whether to decode and never filters a decoded text (D-03). It
+    /// frames only the audio added since the last tick, but measures it against the noise
+    /// floor of the whole hold, so continuous speech is not mistaken for its own floor.
     func decodeTail() async -> String? {
         let clock = ContinuousClock()
         let t0 = clock.now
 
-        let currentCount = buffer.count
-        guard currentCount != lastDecodedCount else { return nil }
         let rate = inputSampleRate
+        // Before the gate: a short opening word must not be consumed without a decode.
+        guard Double(buffer.count) / rate >= Self.minimumPreviewSeconds else { return nil }
+
+        let fresh = buffer.snapshot(from: gate.framedSamples).samples
+        switch gate.step(samples: fresh) {
+        case .skip(let signalPause):
+            skippedNoVoice += 1
+            if signalPause { onSilence?() }
+            return nil
+        case .decode:
+            break
+        }
+
         let tail = buffer.snapshotTail(maxSamples: Int(Self.tailSeconds * rate))
         let t1 = clock.now
-
-        guard Double(tail.count) / rate >= Self.minimumPreviewSeconds else { return nil }
-        lastDecodedCount = currentCount
 
         let samples16k: [Float]
         if abs(rate - Self.targetSampleRate) > 1.0 {
@@ -143,5 +165,75 @@ final class LivePreviewDecoder {
 
     private static func milliseconds(_ d: Duration) -> Double {
         Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15
+    }
+}
+
+/// Voice decision and per-tick bookkeeping of the preview scheduler (Phase 51-11).
+///
+/// Holds the 100 ms frame energies of the whole hold. A tick decodes only when a frame
+/// added since the last decode exceeds the `AdaptiveVoiceGate` threshold computed over
+/// every frame so far, the same function and measured constants as the final path's
+/// Layer 2. A fixed threshold once dropped low-gain speech (AdaptiveVoiceGate header), and
+/// a threshold over the new frames alone would read continuous speech as its own floor.
+///
+/// Sees energies only, never audio samples beyond framing and never any text.
+@MainActor
+struct LivePreviewVoiceGate: Sendable {
+
+    enum Outcome: Equatable, Sendable {
+        case decode
+        /// `signalPause` is true on the first skipped tick after voiced audio.
+        case skip(signalPause: Bool)
+    }
+
+    private(set) var energies: [Float] = []
+    /// Samples already framed. The next snapshot starts here, so a partial frame at the
+    /// end of one tick is read again, complete, on the next.
+    private(set) var framedSamples = 0
+    /// Frames up to this index were part of a decode.
+    private(set) var decodedFrameCount = 0
+    private var voicedSincePauseSignal = false
+    private let inputSampleRate: Double
+    private let frameSamples: Int
+
+    init(inputSampleRate: Double) {
+        self.inputSampleRate = inputSampleRate
+        // Same expression as TranscriptionService.frameEnergies, so frames line up exactly.
+        frameSamples = max(1, Int(0.1 * Float(inputSampleRate)))
+    }
+
+    /// True when a frame at or after `sinceFrame` exceeds the threshold computed over all
+    /// of `energies`. No new frames means no voice.
+    nonisolated static func hasNewVoice(energies: [Float], sinceFrame: Int) -> Bool {
+        let first = max(0, sinceFrame)
+        guard first < energies.count else { return false }
+        let threshold = AdaptiveVoiceGate.evaluate(frameEnergies: energies).threshold
+        return energies[first...].contains { $0 > threshold }
+    }
+
+    /// Frames the complete 100 ms frames in `samples` (the audio after `framedSamples`)
+    /// and steps once.
+    mutating func step(samples: [Float]) -> Outcome {
+        let complete = samples.count / frameSamples
+        guard complete > 0 else { return step(newFrameEnergies: []) }
+        let consumed = complete * frameSamples
+        let frames = TranscriptionService.frameEnergies(
+            of: Array(samples[0..<consumed]),
+            sampleRate: inputSampleRate
+        )
+        framedSamples += consumed
+        return step(newFrameEnergies: frames)
+    }
+
+    mutating func step(newFrameEnergies: [Float]) -> Outcome {
+        energies.append(contentsOf: newFrameEnergies)
+        if Self.hasNewVoice(energies: energies, sinceFrame: decodedFrameCount) {
+            decodedFrameCount = energies.count
+            voicedSincePauseSignal = true
+            return .decode
+        }
+        let signal = voicedSincePauseSignal
+        voicedSincePauseSignal = false
+        return .skip(signalPause: signal)
     }
 }
