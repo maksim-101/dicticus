@@ -260,6 +260,21 @@ final class LiveOverlayPanelTests: XCTestCase {
         controller.hide(reason: .demo)
     }
 
+    func testReduceMotionFlagFollowsTheSystemSettingAtEveryShow() async throws {
+        var motion = true
+        let (_, candidates) = try makeStage(caretAppKit: midScreenCaret)
+        let controller = LiveOverlayController(
+            targetAlpha: 0, accessibility: { OverlayAccessibilityFlags(reduceTransparency: false, reduceMotion: motion) },
+            candidateProvider: { _ in candidates })
+        _ = try await presentedPaneRect(controller)
+        XCTAssertTrue(controller.modelForTesting.reduceMotion)
+        controller.hide(reason: .demo)
+        motion = false
+        controller.show()
+        XCTAssertFalse(controller.modelForTesting.reduceMotion, "the setting changed between presses")
+        controller.hide(reason: .demo)
+    }
+
     func testReduceMotionPlacesThePaneAtItsFinalPositionImmediately() async throws {
         let (stage, candidates) = try makeStage(flags: OverlayAccessibilityFlags(reduceMotion: true),
                                                 caretAppKit: midScreenCaret)

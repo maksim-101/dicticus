@@ -178,6 +178,16 @@ final class HotkeyManagerTests: XCTestCase {
         XCTAssertTrue(spy.updates.isEmpty)
     }
 
+    func testReleaseWithoutAPressNeverTouchesTheOverlay() {
+        let spy = SpyOverlay()
+        let manager = HotkeyManager(overlay: spy)
+        manager.handleKeyUp(mode: .plain)
+        manager.handleKeyUp(mode: .aiCleanup)
+        XCTAssertEqual(spy.showCount, 0)
+        XCTAssertEqual(spy.processingCount, 0)
+        XCTAssertTrue(spy.hideReasons.isEmpty, "a stray release must not hide or dim a panel")
+    }
+
     // MARK: - Integration test (requires WhisperKit model)
 
     func testFullPushToTalkCycle() async throws {
