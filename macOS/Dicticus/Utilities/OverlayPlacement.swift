@@ -20,6 +20,12 @@ enum OverlayPlacement {
         var visibleFrame: CGRect
     }
 
+    /// Large-text-area rule: clearance below the window top (title and tab bar), above the window
+    /// bottom, and the element-to-window height ratio that makes an element "large".
+    nonisolated static let topInset: CGFloat = 44
+    nonisolated static let bottomInset: CGFloat = 16
+    nonisolated static let largeAreaRatio: CGFloat = 0.5
+
     nonisolated static func appKitRect(fromAX ax: CGRect, primaryScreenHeight: CGFloat) -> CGRect {
         CGRect(x: ax.minX, y: primaryScreenHeight - ax.maxY, width: ax.width, height: ax.height)
     }
@@ -73,8 +79,35 @@ enum OverlayPlacement {
             return target.visibleFrame.midX
         }
 
+        /// A large text area (terminal pane, editor, document, mail compose) is an element taller than
+        /// `largeAreaRatio` of its window. The panel goes to the half of the window opposite the caret
+        /// line, so a growing input box is never covered (host session 2). The window must sit on the
+        /// target display; otherwise the caret or element rule below applies.
+        func largeAreaWindow(on target: ScreenGeometry) -> CGRect? {
+            guard let window, let element, window.width > 0, window.height > 0,
+                  window.midX >= target.frame.minX, window.midX < target.frame.maxX,
+                  window.midY >= target.frame.minY, window.midY < target.frame.maxY,
+                  element.height > window.height * largeAreaRatio else { return nil }
+            return window
+        }
+
+        func topOfWindow(_ window: CGRect, on target: ScreenGeometry) -> CGPoint {
+            clamp(CGPoint(x: centreX(on: target) - panel.width / 2, y: window.maxY - topInset - panel.height),
+                  panel: panel, visible: target.visibleFrame)
+        }
+
         if let caret = converted(candidates.caret), caret.height > 0,
            let target = screen(containing: CGPoint(x: caret.midX, y: caret.midY), in: screens) {
+            if let window = largeAreaWindow(on: target) {
+                if caret.midY < window.midY {
+                    return Placement(origin: topOfWindow(window, on: target), source: .caret, flipped: false,
+                                     visibleFrame: target.visibleFrame)
+                }
+                let origin = bottomCentreOrigin(
+                    on: window, centreX: centreX(on: target), panel: panel, visible: target.visibleFrame,
+                    inset: bottomInset)
+                return Placement(origin: origin, source: .caret, flipped: true, visibleFrame: target.visibleFrame)
+            }
             // A single-line field (search or address bar) is kept clear as a whole (host session 2);
             // a tall text area such as a terminal pane or document keeps the caret line.
             var anchor = caret
@@ -89,6 +122,10 @@ enum OverlayPlacement {
         for (rect, source) in [(element, Source.element), (window, .window)] {
             guard let rect, rect.width > 0, rect.height > 0,
                   let target = screen(containing: CGPoint(x: rect.midX, y: rect.midY), in: screens) else { continue }
+            if source == .element, let window = largeAreaWindow(on: target) {
+                return Placement(origin: topOfWindow(window, on: target), source: source, flipped: false,
+                                 visibleFrame: target.visibleFrame)
+            }
             // A single-line field with no reported caret (e.g. a selected URL) is kept clear like one with a caret.
             if source == .element, rect.height <= 60 {
                 let (origin, flipped) = caretOrigin(

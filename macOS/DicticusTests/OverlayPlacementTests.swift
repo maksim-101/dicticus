@@ -95,13 +95,68 @@ final class OverlayPlacementTests: XCTestCase {
         XCTAssertEqual(p.origin.y, fieldRect.maxY + 8)
     }
 
-    func testTallTextAreaStillFollowsTheCaretLine() {
+    // Host session 2: a tall text area inside a window sends the panel to the opposite half of the
+    // window; without a window to measure against, the caret line still decides (D-11 fallback).
+    func testTallTextAreaWithoutAWindowStillFollowsTheCaretLine() {
         let area = CGRect(x: 0, y: 40, width: 1600, height: 900)
         let ax = CGRect(x: 5, y: 800, width: 2, height: 42)
         let p = place(.init(caret: ax, element: area), screens: [screen()])
         let caret = OverlayPlacement.appKitRect(fromAX: ax, primaryScreenHeight: 1000)
         XCTAssertFalse(p.flipped)
         XCTAssertEqual(p.origin.y, caret.maxY + 8)
+    }
+
+    // MARK: - Large text areas (plan 51-13, host session 2 decision)
+
+    private let largeWindow = CGRect(x: 100, y: 100, width: 1200, height: 800)
+    private let largeArea = CGRect(x: 100, y: 140, width: 1200, height: 760)
+
+    func testLargeAreaCaretInLowerHalfPutsThePanelAtTheTopOfTheWindow() {
+        let ax = CGRect(x: 140, y: 800, width: 2, height: 18)
+        let p = place(.init(caret: ax, element: largeArea, window: largeWindow), screens: [screen()])
+        let window = OverlayPlacement.appKitRect(fromAX: largeWindow, primaryScreenHeight: 1000)
+        XCTAssertEqual(p.source, .caret)
+        XCTAssertFalse(p.flipped)
+        XCTAssertEqual(p.origin.y, window.maxY - 44 - panel.height)
+        XCTAssertEqual(p.origin.x, window.midX - panel.width / 2)
+        assertInside(p)
+    }
+
+    func testLargeAreaCaretInUpperHalfPutsThePanelAtTheBottomOfTheWindow() {
+        let ax = CGRect(x: 140, y: 200, width: 2, height: 18)
+        let p = place(.init(caret: ax, element: largeArea, window: largeWindow), screens: [screen()])
+        let window = OverlayPlacement.appKitRect(fromAX: largeWindow, primaryScreenHeight: 1000)
+        XCTAssertEqual(p.source, .caret)
+        XCTAssertTrue(p.flipped)
+        XCTAssertEqual(p.origin.y, window.minY + 16)
+        XCTAssertEqual(p.origin.x, window.midX - panel.width / 2)
+        assertInside(p)
+    }
+
+    func testLargeAreaWithoutCaretPutsThePanelAtTheTopOfTheWindow() {
+        let p = place(.init(element: largeArea, window: largeWindow), screens: [screen()])
+        let window = OverlayPlacement.appKitRect(fromAX: largeWindow, primaryScreenHeight: 1000)
+        XCTAssertEqual(p.source, .element)
+        XCTAssertFalse(p.flipped)
+        XCTAssertEqual(p.origin.y, window.maxY - 44 - panel.height)
+        XCTAssertEqual(p.origin.x, window.midX - panel.width / 2)
+    }
+
+    func testLargeAreaTopPlacementIsClampedWhenTheWindowReachesAboveTheScreen() {
+        let tall = CGRect(x: 100, y: -150, width: 1200, height: 800)
+        let area = CGRect(x: 100, y: -100, width: 1200, height: 740)
+        let ax = CGRect(x: 140, y: 600, width: 2, height: 18)
+        let s = screen(inset: (top: 25, bottom: 0))
+        let p = place(.init(caret: ax, element: area, window: tall), screens: [s])
+        XCTAssertEqual(p.origin.y, s.visibleFrame.maxY - panel.height)
+        assertInside(p)
+    }
+
+    func testAnElementUnderHalfTheWindowStillFollowsTheCaretLine() {
+        let small = CGRect(x: 100, y: 600, width: 1200, height: 300)
+        let ax = CGRect(x: 140, y: 800, width: 2, height: 18)
+        let p = place(.init(caret: ax, element: small, window: largeWindow), screens: [screen()])
+        XCTAssertEqual(p.origin.y, OverlayPlacement.appKitRect(fromAX: ax, primaryScreenHeight: 1000).maxY + 8)
     }
 
     func testWindowAtRightEdgeClampsHorizontally() {
