@@ -1054,6 +1054,9 @@ extension TranscriptionService {
         LivePreviewDecoder(whisperKit: whisperKit, buffer: buffer, inputSampleRate: inputSampleRate)
     }
 
+    /// The service's model, for spike 019's preview decoder with a recording transcribe closure.
+    var testWhisperKit: WhisperKit { whisperKit }
+
     /// Runs the same `finishTranscription` the hotkey release path runs, so the spike
     /// measures the release path that ships.
     func testReleaseAndTranscribe(
