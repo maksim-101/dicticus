@@ -74,6 +74,36 @@ final class OverlayPlacementTests: XCTestCase {
         assertInside(p)
     }
 
+    // Host session 2: Safari's address bar and Music's search field sit at the top of the screen;
+    // the flipped panel measured from the caret line covered the lower part of the field.
+    func testSingleLineFieldNearTopFlipsBelowTheWholeField() {
+        let field = CGRect(x: 300, y: 12, width: 600, height: 34)
+        let ax = CGRect(x: 320, y: 21, width: 2, height: 16)
+        let p = place(.init(caret: ax, element: field), screens: [screen()])
+        let fieldRect = OverlayPlacement.appKitRect(fromAX: field, primaryScreenHeight: 1000)
+        XCTAssertTrue(p.flipped)
+        XCTAssertEqual(p.origin.y, fieldRect.minY - 8 - panel.height)
+        assertInside(p)
+    }
+
+    func testSingleLineFieldKeepsThePanelAboveTheWholeField() {
+        let field = CGRect(x: 300, y: 500, width: 600, height: 34)
+        let ax = CGRect(x: 320, y: 509, width: 2, height: 16)
+        let p = place(.init(caret: ax, element: field), screens: [screen()])
+        let fieldRect = OverlayPlacement.appKitRect(fromAX: field, primaryScreenHeight: 1000)
+        XCTAssertFalse(p.flipped)
+        XCTAssertEqual(p.origin.y, fieldRect.maxY + 8)
+    }
+
+    func testTallTextAreaStillFollowsTheCaretLine() {
+        let area = CGRect(x: 0, y: 40, width: 1600, height: 900)
+        let ax = CGRect(x: 5, y: 800, width: 2, height: 42)
+        let p = place(.init(caret: ax, element: area), screens: [screen()])
+        let caret = OverlayPlacement.appKitRect(fromAX: ax, primaryScreenHeight: 1000)
+        XCTAssertFalse(p.flipped)
+        XCTAssertEqual(p.origin.y, caret.maxY + 8)
+    }
+
     func testWindowAtRightEdgeClampsHorizontally() {
         let p = place(.init(caret: CGRect(x: 1590, y: 500, width: 2, height: 18),
                             window: CGRect(x: 1500, y: 100, width: 100, height: 700)), screens: [screen()])

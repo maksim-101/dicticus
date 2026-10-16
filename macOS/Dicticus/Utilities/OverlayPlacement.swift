@@ -75,8 +75,15 @@ enum OverlayPlacement {
 
         if let caret = converted(candidates.caret), caret.height > 0,
            let target = screen(containing: CGPoint(x: caret.midX, y: caret.midY), in: screens) {
+            // A single-line field (search or address bar) is kept clear as a whole (host session 2);
+            // a tall text area such as a terminal pane or document keeps the caret line.
+            var anchor = caret
+            if let element, element.height <= caret.height * 3,
+               element.minY <= caret.midY, caret.midY <= element.maxY {
+                anchor = CGRect(x: caret.minX, y: element.minY, width: caret.width, height: element.height)
+            }
             let (origin, flipped) = caretOrigin(
-                anchor: caret, centreX: centreX(on: target), panel: panel, visible: target.visibleFrame)
+                anchor: anchor, centreX: centreX(on: target), panel: panel, visible: target.visibleFrame)
             return Placement(origin: origin, source: .caret, flipped: flipped, visibleFrame: target.visibleFrame)
         }
         for (rect, source) in [(element, Source.element), (window, .window)] {
