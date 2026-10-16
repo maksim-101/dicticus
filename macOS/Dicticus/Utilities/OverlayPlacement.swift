@@ -26,6 +26,19 @@ enum OverlayPlacement {
     nonisolated static let bottomInset: CGFloat = 16
     nonisolated static let largeAreaRatio: CGFloat = 0.5
 
+    /// Single-line field rule: with a caret, an element is one line when it is at most this many
+    /// caret heights tall; without a caret, when it is at most `singleLineMaxHeight` points.
+    nonisolated static let singleLineCaretMultiple: CGFloat = 3
+    nonisolated static let singleLineMaxHeight: CGFloat = 60
+
+    /// A caret whose midpoint lies farther than this outside the focused element (or the window,
+    /// when there is no element) is a bogus rect from the app and is not used as an anchor.
+    nonisolated static let caretContainmentTolerance: CGFloat = 24
+
+    nonisolated static func isSingleLine(elementHeight: CGFloat, caretHeight: CGFloat?) -> Bool {
+        elementHeight <= (caretHeight.map { $0 * singleLineCaretMultiple } ?? singleLineMaxHeight)
+    }
+
     nonisolated static func appKitRect(fromAX ax: CGRect, primaryScreenHeight: CGFloat) -> CGRect {
         CGRect(x: ax.minX, y: primaryScreenHeight - ax.maxY, width: ax.width, height: ax.height)
     }
@@ -98,8 +111,20 @@ enum OverlayPlacement {
                   panel: panel, visible: target.visibleFrame)
         }
 
+        /// The caret must lie in the focused element, else in the window. A container whose midpoint
+        /// is on another display does not count (it is stale, see `centreX`), so it cannot veto a caret.
+        func caretIsPlausible(_ caret: CGRect, on target: ScreenGeometry) -> Bool {
+            let container = [element, window].compactMap { $0 }.first {
+                $0.width > 0 && $0.height > 0 && target.frame.contains(CGPoint(x: $0.midX, y: $0.midY))
+            }
+            guard let container else { return true }
+            return container.insetBy(dx: -caretContainmentTolerance, dy: -caretContainmentTolerance)
+                .contains(CGPoint(x: caret.midX, y: caret.midY))
+        }
+
         if let caret = converted(candidates.caret), caret.height > 0,
-           let target = screen(containing: CGPoint(x: caret.midX, y: caret.midY), in: screens) {
+           let target = screen(containing: CGPoint(x: caret.midX, y: caret.midY), in: screens),
+           caretIsPlausible(caret, on: target) {
             if let window = largeAreaWindow(on: target) {
                 if caret.midY < window.midY {
                     return Placement(origin: topOfWindow(window, on: target), source: .caret, flipped: false,
@@ -113,7 +138,7 @@ enum OverlayPlacement {
             // A single-line field (search or address bar) is kept clear as a whole (host session 2);
             // a tall text area such as a terminal pane or document keeps the caret line.
             var anchor = caret
-            if let element, element.height <= caret.height * 3,
+            if let element, isSingleLine(elementHeight: element.height, caretHeight: caret.height),
                element.minY <= caret.midY, caret.midY <= element.maxY {
                 anchor = CGRect(x: caret.minX, y: element.minY, width: caret.width, height: element.height)
             }
@@ -129,7 +154,7 @@ enum OverlayPlacement {
                                  visibleFrame: target.visibleFrame)
             }
             // A single-line field with no reported caret (e.g. a selected URL) is kept clear like one with a caret.
-            if source == .element, rect.height <= 60 {
+            if source == .element, isSingleLine(elementHeight: rect.height, caretHeight: nil) {
                 let (origin, flipped) = caretOrigin(
                     anchor: rect, centreX: centreX(on: target), panel: panel, visible: target.visibleFrame)
                 return Placement(origin: origin, source: source, flipped: flipped, visibleFrame: target.visibleFrame)

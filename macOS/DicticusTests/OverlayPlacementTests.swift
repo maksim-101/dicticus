@@ -106,6 +106,40 @@ final class OverlayPlacementTests: XCTestCase {
         XCTAssertEqual(p.origin.y, caret.maxY + 8)
     }
 
+    // MARK: - A caret outside its element or window is bogus (review round 1, IN-02)
+
+    func testACaretFarOutsideTheFocusedElementIsIgnoredAndTheElementDecidesTheSpot() {
+        let field = CGRect(x: 300, y: 500, width: 600, height: 34)
+        let bogus = CGRect(x: 0, y: 0, width: 2, height: 18)
+        let p = place(.init(caret: bogus, element: field), screens: [screen()])
+        let fieldRect = OverlayPlacement.appKitRect(fromAX: field, primaryScreenHeight: 1000)
+        XCTAssertEqual(p.source, .element)
+        XCTAssertEqual(p.origin.y, fieldRect.maxY + 8, "a single-line field keeps the panel clear of the whole field")
+    }
+
+    func testACaretOutsideTheWindowIsIgnoredWhenThereIsNoElement() {
+        let window = CGRect(x: 200, y: 100, width: 800, height: 700)
+        let bogus = CGRect(x: 10, y: 10, width: 2, height: 18)
+        let p = place(.init(caret: bogus, window: window), screens: [screen()])
+        XCTAssertEqual(p.source, .window)
+        XCTAssertTrue(OverlayPlacement.appKitRect(fromAX: window, primaryScreenHeight: 1000)
+            .insetBy(dx: -1, dy: -1).contains(CGRect(origin: p.origin, size: panel)))
+    }
+
+    func testAWindowOnAnotherDisplayCannotVetoTheCaret() {
+        let screens = [screen(), screen(1600, 0)]
+        let p = place(.init(caret: CGRect(x: 1700, y: 500, width: 2, height: 18),
+                            window: CGRect(x: 100, y: 100, width: 800, height: 700)), screens: screens)
+        XCTAssertEqual(p.source, .caret, "a stale window on the other display discarded a good caret")
+    }
+
+    func testACaretJustOutsideItsElementStaysTheAnchor() {
+        let field = CGRect(x: 300, y: 500, width: 600, height: 34)
+        let nearEdge = CGRect(x: 292, y: 509, width: 2, height: 16)
+        let p = place(.init(caret: nearEdge, element: field), screens: [screen()])
+        XCTAssertEqual(p.source, .caret, "a caret a few points past the element edge is within tolerance")
+    }
+
     // MARK: - Large text areas (plan 51-13, host session 2 decision)
 
     private let largeWindow = CGRect(x: 100, y: 100, width: 1200, height: 800)
@@ -180,7 +214,7 @@ final class OverlayPlacementTests: XCTestCase {
 
     func testCaretOnLeftHandDisplayWithNegativeCoordinates() {
         let screens = [screen(), screen(-1600, 0)]
-        let p = place(.init(caret: CGRect(x: -1590, y: 500, width: 2, height: 18),
+        let p = place(.init(caret: CGRect(x: -1390, y: 500, width: 2, height: 18),
                             window: CGRect(x: -1400, y: 100, width: 800, height: 700)), screens: screens)
         XCTAssertEqual(p.source, .caret)
         XCTAssertEqual(p.origin.x, -1000 - panel.width / 2)
@@ -227,7 +261,7 @@ final class OverlayPlacementTests: XCTestCase {
     }
 
     func testCaretLineStillDecidesTheHeightWhenCentredOnTheWindow() {
-        let window = CGRect(x: 100, y: 100, width: 1200, height: 700)
+        let window = CGRect(x: 100, y: 0, width: 1200, height: 700)
         let ax = CGRect(x: 120, y: 300, width: 2, height: 18)
         let p = place(.init(caret: ax, window: window), screens: [screen()])
         XCTAssertEqual(p.origin.y, OverlayPlacement.appKitRect(fromAX: ax, primaryScreenHeight: 1000).maxY + 8)
