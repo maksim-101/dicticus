@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import WhisperKit
 @preconcurrency import AVFoundation
 import NaturalLanguage
@@ -310,11 +311,27 @@ class TranscriptionService: ObservableObject {
         takeSamples: () -> [Float],
         inputSampleRate: Double
     ) async throws -> (result: DicticusTranscriptionResult, avgLogprobs: [Float], compressionRatios: [Float]) {
+        try await Self.releaseSequence(
+            previewSession: previewSession,
+            onDrained: { self.lastLivePreviewStats = $0 },
+            takeSamples: takeSamples,
+            decode: { try await self.transcribe(rawSamples: $0, inputSampleRate: inputSampleRate) }
+        )
+    }
+
+    /// The order of the release path, separated from the model so a test can observe it:
+    /// cancel and await the preview, then take the samples, then run the one final decode on
+    /// exactly those samples.
+    static func releaseSequence<Result>(
+        previewSession: LivePreviewSession?,
+        onDrained: (LivePreviewSession.Stats) -> Void,
+        takeSamples: () -> [Float],
+        decode: ([Float]) async throws -> Result
+    ) async throws -> Result {
         if let previewSession {
-            lastLivePreviewStats = await previewSession.cancelAndDrain()
+            onDrained(await previewSession.cancelAndDrain())
         }
-        let samples = takeSamples()
-        return try await transcribe(rawSamples: samples, inputSampleRate: inputSampleRate)
+        return try await decode(takeSamples())
     }
 
     /// The transcription path proper, from raw captured samples to a result:
@@ -956,6 +973,10 @@ class TranscriptionService: ObservableObject {
         let allowed: Set<String> = ["de", "en"]
         return allowed.contains(detected) ? detected : "en"
     }
+}
+
+extension TranscriptionService: DictationTranscribing {
+    var statePublisher: AnyPublisher<State, Never> { $state.eraseToAnyPublisher() }
 }
 
 // MARK: - Test support

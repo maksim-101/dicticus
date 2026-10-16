@@ -1,6 +1,82 @@
 import XCTest
+import Combine
 import KeyboardShortcuts
 @testable import Dicticus
+
+/// Transcription stub for the release lifecycle: no model, no audio engine.
+@MainActor
+final class StubTranscriber: DictationTranscribing {
+    @Published var state: TranscriptionService.State = .idle
+    var statePublisher: AnyPublisher<TranscriptionService.State, Never> { $state.eraseToAnyPublisher() }
+    var lastResult: DicticusTranscriptionResult?
+    var lastLivePreviewStats: LivePreviewSession.Stats?
+
+    var startError: Error?
+    var stopResult: Result<DicticusTranscriptionResult, Error> =
+        .success(DicticusTranscriptionResult(text: "hello world", language: "en", confidence: 0.9))
+    /// Runs inside `stopRecordingAndTranscribe`, i.e. at the moment the final decode starts.
+    var atDecode: (@MainActor () -> Void)?
+
+    private(set) var startCount = 0
+    private(set) var previewStarts = 0
+    private(set) var publish: (@MainActor (String) -> Void)?
+    private(set) var silence: (@MainActor () -> Void)?
+
+    func startRecording() throws {
+        startCount += 1
+        if let startError { throw startError }
+        state = .recording
+    }
+
+    func startLivePreview(
+        cadence: Duration, publish: @escaping @MainActor (String) -> Void, silence: (@MainActor () -> Void)?
+    ) {
+        previewStarts += 1
+        self.publish = publish
+        self.silence = silence
+    }
+
+    func stopRecordingAndTranscribe() async throws -> DicticusTranscriptionResult {
+        state = .transcribing
+        defer { state = .idle }
+        atDecode?()
+        return try stopResult.get()
+    }
+}
+
+/// Records the paste instead of performing it, and can hold the paste open.
+@MainActor
+final class RecordingInjector: TextInjector {
+    private(set) var injected: [String] = []
+    /// The overlay's hide calls at the moment the paste started.
+    private(set) var hidesAtInjection: [LiveOverlayHideReason] = []
+    var holdPaste = false
+    private(set) var isHolding = false
+    private var held: CheckedContinuation<Void, Never>?
+    private let spy: SpyOverlay
+
+    init(spy: SpyOverlay) {
+        self.spy = spy
+        super.init()
+    }
+
+    override func injectText(_ text: String, expectedFrontmostBundleID: String? = nil) async -> Outcome {
+        injected.append(text)
+        hidesAtInjection = spy.hideReasons
+        if holdPaste {
+            isHolding = true
+            await withCheckedContinuation { held = $0 }
+            isHolding = false
+        }
+        return .delivered
+    }
+
+    func releasePaste() {
+        holdPaste = false
+        held?.resume()
+        held = nil
+    }
+}
 
 @MainActor
 final class HotkeyManagerTests: XCTestCase {
@@ -186,6 +262,152 @@ final class HotkeyManagerTests: XCTestCase {
         XCTAssertEqual(spy.showCount, 0)
         XCTAssertEqual(spy.processingCount, 0)
         XCTAssertTrue(spy.hideReasons.isEmpty, "a stray release must not hide or dim a panel")
+    }
+
+    // MARK: - Phase 51 release lifecycle (stub transcription, recording injector)
+
+    @MainActor
+    private final class Rig {
+        let spy = SpyOverlay()
+        let stub = StubTranscriber()
+        let warmup = ModelWarmupService()
+        let injector: RecordingInjector
+        let manager: HotkeyManager
+
+        init() {
+            injector = RecordingInjector(spy: spy)
+            manager = HotkeyManager(overlay: spy, textInjector: injector, mediaController: .makeForTesting())
+            warmup.isReady = true
+            manager.attach(transcriptionService: stub, warmupService: warmup)
+        }
+
+        /// Press and release `.plain` and wait until the dictation Task has hidden the panel for good.
+        func dictate() async {
+            manager.handleKeyDown(mode: .plain)
+            manager.handleKeyUp(mode: .plain)
+            _ = await HotkeyManagerTests.eventually { self.spy.hideReasons.contains(.taskEnd) }
+        }
+    }
+
+    private var rig: Rig!
+
+    override func setUp() async throws {
+        try await super.setUp()
+        rig = Rig()
+    }
+
+    override func tearDown() async throws {
+        rig = nil
+        DicticusDefaults.suite.removeObject(forKey: LivePreviewSession.enabledKey)
+        try await super.tearDown()
+    }
+
+    /// Polls until `condition` holds. The bound only caps a failing run; a passing run returns at once.
+    static func eventually(_ condition: @escaping @MainActor () -> Bool) async -> Bool {
+        let deadline = ContinuousClock.now + .seconds(10)
+        while !condition(), ContinuousClock.now < deadline { try? await Task.sleep(for: .milliseconds(10)) }
+        return condition()
+    }
+
+    func testReleaseSettlesTheOverlayBeforeTheFinalDecodeAndHidesBeforeThePaste() async {
+        var processingAtDecode = -1
+        var hidesAtDecode: [LiveOverlayHideReason] = []
+        rig.stub.atDecode = { [spy = rig.spy] in
+            processingAtDecode = spy.processingCount
+            hidesAtDecode = spy.hideReasons
+        }
+        await rig.dictate()
+
+        XCTAssertEqual(rig.spy.showCount, 1)
+        XCTAssertEqual(rig.stub.previewStarts, 1)
+        XCTAssertEqual(processingAtDecode, 1, "setProcessing must run on release, before the final decode (D-06)")
+        XCTAssertEqual(hidesAtDecode, [], "the panel stays up through the final decode")
+        XCTAssertEqual(rig.injector.injected, ["hello world"])
+        XCTAssertEqual(rig.injector.hidesAtInjection, [.pasting], "the panel hides before the paste starts")
+        XCTAssertEqual(rig.spy.hideReasons, [.pasting, .taskEnd])
+    }
+
+    func testAThrowingDecodeHidesTheOverlayExactlyOnceAndPastesNothing() async {
+        rig.stub.stopResult = .failure(TranscriptionError.tooShort)
+        await rig.dictate()
+
+        XCTAssertEqual(rig.spy.hideReasons, [.taskEnd])
+        XCTAssertEqual(rig.spy.processingCount, 1)
+        XCTAssertTrue(rig.injector.injected.isEmpty)
+        XCTAssertFalse(rig.manager.isRecording)
+    }
+
+    func testANewerPressKeepsItsPanelWhenAnOlderReleaseFinishes() async {
+        rig.injector.holdPaste = true
+        rig.manager.handleKeyDown(mode: .plain)
+        rig.manager.handleKeyUp(mode: .plain)
+        let reachedPaste = await Self.eventually { self.rig.injector.isHolding }
+        XCTAssertTrue(reachedPaste)
+        XCTAssertEqual(rig.spy.hideReasons, [.pasting])
+
+        // A press during the previous paste's clipboard-restore window shows a newer panel.
+        rig.manager.handleKeyDown(mode: .plain)
+        XCTAssertEqual(rig.spy.showCount, 2)
+        rig.injector.releasePaste()
+
+        rig.manager.handleKeyUp(mode: .plain)
+        _ = await Self.eventually { self.rig.spy.hideReasons.count >= 3 }
+        XCTAssertEqual(rig.spy.hideReasons, [.pasting, .pasting, .taskEnd],
+                       "the older dictation hid the newer press's panel")
+    }
+
+    func testToggleOffStartsNeitherPanelNorPreviewButStillRecordsAndPastes() async {
+        DicticusDefaults.suite.set(false, forKey: LivePreviewSession.enabledKey)
+        await rig.dictate()
+
+        XCTAssertEqual(rig.stub.startCount, 1)
+        XCTAssertEqual(rig.spy.showCount, 0)
+        XCTAssertEqual(rig.stub.previewStarts, 0)
+        XCTAssertEqual(rig.injector.injected, ["hello world"])
+    }
+
+    func testPreviewTextAndPausesReachTheOverlay() {
+        rig.manager.handleKeyDown(mode: .plain)
+        rig.stub.publish?("one two")
+        rig.stub.silence?()
+        XCTAssertEqual(rig.spy.updates, ["one two"])
+        XCTAssertEqual(rig.spy.settleCount, 1)
+        rig.manager.handleKeyUp(mode: .plain)
+    }
+
+    func testReleaseWhenTheServiceIsNotRecordingHidesWithTheEarlyReturnReason() {
+        rig.manager.handleKeyDown(mode: .plain)
+        rig.stub.state = .idle
+        rig.manager.handleKeyUp(mode: .plain)
+
+        XCTAssertEqual(rig.spy.hideReasons, [.earlyReturn])
+        XCTAssertEqual(rig.spy.processingCount, 0)
+        XCTAssertTrue(rig.injector.injected.isEmpty)
+        XCTAssertFalse(rig.manager.isRecording)
+    }
+
+    func testReleaseOfTheOtherModeLeavesThePanelAndTheRecordingAlone() async {
+        rig.manager.handleKeyDown(mode: .plain)
+        rig.manager.handleKeyUp(mode: .aiCleanup)
+
+        XCTAssertTrue(rig.spy.hideReasons.isEmpty)
+        XCTAssertEqual(rig.spy.processingCount, 0)
+        XCTAssertTrue(rig.manager.isRecording)
+
+        rig.manager.handleKeyUp(mode: .plain)
+        _ = await Self.eventually { self.rig.spy.hideReasons.contains(.taskEnd) }
+        XCTAssertEqual(rig.spy.processingCount, 1)
+    }
+
+    func testARecordingThatFailsToStartNeverShowsThePanelAndTheNextPressWorks() async {
+        rig.stub.startError = TranscriptionError.busy
+        rig.manager.handleKeyDown(mode: .plain)
+        XCTAssertEqual(rig.spy.showCount, 0)
+        XCTAssertFalse(rig.manager.isRecording)
+
+        rig.stub.startError = nil
+        await rig.dictate()
+        XCTAssertEqual(rig.spy.showCount, 1)
     }
 
     // MARK: - Integration test (requires WhisperKit model)

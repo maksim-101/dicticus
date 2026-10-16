@@ -46,7 +46,11 @@ final class LivePreviewDecoder {
         var tokenCount: Int
     }
 
-    private let whisperKit: WhisperKit
+    /// The model call: 16 kHz samples and options in, chunk results out. Production wraps
+    /// the service's WhisperKit instance; a test supplies canned results.
+    typealias Transcribe = @MainActor ([Float], DecodingOptions) async throws -> [TranscriptionResult]
+
+    private let transcribe: Transcribe
     private let buffer: AudioSampleBuffer
     private let inputSampleRate: Double
     private let dictionary: @MainActor (String) -> String
@@ -63,14 +67,26 @@ final class LivePreviewDecoder {
     /// ticks that ran the model.
     private(set) var lastTickRanModel = false
 
-    init(
+    convenience init(
         whisperKit: WhisperKit,
         buffer: AudioSampleBuffer,
         inputSampleRate: Double,
         dictionary: @escaping @MainActor (String) -> String = { DictionaryService.shared.apply(to: $0) },
         onSilence: (@MainActor () -> Void)? = nil
     ) {
-        self.whisperKit = whisperKit
+        self.init(
+            transcribe: { samples, options in try await whisperKit.transcribe(audioArray: samples, decodeOptions: options) },
+            buffer: buffer, inputSampleRate: inputSampleRate, dictionary: dictionary, onSilence: onSilence)
+    }
+
+    init(
+        transcribe: @escaping Transcribe,
+        buffer: AudioSampleBuffer,
+        inputSampleRate: Double,
+        dictionary: @escaping @MainActor (String) -> String = { DictionaryService.shared.apply(to: $0) },
+        onSilence: (@MainActor () -> Void)? = nil
+    ) {
+        self.transcribe = transcribe
         self.buffer = buffer
         self.inputSampleRate = inputSampleRate
         self.dictionary = dictionary
@@ -81,7 +97,7 @@ final class LivePreviewDecoder {
     /// The one WhisperKit call of this file. Takes 16 kHz samples and explicit options
     /// so the latency sweep can time both option sets through the same code.
     func decodeResampled(_ samples16k: [Float], options: DecodingOptions) async throws -> [TranscriptionResult] {
-        try await whisperKit.transcribe(audioArray: samples16k, decodeOptions: options)
+        try await transcribe(samples16k, options)
     }
 
     /// One preview tick. Returns nil when the voice gate skips the tick, when there is too

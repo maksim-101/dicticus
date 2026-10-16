@@ -7,6 +7,24 @@ import XCTest
 @MainActor
 final class LivePreviewSessionTests: XCTestCase {
 
+    /// A decode that waits here ignores cancellation until the test opens the gate.
+    @MainActor
+    private final class Gate {
+        private var isOpen = false
+        private var waiters: [CheckedContinuation<Void, Never>] = []
+
+        func wait() async {
+            if isOpen { return }
+            await withCheckedContinuation { waiters.append($0) }
+        }
+
+        func openAll() {
+            isOpen = true
+            for waiter in waiters { waiter.resume() }
+            waiters.removeAll()
+        }
+    }
+
     @MainActor
     private final class Probe {
         var running = 0
@@ -210,5 +228,70 @@ final class LivePreviewSessionTests: XCTestCase {
 
     func testTheProductionBudgetIsTwoSeconds() {
         XCTAssertEqual(LivePreviewSession.productionDecodeBudget, .seconds(2))
+    }
+
+    // MARK: - release ordering (G1): drain the preview, then take the samples, then decode them
+
+    func testTheReleaseDrainsThePreviewBeforeTakingTheSamplesAndDecodesExactlyThem() async throws {
+        var events: [String] = []
+        let started = Probe()
+        let gate = Gate()
+        let session = LivePreviewSession(
+            cadence: .milliseconds(1),
+            isActive: { true },
+            decode: {
+                started.calls += 1
+                await gate.wait()  // ignores cancellation, like a CoreML prediction
+                events.append("preview unwound")
+                return nil
+            },
+            publish: { _ in }
+        )
+        session.start()
+        while started.calls == 0 { try await Task.sleep(for: .milliseconds(5)) }
+        // Opens after the drain has begun; the order below holds however long that takes.
+        let opener = Task { try? await Task.sleep(for: .milliseconds(50)); gate.openAll() }
+
+        let decoded = try await TranscriptionService.releaseSequence(
+            previewSession: session,
+            onDrained: { _ in events.append("drained") },
+            takeSamples: { events.append("take samples"); return [1, 2, 3] },
+            decode: { samples in events.append("final decode"); return samples }
+        )
+        await opener.value
+
+        XCTAssertEqual(events, ["preview unwound", "drained", "take samples", "final decode"])
+        XCTAssertEqual(decoded, [1, 2, 3], "the final decode got different samples than the drained buffer")
+    }
+
+    func testTheReleaseWithoutAPreviewStillDecodesTheSamples() async throws {
+        var drained = false
+        let decoded = try await TranscriptionService.releaseSequence(
+            previewSession: nil,
+            onDrained: { _ in drained = true },
+            takeSamples: { [4, 5] },
+            decode: { $0.map { $0 * 2 } }
+        )
+        XCTAssertEqual(decoded, [8, 10])
+        XCTAssertFalse(drained)
+    }
+
+    func testAFailingFinalDecodeStillReportsTheDrainedPreviewStats() async {
+        struct Boom: Error {}
+        let session = LivePreviewSession(cadence: .milliseconds(1), isActive: { true }, decode: { nil }, publish: { _ in })
+        session.start()
+        var drained = false
+        do {
+            _ = try await TranscriptionService.releaseSequence(
+                previewSession: session,
+                onDrained: { _ in drained = true },
+                takeSamples: { [] },
+                decode: { _ -> Int in throw Boom() }
+            )
+            XCTFail("decode error was swallowed")
+        } catch {
+            XCTAssertTrue(error is Boom)
+        }
+        XCTAssertTrue(drained)
     }
 }

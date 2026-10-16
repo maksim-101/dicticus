@@ -6,6 +6,23 @@ import os
 
 private let hotkeyLog = Logger(subsystem: "com.dicticus", category: "hotkey-manager")
 
+/// The part of `TranscriptionService` that `HotkeyManager` drives. A test substitutes a stub,
+/// so the release lifecycle can be exercised without a WhisperKit model or an audio engine.
+@MainActor
+protocol DictationTranscribing: AnyObject {
+    var state: TranscriptionService.State { get }
+    var statePublisher: AnyPublisher<TranscriptionService.State, Never> { get }
+    var lastResult: DicticusTranscriptionResult? { get }
+    var lastLivePreviewStats: LivePreviewSession.Stats? { get }
+    func startRecording() throws
+    func startLivePreview(
+        cadence: Duration,
+        publish: @escaping @MainActor (String) -> Void,
+        silence: (@MainActor () -> Void)?
+    )
+    func stopRecordingAndTranscribe() async throws -> DicticusTranscriptionResult
+}
+
 /// Push-to-talk state machine coordinating hotkey events, TranscriptionService, and TextInjector.
 ///
 /// Per D-01: Hold hotkey starts recording, release triggers transcription and paste.
@@ -70,7 +87,7 @@ class HotkeyManager: ObservableObject {
     @Published var contextPin: DictationContext?
 
     /// Weak reference to TranscriptionService — set via setup().
-    private weak var transcriptionService: TranscriptionService?
+    private weak var transcriptionService: (any DictationTranscribing)?
 
     /// Reference to ModelWarmupService to check isReady before recording.
     private weak var warmupService: ModelWarmupService?
@@ -100,19 +117,26 @@ class HotkeyManager: ObservableObject {
     /// TextInjector for clipboard-based text injection.
     /// Isolated to @MainActor via HotkeyManager's own isolation.
     /// The app-wide shared instance (Phase 50 plan 12, CR-01) — `revertToRaw` pastes through
-    /// the same one so the pasteboard busy window covers both callers.
-    private let textInjector = TextInjector.shared
+    /// the same one so the pasteboard busy window covers both callers. A test passes a subclass
+    /// that records the call instead of pasting.
+    private let textInjector: TextInjector
 
     /// MediaRemote-backed service for PTT media auto-pause (Phase 30, MEDIA-PAUSE-01).
     /// dlopen happens once at construction; guard inside MediaController handles missing framework.
-    private let mediaController = MediaController()
+    private let mediaController: MediaController
 
     /// Live transcript overlay (Phase 51). Shown after a successful recording start when the
     /// preview toggle is on; hidden before the paste and on every discard path.
     private let overlay: LiveOverlayPresenting
 
-    init(overlay: LiveOverlayPresenting? = nil) {
+    init(
+        overlay: LiveOverlayPresenting? = nil,
+        textInjector: TextInjector? = nil,
+        mediaController: MediaController? = nil
+    ) {
         self.overlay = overlay ?? LiveOverlayController()
+        self.textInjector = textInjector ?? TextInjector.shared
+        self.mediaController = mediaController ?? MediaController()
     }
 
     /// Reference to ModifierHotkeyListener — set via setupModifierListener().
@@ -124,16 +148,12 @@ class HotkeyManager: ObservableObject {
     /// Must be called after TranscriptionService is created (after warmup completes).
     /// Safe to call multiple times — KeyboardShortcuts.events(for:) creates new async streams.
     func setup(
-        transcriptionService: TranscriptionService,
+        transcriptionService: any DictationTranscribing,
         warmupService: ModelWarmupService,
         textProcessingService: TextProcessingService
     ) {
-        self.transcriptionService = transcriptionService
-        self.warmupService = warmupService
+        attach(transcriptionService: transcriptionService, warmupService: warmupService)
         self.textProcessingService = textProcessingService
-        self.cleanupService = warmupService.cleanupServiceInstance
-
-        bindState()
 
         // D-04 layer 2: liveness — failure of KeyboardShortcuts to start/keep an AsyncStream is silent
         // in normal flow, so log + publish a recoverable flag.
@@ -177,6 +197,16 @@ class HotkeyManager: ObservableObject {
 
         // Request notification permission on setup
         NotificationService.shared.setup()
+    }
+
+    /// The service wiring of `setup()` without the hotkey streams, so a test can drive the press and
+    /// release handlers directly.
+    func attach(transcriptionService: any DictationTranscribing, warmupService: ModelWarmupService) {
+        self.transcriptionService = transcriptionService
+        self.warmupService = warmupService
+        self.cleanupService = warmupService.cleanupServiceInstance
+
+        bindState()
     }
 
     /// Wire ModifierHotkeyListener into the push-to-talk state machine and start the CGEventTap.
@@ -248,7 +278,7 @@ class HotkeyManager: ObservableObject {
         cancellables.removeAll()
         guard let ts = transcriptionService else { return }
         
-        let tsPub = ts.$state
+        let tsPub = ts.statePublisher
         let csPub = cleanupService?.$state.eraseToAnyPublisher() ?? Just(.idle).eraseToAnyPublisher()
         
         Publishers.CombineLatest3($isRecording, tsPub, csPub)

@@ -1,4 +1,5 @@
 import XCTest
+import WhisperKit
 @testable import Dicticus
 
 /// Regression net for the preview voice gate (Phase 51-11): the decision whether the frames
@@ -126,5 +127,114 @@ final class LivePreviewGateTests: XCTestCase {
         _ = gate.step(samples: Array(repeating: 0.05, count: 4800))
         XCTAssertEqual(gate.energies.count, 1)
         XCTAssertEqual(gate.framedSamples, 4800)
+    }
+
+    // MARK: - decoder rules around the model (no WhisperKit: the decode is a closure)
+
+    private final class Calls: @unchecked Sendable {
+        var decodes = 0
+        var silences = 0
+    }
+
+    private let rate = 16000.0
+
+    private func audio(_ value: Float, seconds: Double) -> [Float] {
+        Array(repeating: value, count: Int(seconds * rate))
+    }
+
+    private func chunk(_ text: String, noSpeechProb: Float = 0) -> TranscriptionResult {
+        TranscriptionResult(
+            text: text,
+            segments: [TranscriptionSegment(text: text, noSpeechProb: noSpeechProb)],
+            language: "en",
+            timings: TranscriptionTimings())
+    }
+
+    private func makeDecoder(
+        buffer: AudioSampleBuffer, calls: Calls, results: [TranscriptionResult]
+    ) -> LivePreviewDecoder {
+        LivePreviewDecoder(
+            transcribe: { _, _ in calls.decodes += 1; return results },
+            buffer: buffer,
+            inputSampleRate: rate,
+            dictionary: { $0 },
+            onSilence: { calls.silences += 1 })
+    }
+
+    func testATickWithoutVoiceNeverReachesTheModel() async {
+        let buffer = AudioSampleBuffer()
+        buffer.append(audio(0.002, seconds: 1.5))
+        let calls = Calls()
+        let decoder = makeDecoder(buffer: buffer, calls: calls, results: [chunk("never decoded")])
+
+        let text = await decoder.decodeTail()
+
+        XCTAssertNil(text)
+        XCTAssertEqual(calls.decodes, 0, "a tick with no voice ran the model")
+        XCTAssertEqual(decoder.skippedNoVoice, 1)
+        XCTAssertFalse(decoder.lastTickRanModel)
+        XCTAssertEqual(calls.silences, 0, "silence before any voice is not a pause")
+    }
+
+    func testTheFirstSilentTickAfterVoiceSignalsOnePauseAndLaterVoiceDecodesAgain() async {
+        let buffer = AudioSampleBuffer()
+        buffer.append(audio(0.002, seconds: 0.8) + audio(0.05, seconds: 0.6))
+        let calls = Calls()
+        let decoder = makeDecoder(buffer: buffer, calls: calls, results: [chunk("hello there friend")])
+
+        let first = await decoder.decodeTail()
+        XCTAssertEqual(first, "hello there friend")
+        XCTAssertEqual(calls.decodes, 1)
+        XCTAssertTrue(decoder.lastTickRanModel)
+        XCTAssertEqual(calls.silences, 0)
+
+        buffer.append(audio(0.002, seconds: 0.3))
+        let pause = await decoder.decodeTail()
+        XCTAssertNil(pause)
+        XCTAssertEqual(calls.decodes, 1, "the silent tick decoded")
+        XCTAssertEqual(calls.silences, 1, "the first silent tick after voice must signal the pause")
+
+        buffer.append(audio(0.002, seconds: 0.3))
+        _ = await decoder.decodeTail()
+        XCTAssertEqual(calls.silences, 1, "the pause is signalled once")
+        XCTAssertEqual(decoder.skippedNoVoice, 2)
+
+        buffer.append(audio(0.05, seconds: 0.3))
+        let resumed = await decoder.decodeTail()
+        XCTAssertNotNil(resumed)
+        XCTAssertEqual(calls.decodes, 2)
+    }
+
+    func testThePreviewKeepsTextThatTheFinalPathsClipRulesWouldDiscard() async {
+        // The final path drops a lone "you" from a clip under 1.5 s, and a decode whose segments
+        // all carry a high no-speech probability. The preview applies neither (D-03).
+        let clipSeconds = 1.3
+        XCTAssertNotNil(BoilerplateHallucination.matchShortStock("you", durationSeconds: Float(clipSeconds), voiceDetected: true))
+        XCTAssertTrue(NoSpeechDiscard.looksLikeSilence(noSpeechProbs: [0.99]))
+
+        let buffer = AudioSampleBuffer()
+        buffer.append(audio(0.002, seconds: 0.6) + audio(0.05, seconds: 0.7))
+        let calls = Calls()
+        let decoder = makeDecoder(buffer: buffer, calls: calls, results: [chunk("you", noSpeechProb: 0.99)])
+
+        let text = await decoder.decodeTail()
+
+        XCTAssertEqual(text, "you")
+        XCTAssertEqual(calls.decodes, 1)
+    }
+
+    func testTooLittleAudioIsNotConsumedByTheGate() async {
+        let buffer = AudioSampleBuffer()
+        buffer.append(audio(0.002, seconds: 0.3) + audio(0.05, seconds: 0.4))
+        let calls = Calls()
+        let decoder = makeDecoder(buffer: buffer, calls: calls, results: [chunk("early")])
+
+        let early = await decoder.decodeTail()
+        XCTAssertNil(early)
+        XCTAssertEqual(decoder.skippedNoVoice, 0, "a short opening word must not be consumed without a decode")
+
+        buffer.append(audio(0.05, seconds: 0.6))
+        let later = await decoder.decodeTail()
+        XCTAssertEqual(later, "early")
     }
 }
