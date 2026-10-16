@@ -4,18 +4,29 @@ import XCTest
 /// Regression net for the preview session state machine, with injected decode closures
 /// (no model): D-04 (one decode in flight, no queue) and D-02 (the release path can wait
 /// for the in-flight decode to unwind, and a late result is never published).
+///
+/// No test depends on tight timing: decodes are held by a `Gate` the test controls, tests wait on
+/// state with a generous cap (a passing run returns at once), and the only elapsed-time checks are
+/// lower bounds, which a loaded machine can only satisfy more easily.
 @MainActor
 final class LivePreviewSessionTests: XCTestCase {
 
-    /// A decode that waits here ignores cancellation until the test opens the gate.
+    /// A decode that waits here ignores cancellation until the test lets it through, like a
+    /// CoreML prediction: `grant()` releases one waiter, `openAll()` releases every present and future one.
     @MainActor
     private final class Gate {
         private var isOpen = false
+        private var permits = 0
         private var waiters: [CheckedContinuation<Void, Never>] = []
 
         func wait() async {
             if isOpen { return }
+            if permits > 0 { permits -= 1; return }
             await withCheckedContinuation { waiters.append($0) }
+        }
+
+        func grant() {
+            if waiters.isEmpty { permits += 1 } else { waiters.removeFirst().resume() }
         }
 
         func openAll() {
@@ -31,86 +42,117 @@ final class LivePreviewSessionTests: XCTestCase {
         var maxRunning = 0
         var calls = 0
         var unwound = false
+        var drained = false
         var published: [String] = []
+        var starts: [ContinuousClock.Instant] = []
     }
 
-    func testAtMostOneDecodeInFlightWhenDecodeOutlastsCadence() async {
+    private func waitUntil(_ condition: () -> Bool) async {
+        let deadline = ContinuousClock.now + .seconds(15)
+        while !condition(), ContinuousClock.now < deadline { try? await Task.sleep(for: .milliseconds(5)) }
+    }
+
+    func testAtMostOneDecodeInFlightAndNoDecodeIsQueuedBehindASlowOne() async {
         let probe = Probe()
+        let gate = Gate()
         let session = LivePreviewSession(
-            cadence: .milliseconds(50),
+            cadence: .milliseconds(1),
             isActive: { true },
             decode: {
+                probe.calls += 1
                 probe.running += 1
                 probe.maxRunning = max(probe.maxRunning, probe.running)
-                try? await Task.sleep(for: .milliseconds(150))
+                await gate.wait()
                 probe.running -= 1
                 return nil
             },
             publish: { _ in }
         )
         session.start()
-        try? await Task.sleep(for: .seconds(1))
+        for expected in 1...4 {
+            await waitUntil { probe.calls == expected }
+            XCTAssertEqual(probe.calls, expected, "a decode started while the previous one was still held")
+            XCTAssertEqual(probe.running, 1)
+            gate.grant()
+            await waitUntil { probe.calls == expected + 1 }
+        }
+        gate.openAll()
         let stats = await session.cancelAndDrain()
 
         XCTAssertEqual(probe.maxRunning, 1)
-        XCTAssertLessThanOrEqual(stats.ticks, 8, "decodes queued up behind a slow one")
-        XCTAssertGreaterThanOrEqual(stats.ticks, 3)
+        XCTAssertGreaterThanOrEqual(stats.ticks, 4)
     }
 
-    func testInstantDecodeTicksAtTheCadence() async {
+    func testTicksAreSpacedByAtLeastTheCadence() async {
+        let probe = Probe()
+        let clock = ContinuousClock()
+        let cadence = Duration.milliseconds(100)
         let session = LivePreviewSession(
-            cadence: .milliseconds(200),
-            isActive: { true },
-            decode: { nil },
+            cadence: cadence,
+            isActive: { probe.calls < 4 },
+            decode: { probe.starts.append(clock.now); probe.calls += 1; return nil },
             publish: { _ in }
         )
         session.start()
-        try? await Task.sleep(for: .milliseconds(1050))
-        let stats = await session.cancelAndDrain()
+        await waitUntil { !session.isRunning }
 
-        XCTAssertGreaterThanOrEqual(stats.ticks, 5)
-        XCTAssertLessThanOrEqual(stats.ticks, 7)
+        XCTAssertEqual(probe.starts.count, 4)
+        for (earlier, later) in zip(probe.starts, probe.starts.dropFirst()) {
+            XCTAssertGreaterThanOrEqual(later - earlier, cadence - .milliseconds(20), "ticks ran faster than the cadence")
+        }
     }
 
     func testCancelAndDrainWaitsForTheDecodeAndNeverPublishesItsLateResult() async {
         let probe = Probe()
+        let gate = Gate()
         let session = LivePreviewSession(
-            cadence: .milliseconds(10),
+            cadence: .milliseconds(1),
             isActive: { true },
             decode: {
-                // The detached sleep ignores cancellation, like a CoreML prediction.
-                await Task.detached { try? await Task.sleep(for: .milliseconds(300)) }.value
+                probe.calls += 1
+                await gate.wait()
                 probe.unwound = true
                 return "late"
             },
             publish: { probe.published.append($0) }
         )
         session.start()
-        try? await Task.sleep(for: .milliseconds(60))
+        await waitUntil { probe.calls == 1 }
+        let drain = Task { () -> LivePreviewSession.Stats in
+            let stats = await session.cancelAndDrain()
+            probe.drained = true
+            return stats
+        }
+        // If the drain did not wait for the decode it would have returned by now.
+        try? await Task.sleep(for: .milliseconds(50))
+        XCTAssertFalse(probe.drained, "cancelAndDrain returned while the decode was still in flight")
         XCTAssertFalse(probe.unwound)
 
-        let stats = await session.cancelAndDrain()
+        gate.openAll()
+        let stats = await drain.value
 
-        XCTAssertTrue(probe.unwound, "cancelAndDrain returned before the decode finished")
+        XCTAssertTrue(probe.unwound)
         XCTAssertTrue(stats.cancelledInFlight)
         XCTAssertEqual(stats.published, 0)
         XCTAssertTrue(probe.published.isEmpty)
-        XCTAssertGreaterThan(stats.drainDuration, .milliseconds(100))
+        XCTAssertGreaterThanOrEqual(stats.drainDuration, .milliseconds(40))
         XCTAssertFalse(session.isRunning)
     }
 
     func testCancelAndDrainIsSafeToCallTwice() async {
+        let probe = Probe()
         let session = LivePreviewSession(
-            cadence: .milliseconds(20),
+            cadence: .milliseconds(5),
             isActive: { true },
             decode: { "x" },
-            publish: { _ in }
+            publish: { probe.published.append($0) }
         )
         session.start()
-        try? await Task.sleep(for: .milliseconds(100))
+        await waitUntil { probe.published.count >= 2 }
         let first = await session.cancelAndDrain()
         let second = await session.cancelAndDrain()
 
+        XCTAssertGreaterThanOrEqual(first.published, 2)
         XCTAssertEqual(first.ticks, second.ticks)
         XCTAssertEqual(first.published, second.published)
     }
@@ -118,19 +160,24 @@ final class LivePreviewSessionTests: XCTestCase {
     func testLoopStopsWhenTheSessionIsNoLongerActive() async {
         let probe = Probe()
         let session = LivePreviewSession(
-            cadence: .milliseconds(20),
+            cadence: .milliseconds(5),
             isActive: { probe.calls < 2 },
             decode: { probe.calls += 1; return nil },
             publish: { _ in }
         )
         session.start()
-        try? await Task.sleep(for: .milliseconds(300))
+        await waitUntil { !session.isRunning }
         let stats = await session.cancelAndDrain()
 
         XCTAssertEqual(stats.ticks, 2)
     }
 
     // MARK: - decode budget (review WR-02)
+
+    /// A model run slower than this ends the previews; `slow` is far above it and `fast` far below.
+    private let budget = Duration.milliseconds(400)
+    private let slow = 1500
+    private let fast = 0
 
     private func budgetSession(
         decodeMs: [Int],
@@ -139,7 +186,7 @@ final class LivePreviewSessionTests: XCTestCase {
     ) -> LivePreviewSession {
         var call = 0
         return LivePreviewSession(
-            cadence: .milliseconds(10),
+            cadence: .milliseconds(5),
             isActive: { true },
             decode: {
                 let ms = decodeMs[min(call, decodeMs.count - 1)]
@@ -148,15 +195,15 @@ final class LivePreviewSessionTests: XCTestCase {
                 return "x"
             },
             publish: publish,
-            decodeBudget: .milliseconds(200),
+            decodeBudget: budget,
             ranModel: ranModel
         )
     }
 
     func testASlowDecodeEndsPreviewsForTheHoldAndStillPublishesItsText() async {
-        let session = budgetSession(decodeMs: [50, 300])
+        let session = budgetSession(decodeMs: [fast, slow])
         session.start()
-        try? await Task.sleep(for: .seconds(1))
+        await waitUntil { !session.isRunning }
         let stats = await session.cancelAndDrain()
 
         XCTAssertEqual(stats.ticks, 2)
@@ -166,19 +213,21 @@ final class LivePreviewSessionTests: XCTestCase {
     }
 
     func testDecodesWithinTheBudgetKeepRunning() async {
-        let session = budgetSession(decodeMs: [50])
+        let probe = Probe()
+        let session = budgetSession(decodeMs: [fast], publish: { probe.published.append($0) })
         session.start()
-        try? await Task.sleep(for: .seconds(1))
+        await waitUntil { probe.published.count >= 4 }
         let stats = await session.cancelAndDrain()
 
-        XCTAssertGreaterThanOrEqual(stats.ticks, 3)
+        XCTAssertGreaterThanOrEqual(stats.ticks, 4)
         XCTAssertFalse(stats.overBudget)
     }
 
     func testTheFirstDecodeOfAHoldIsExemptFromTheBudget() async {
-        let session = budgetSession(decodeMs: [300, 50])
+        let probe = Probe()
+        let session = budgetSession(decodeMs: [slow, fast], publish: { probe.published.append($0) })
         session.start()
-        try? await Task.sleep(for: .seconds(1))
+        await waitUntil { probe.published.count >= 3 }
         let stats = await session.cancelAndDrain()
 
         XCTAssertGreaterThanOrEqual(stats.ticks, 3)
@@ -189,20 +238,21 @@ final class LivePreviewSessionTests: XCTestCase {
         // Ticks 1-2 return early like a hold shorter than 1.2 s; the first model run is
         // tick 3 and is slow. Only the second slow model run ends the previews.
         var tick = 0
+        let slowMs = slow
         let session = LivePreviewSession(
-            cadence: .milliseconds(10),
+            cadence: .milliseconds(5),
             isActive: { true },
             decode: {
                 tick += 1
-                if tick > 2 { try? await Task.sleep(for: .milliseconds(300)) }
+                if tick > 2 { try? await Task.sleep(for: .milliseconds(slowMs)) }
                 return nil
             },
             publish: { _ in },
-            decodeBudget: .milliseconds(200),
+            decodeBudget: budget,
             ranModel: { tick > 2 }
         )
         session.start()
-        try? await Task.sleep(for: .seconds(1.5))
+        await waitUntil { !session.isRunning }
         let stats = await session.cancelAndDrain()
 
         XCTAssertEqual(stats.ticks, 4)
@@ -219,7 +269,6 @@ final class LivePreviewSessionTests: XCTestCase {
             skippedNoVoice: { 7 }
         )
         session.start()
-        try? await Task.sleep(for: .milliseconds(50))
         let stats = await session.cancelAndDrain()
 
         XCTAssertEqual(stats.skippedNoVoice, 7)
@@ -248,7 +297,7 @@ final class LivePreviewSessionTests: XCTestCase {
             publish: { _ in }
         )
         session.start()
-        while started.calls == 0 { try await Task.sleep(for: .milliseconds(5)) }
+        await waitUntil { started.calls > 0 }
         // Opens after the drain has begun; the order below holds however long that takes.
         let opener = Task { try? await Task.sleep(for: .milliseconds(50)); gate.openAll() }
 

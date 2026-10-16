@@ -38,6 +38,7 @@ final class LivePreviewDecoder {
         chunkingStrategy: .vad
     )
 
+    /// Per-tick timing for the latency spike and the recorder; compiled out of Release.
     struct Timing: Sendable {
         var snapshotMs: Double
         var resampleMs: Double
@@ -57,6 +58,7 @@ final class LivePreviewDecoder {
     private let onSilence: (@MainActor () -> Void)?
     private var gate: LivePreviewVoiceGate
 
+    /// Set only in DEBUG builds.
     private(set) var lastTiming: Timing?
 
     /// Ticks the voice gate skipped because no new voiced audio had arrived.
@@ -107,8 +109,10 @@ final class LivePreviewDecoder {
     /// frames only the audio added since the last tick, but measures it against the noise
     /// floor of the whole hold, so continuous speech is not mistaken for its own floor.
     func decodeTail() async -> String? {
+        #if DEBUG
         let clock = ContinuousClock()
         let t0 = clock.now
+        #endif
         lastTickRanModel = false
 
         let rate = inputSampleRate
@@ -126,7 +130,9 @@ final class LivePreviewDecoder {
         }
 
         let tail = buffer.snapshotTail(maxSamples: Int(Self.tailSeconds * rate))
+        #if DEBUG
         let t1 = clock.now
+        #endif
 
         let samples16k: [Float]
         if abs(rate - Self.targetSampleRate) > 1.0 {
@@ -136,7 +142,9 @@ final class LivePreviewDecoder {
         } else {
             samples16k = tail
         }
+        #if DEBUG
         let t2 = clock.now
+        #endif
 
         let results: [TranscriptionResult]
         do {
@@ -144,7 +152,9 @@ final class LivePreviewDecoder {
         } catch {
             return nil
         }
+        #if DEBUG
         let t3 = clock.now
+        #endif
 
         // A cancelled decode can return normally with partial text.
         guard !Task.isCancelled else { return nil }
@@ -153,8 +163,8 @@ final class LivePreviewDecoder {
             from: results.map { (text: $0.text, language: $0.language) },
             dictionary: dictionary
         )
+        #if DEBUG
         let t4 = clock.now
-
         lastTiming = Timing(
             snapshotMs: Self.milliseconds(t1 - t0),
             resampleMs: Self.milliseconds(t2 - t1),
@@ -162,6 +172,7 @@ final class LivePreviewDecoder {
             filterMs: Self.milliseconds(t4 - t3),
             tokenCount: results.reduce(0) { $0 + $1.segments.reduce(0) { $0 + $1.tokens.count } }
         )
+        #endif
         return text
     }
 

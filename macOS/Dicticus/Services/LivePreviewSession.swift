@@ -30,6 +30,7 @@ final class LivePreviewSession {
         var published: Int
         var cancelledInFlight: Bool
         var drainDuration: Duration
+        /// Per model run and per publish; filled in DEBUG builds only (empty in Release).
         var decodeDurations: [Duration]
         var publishInstants: [ContinuousClock.Instant]
         /// The hold's previews were stopped because a decode exceeded the budget.
@@ -90,13 +91,17 @@ final class LivePreviewSession {
                 decodeInFlight = false
                 let elapsed = clock.now - started
                 let ranTheModel = ranModel()
+                #if DEBUG
                 // Skipped ticks take no time worth reporting; only model runs are timed.
                 if ranTheModel { decodeDurations.append(elapsed) }
+                #endif
                 ticks += 1
                 // A decode that finishes after cancellation must never be published.
                 if let text, !Task.isCancelled {
                     published += 1
+                    #if DEBUG
                     publishInstants.append(clock.now)
+                    #endif
                     publish(text)
                 }
                 // Budget stop (WR-02). Only ticks that ran the model count, and the first of
