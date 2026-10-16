@@ -234,6 +234,10 @@ struct HomePane: View {
                         .frame(maxWidth: .infinity)
                 }
             }
+
+            #if DEBUG_RECORDER
+            FlagLastPreviewButton()
+            #endif
         }
     }
 
@@ -367,6 +371,46 @@ private struct RevertToRawButton: View {
         .accessibilityLabel("Revert to Raw")
     }
 }
+
+#if DEBUG_RECORDER
+// MARK: - FlagLastPreviewButton
+
+/// Quick 261016-nx0: saves the last preview hold (audio + published previews) via
+/// PreviewFlagRecorder. Debug-Recorder builds only; the caption names the file or the reason.
+private struct FlagLastPreviewButton: View {
+
+    @ObservedObject var recorder = PreviewFlagRecorder.shared
+    @State private var status: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button {
+                Task {
+                    let outcome = await recorder.flag()
+                    status = outcome.message
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+                        status = nil
+                    }
+                }
+            } label: {
+                Label("Flag last preview", systemImage: "flag")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(!recorder.canFlag)
+            .help("Saves the last hold's audio and preview timeline to DebugRecordings/preview-flags")
+            .accessibilityLabel("Flag last preview")
+
+            if let status {
+                Text(status)
+                    .font(.caption)
+                    .foregroundStyle(Color.secondary)
+            }
+        }
+    }
+}
+#endif
 
 // MARK: - Color(hex:) helper (local, macOS only)
 
