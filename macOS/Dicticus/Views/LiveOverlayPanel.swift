@@ -33,6 +33,10 @@ final class LiveOverlayModel: ObservableObject {
     /// Read at every `show()`: no rise and no line slide, fade only.
     @Published var reduceMotion = false
 
+    /// The colour ring on the pane edge runs from release until the paste hides the panel;
+    /// Reduce Transparency removes it.
+    var isProcessingIndicatorActive: Bool { phase == .processing && !reduceTransparency }
+
     /// The whole line, for animation keys and tests.
     var combined: String {
         tentative.isEmpty ? settled : settled.isEmpty ? tentative : settled + " " + tentative

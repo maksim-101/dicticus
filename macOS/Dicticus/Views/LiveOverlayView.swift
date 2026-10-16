@@ -38,7 +38,13 @@ struct LiveOverlayView: View {
                 Sheen()
             }
             content
+            if model.isProcessingIndicatorActive {
+                ProcessingRing(rotates: !model.reduceMotion)
+                    .transition(.opacity)
+            }
         }
+        .animation(model.reduceMotion ? nil : .easeOut(duration: ProcessingRing.fadeDuration),
+                   value: model.isProcessingIndicatorActive)
         .frame(width: Self.width, height: Self.height)
         .accessibilityHidden(true)
     }
@@ -109,6 +115,59 @@ struct LiveOverlayView: View {
         }
         guard let firstSpace = tail.firstIndex(where: \.isWhitespace) else { return String(tail) }
         return String(tail[firstSpace...].drop(while: \.isWhitespace))
+    }
+}
+
+/// Processing indicator P1 "border snake" (host session 2): a short colourful segment travels
+/// once around the pane edge every `period` seconds. Reduce Motion shows the whole rim at low
+/// strength instead. Drawn inside the glass content, masked to a stroke along the pane shape.
+private struct ProcessingRing: View {
+    let rotates: Bool
+
+    static let fadeDuration: TimeInterval = 0.35
+    static let period: TimeInterval = 1.6
+    static let lineWidth: CGFloat = 1.5
+    static let restingOpacity = 0.35
+
+    private static let cyan = Color(red: 0x6E / 255, green: 0xE7 / 255, blue: 0xF9 / 255)
+    private static let violet = Color(red: 0xA7 / 255, green: 0x8B / 255, blue: 0xFA / 255)
+    private static let pink = Color(red: 0xF4 / 255, green: 0x72 / 255, blue: 0xB6 / 255)
+
+    @State private var turn = 0.0
+
+    private static var snake: Gradient {
+        Gradient(stops: [
+            .init(color: cyan.opacity(0), location: 0),
+            .init(color: cyan.opacity(0), location: 250 / 360),
+            .init(color: cyan, location: 290 / 360),
+            .init(color: violet, location: 320 / 360),
+            .init(color: pink, location: 345 / 360),
+            .init(color: pink.opacity(0), location: 1)
+        ])
+    }
+
+    private static var rim: Gradient { Gradient(colors: [cyan, violet, pink, cyan]) }
+
+    var body: some View {
+        let diagonal = (LiveOverlayView.width * LiveOverlayView.width + LiveOverlayView.height * LiveOverlayView.height).squareRoot()
+        Color.clear
+            .frame(width: LiveOverlayView.width, height: LiveOverlayView.height)
+            .overlay {
+                Rectangle()
+                    .fill(AngularGradient(gradient: rotates ? Self.snake : Self.rim, center: .center, angle: .degrees(-90)))
+                    .frame(width: diagonal, height: diagonal)
+                    .rotationEffect(.degrees(turn))
+            }
+            .mask {
+                RoundedRectangle(cornerRadius: LiveOverlayView.cornerRadius, style: .continuous)
+                    .strokeBorder(Color.black, lineWidth: Self.lineWidth)
+            }
+            .opacity(rotates ? 1 : Self.restingOpacity)
+            .allowsHitTesting(false)
+            .onAppear {
+                guard rotates else { return }
+                withAnimation(.linear(duration: Self.period).repeatForever(autoreverses: false)) { turn = 360 }
+            }
     }
 }
 

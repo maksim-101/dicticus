@@ -293,6 +293,34 @@ final class LiveOverlayPanelTests: XCTestCase {
         XCTAssertEqual(settled.minY, expected.origin.y, accuracy: 0.5, "the rise ends on the placement target")
     }
 
+    // MARK: - Processing ring (plan 51-13, host session 2: "Dan")
+
+    func testProcessingRingRunsFromReleaseUntilTheNextShow() {
+        let controller = LiveOverlayController(
+            targetAlpha: 0, accessibility: { OverlayAccessibilityFlags(reduceMotion: true) })
+        controller.show()
+        XCTAssertFalse(controller.modelForTesting.isProcessingIndicatorActive, "no ring while listening")
+        controller.update("one two three four")
+        controller.settle()
+        XCTAssertFalse(controller.modelForTesting.isProcessingIndicatorActive, "a pause is not processing")
+        controller.setProcessing()
+        XCTAssertTrue(controller.modelForTesting.isProcessingIndicatorActive)
+        controller.hide(reason: .pasting)
+        controller.show()
+        XCTAssertFalse(controller.modelForTesting.isProcessingIndicatorActive, "the next press starts without a ring")
+        controller.hide(reason: .demo)
+    }
+
+    func testReduceTransparencyShowsNoProcessingRing() {
+        let controller = LiveOverlayController(
+            targetAlpha: 0, accessibility: { OverlayAccessibilityFlags(reduceTransparency: true) })
+        controller.show()
+        controller.setProcessing()
+        XCTAssertEqual(controller.modelForTesting.phase, .processing)
+        XCTAssertFalse(controller.modelForTesting.isProcessingIndicatorActive)
+        controller.hide(reason: .demo)
+    }
+
     func testThePanelIsSilentToVoiceOver() throws {
         let panel = LiveOverlayPanel(model: LiveOverlayModel())
         let hosting = try XCTUnwrap(panel.glassView.contentView)
