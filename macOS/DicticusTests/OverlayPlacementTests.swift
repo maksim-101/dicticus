@@ -142,6 +142,18 @@ final class OverlayPlacementTests: XCTestCase {
         XCTAssertEqual(p.origin.x, window.midX - panel.width / 2)
     }
 
+    // Review 2 WR-01: a palette-style window (40 pt field in a 70 pt window) passed the large-area
+    // ratio, and the top-of-window band covered the whole window and the field.
+    func testPaletteWindowFieldIsKeptClearAsASingleLineField() {
+        let window = CGRect(x: 500, y: 300, width: 600, height: 70)
+        let field = CGRect(x: 520, y: 315, width: 560, height: 40)
+        let ax = CGRect(x: 540, y: 327, width: 2, height: 16)
+        let p = place(.init(caret: ax, element: field, window: window), screens: [screen()])
+        let fieldRect = OverlayPlacement.appKitRect(fromAX: field, primaryScreenHeight: 1000)
+        XCTAssertFalse(p.flipped)
+        XCTAssertEqual(p.origin.y, fieldRect.maxY + 8)
+    }
+
     func testLargeAreaTopPlacementIsClampedWhenTheWindowReachesAboveTheScreen() {
         let tall = CGRect(x: 100, y: -150, width: 1200, height: 800)
         let area = CGRect(x: 100, y: -100, width: 1200, height: 740)

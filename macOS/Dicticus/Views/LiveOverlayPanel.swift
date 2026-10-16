@@ -138,8 +138,9 @@ final class LiveOverlayPanel: NSPanel {
         isReleasedWhenClosed = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
 
-        // D-18: dictated text stays out of screen sharing and recording. AppKit keeps `.none`
-        // for good once it is set, so the one DEBUG exception must be decided before the first set.
+        // D-18 asked for exclusion from screen sharing and recording; on macOS 26 a screen recording
+        // still captures the panel (host session 1), so `.none` is best effort only. AppKit keeps
+        // `.none` for good once it is set, so the one DEBUG exception must be decided before the first set.
         #if DEBUG
         let allowCapture = capturable || DicticusDefaults.suite.bool(forKey: "debugOverlayCapturable")
         #else

@@ -72,8 +72,10 @@ public actor OverlayProbe {
     }
 
     private nonisolated static func array(_ r: CGRect?) -> Any {
+        // Raw AX bounds come from other apps; a NaN or infinity would make JSONSerialization raise.
         guard let r else { return NSNull() }
-        return [r.origin.x, r.origin.y, r.size.width, r.size.height].map { Double($0) }
+        let values = [r.origin.x, r.origin.y, r.size.width, r.size.height].map { Double($0) }
+        return values.allSatisfy(\.isFinite) ? values : NSNull()
     }
 
     /// `stabilizerConflicts` / `stabilizerGaps` are counts of preview alignment fallbacks (plan 51-10).

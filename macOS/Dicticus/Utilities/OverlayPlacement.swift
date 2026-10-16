@@ -87,7 +87,9 @@ enum OverlayPlacement {
             guard let window, let element, window.width > 0, window.height > 0,
                   window.midX >= target.frame.minX, window.midX < target.frame.maxX,
                   window.midY >= target.frame.minY, window.midY < target.frame.maxY,
-                  element.height > window.height * largeAreaRatio else { return nil }
+                  element.height > window.height * largeAreaRatio,
+                  // Each half must hold the panel, or the band lands on the caret (palette-style windows).
+                  window.height / 2 >= panel.height + topInset else { return nil }
             return window
         }
 
