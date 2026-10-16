@@ -125,26 +125,32 @@ final class AsrReplayHarnessTests: XCTestCase {
 
     /// Read a WAV into mono Float32 at its native rate. Resampling is deliberately left
     /// to the production path so the replay exercises it too.
+    ///
+    /// Reads in 16384-frame chunks: on macOS 27 a single `read(into:)` sized to the whole
+    /// file of a Float32 WAV returns short (e.g. 15360 of 16000 frames), silently dropping
+    /// the tail (quick 261016-nx0).
     static func readWav(_ url: URL) -> ([Float], Double)? {
-        guard let file = try? AVAudioFile(forReading: url) else { return nil }
+        guard let file = try? AVAudioFile(forReading: url), file.length > 0 else { return nil }
         let format = file.processingFormat
-        let frames = AVAudioFrameCount(file.length)
-        guard frames > 0,
-              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames),
-              (try? file.read(into: buffer)) != nil,
-              let channels = buffer.floatChannelData
-        else { return nil }
-
-        let count = Int(buffer.frameLength)
         let channelCount = Int(format.channelCount)
-        var samples = [Float](repeating: 0, count: count)
-        if channelCount == 1 {
-            samples = Array(UnsafeBufferPointer(start: channels[0], count: count))
-        } else {
-            for frame in 0..<count {
-                var acc: Float = 0
-                for channel in 0..<channelCount { acc += channels[channel][frame] }
-                samples[frame] = acc / Float(channelCount)
+        guard let chunk = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 16_384) else { return nil }
+
+        var samples = [Float]()
+        samples.reserveCapacity(Int(file.length))
+        while file.framePosition < file.length {
+            guard (try? file.read(into: chunk)) != nil,
+                  chunk.frameLength > 0,
+                  let channels = chunk.floatChannelData
+            else { return nil }
+            let count = Int(chunk.frameLength)
+            if channelCount == 1 {
+                samples.append(contentsOf: UnsafeBufferPointer(start: channels[0], count: count))
+            } else {
+                for frame in 0..<count {
+                    var acc: Float = 0
+                    for channel in 0..<channelCount { acc += channels[channel][frame] }
+                    samples.append(acc / Float(channelCount))
+                }
             }
         }
         return (samples, format.sampleRate)
