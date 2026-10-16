@@ -207,6 +207,17 @@ final class OverlayPlacementTests: XCTestCase {
         XCTAssertEqual(p.origin.y, element.minY + 16)
     }
 
+    // Host session 2: Vivaldi's address bar with the URL selected reports no caret; the
+    // bottom-centre fallback put the panel inside the field.
+    func testSingleLineFieldWithoutCaretIsKeptClearAsAWhole() {
+        let field = CGRect(x: 300, y: 12, width: 600, height: 34)
+        let p = place(.init(element: field), screens: [screen()])
+        let fieldRect = OverlayPlacement.appKitRect(fromAX: field, primaryScreenHeight: 1000)
+        XCTAssertEqual(p.source, .element)
+        XCTAssertTrue(p.flipped)
+        XCTAssertEqual(p.origin.y, fieldRect.minY - 8 - panel.height)
+    }
+
     func testNoCaretNoElementUsesWindow() {
         let p = place(.init(window: CGRect(x: 100, y: 100, width: 900, height: 700)), screens: [screen()])
         XCTAssertEqual(p.source, .window)

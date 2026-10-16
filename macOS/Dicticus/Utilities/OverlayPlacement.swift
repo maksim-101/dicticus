@@ -89,6 +89,12 @@ enum OverlayPlacement {
         for (rect, source) in [(element, Source.element), (window, .window)] {
             guard let rect, rect.width > 0, rect.height > 0,
                   let target = screen(containing: CGPoint(x: rect.midX, y: rect.midY), in: screens) else { continue }
+            // A single-line field with no reported caret (e.g. a selected URL) is kept clear like one with a caret.
+            if source == .element, rect.height <= 60 {
+                let (origin, flipped) = caretOrigin(
+                    anchor: rect, centreX: centreX(on: target), panel: panel, visible: target.visibleFrame)
+                return Placement(origin: origin, source: source, flipped: flipped, visibleFrame: target.visibleFrame)
+            }
             let origin = bottomCentreOrigin(
                 on: rect, centreX: centreX(on: target), panel: panel, visible: target.visibleFrame)
             return Placement(origin: origin, source: source, flipped: false, visibleFrame: target.visibleFrame)
