@@ -53,6 +53,13 @@ if [ ! -d "$APP_DIR/Dicticus.app" ]; then
     exit 1
 fi
 
+# Phase 51 D-08: the appcast gates on this value, so a wrong target must stop the release before signing.
+MIN_OS="$(plutil -extract LSMinimumSystemVersion raw "$APP_DIR/Dicticus.app/Contents/Info.plist")"
+if [ "$MIN_OS" != "26.0" ]; then
+    echo "ERROR: LSMinimumSystemVersion is '$MIN_OS', expected 26.0 (Phase 51 D-08)"
+    exit 1
+fi
+
 # Ensure the Developer ID key is present; auto-restore from 1Password if missing (D-02/D-03).
 # shellcheck source=scripts/_signing-guard.sh
 # shellcheck disable=SC1091

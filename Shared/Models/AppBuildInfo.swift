@@ -25,14 +25,21 @@ enum AppBuildInfo {
         return s
     }
 
-    static let recentChanges: [String] = [
-        "macOS: Added: a live transcript panel near the text cursor while you hold the dictation key (turn it off in Settings → General); now requires macOS 26",
+    static let recentChanges: [String] = platformChanges + [
         "Fixed: AI cleanup no longer swaps a correctly dictated German compound for a different word",
         "Fixed: a dictation that starts with a number no longer capitalizes the word after it",
         "Fixed: technical terms such as WebUI or YAML are no longer \"corrected\" into a different brand or word",
         "Fixed: AI cleanup's commas in spoken lists and its sentence breaks in long dictations are kept",
         "Added: spoken punctuation for brackets, ellipsis, question and exclamation marks, and new lines",
     ]
+
+    #if os(macOS)
+    private static let platformChanges = [
+        "Added: a live transcript panel near the text cursor while you hold the dictation key (turn it off in Settings → General); now requires macOS 26",
+    ]
+    #else
+    private static let platformChanges: [String] = []
+    #endif
 
     static let releasesURL = URL(string: "https://github.com/maksim-101/dicticus/releases")!
 }
