@@ -629,6 +629,8 @@ class HotkeyManager: ObservableObject {
                 #if DEBUG_RECORDER
                 // 261003-jvq: observe post-paste edits; unstructured, never awaited by this dictation Task.
                 if outcome == .delivered {
+                    // 261016-nx0: the paste may land after a newer hold began, so the note carries this hold's seq.
+                    if recordPreviewSession { PreviewFlagRecorder.shared.notePasted(seq: overlaySeq, text: finalOutput) }
                     let pasteDate = Date()
                     let secureInput = PasteProbe.secureInputEnabled()
                     Task {

@@ -262,9 +262,21 @@ class TranscriptionService: ObservableObject {
         let buffer = sampleBuffer
         let transcriptionResult = try await finishTranscription(
             previewSession: session,
-            takeSamples: { buffer.drain() },
+            takeSamples: {
+                let samples = buffer.drain()
+                #if DEBUG_RECORDER
+                // 261016-nx0: keep the hold's audio for "Flag last preview" (a preview ran for this hold).
+                if session != nil { PreviewFlagRecorder.shared.noteSamples(samples, inputSampleRate: inputSampleRate) }
+                #endif
+                return samples
+            },
             inputSampleRate: inputSampleRate
         ).result
+        #if DEBUG_RECORDER
+        if session != nil {
+            PreviewFlagRecorder.shared.noteFinal(text: transcriptionResult.text, language: transcriptionResult.language)
+        }
+        #endif
 
         lastResult = transcriptionResult
         state = .idle

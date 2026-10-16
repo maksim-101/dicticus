@@ -245,6 +245,10 @@ final class LiveOverlayController: LiveOverlayPresenting {
         let frontmost = NSWorkspace.shared.frontmostApplication
         let pid = frontmost?.processIdentifier
         let bundleID = frontmost?.bundleIdentifier
+        #if DEBUG_RECORDER
+        // 261016-nx0: remember this hold for "Flag last preview".
+        PreviewFlagRecorder.shared.beginHold(seq: seq, bundleID: bundleID)
+        #endif
         let provider = candidateProvider
         Task { [weak self] in
             let candidates = await provider(pid)
@@ -291,17 +295,28 @@ final class LiveOverlayController: LiveOverlayPresenting {
     func update(_ text: String) {
         guard visible, model.phase == .listening else { return }
         stabilizer.ingest(text)
+        #if DEBUG_RECORDER
+        PreviewFlagRecorder.shared.notePublish(
+            seq: currentSeq, text: text, settled: stabilizer.settledText, tentative: stabilizer.tentativeText)
+        #endif
         publishStabilizer()
     }
 
     func settle() {
         guard visible, model.phase == .listening else { return }
         stabilizer.settleAll()
+        #if DEBUG_RECORDER
+        PreviewFlagRecorder.shared.noteSettle(
+            seq: currentSeq, settled: stabilizer.settledText, tentative: stabilizer.tentativeText)
+        #endif
         publishStabilizer()
     }
 
     func setProcessing() {
         guard visible else { return }
+        #if DEBUG_RECORDER
+        PreviewFlagRecorder.shared.noteRelease(seq: currentSeq)
+        #endif
         stabilizer.settleAll()
         publishStabilizer()
         model.phase = .processing
