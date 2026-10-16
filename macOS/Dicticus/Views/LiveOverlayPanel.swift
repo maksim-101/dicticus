@@ -7,6 +7,8 @@ protocol LiveOverlayPresenting: AnyObject {
     /// Incremented by every real `show()`. Lets a release Task tell whether the panel it
     /// started with is still the current one before it hides.
     var currentSeq: Int { get }
+    /// Builds the panel without showing it, so the first `show()` does not pay for it.
+    func prepare()
     func show()
     func update(_ text: String)
     /// Every word still pale becomes settled: the speaker paused (voice gate) or released.
@@ -204,6 +206,10 @@ final class LiveOverlayController: LiveOverlayPresenting {
     var modelForTesting: LiveOverlayModel { model }
     var panelForTesting: LiveOverlayPanel? { panel }
 
+    func prepare() {
+        if panel == nil { panel = makePanel() }
+    }
+
     func show() {
         let flags = accessibility()
         model.phase = .listening
@@ -280,14 +286,16 @@ final class LiveOverlayController: LiveOverlayPresenting {
         #endif
     }
 
+    // A preview decode already queued on the main actor can still land after `setProcessing()`;
+    // once the release has settled the line, it must not add pale words back.
     func update(_ text: String) {
-        guard visible else { return }
+        guard visible, model.phase == .listening else { return }
         stabilizer.ingest(text)
         publishStabilizer()
     }
 
     func settle() {
-        guard visible else { return }
+        guard visible, model.phase == .listening else { return }
         stabilizer.settleAll()
         publishStabilizer()
     }
@@ -308,6 +316,7 @@ final class LiveOverlayController: LiveOverlayPresenting {
     func hide(reason: LiveOverlayHideReason) {
         guard visible, let panel else { return }
         visible = false
+        let hiddenSeq = currentSeq
         #if DEBUG_RECORDER
         // A release before the anchor resolved never showed the panel, so it has no show to pair.
         if recordedShowSeq == currentSeq {
@@ -321,10 +330,13 @@ final class LiveOverlayController: LiveOverlayPresenting {
             }
         }
         #endif
-        // The text stays until the next `show()` so the fade-out still has something to show.
+        // The text stays through the fade-out so it has something to show, and is cleared once the
+        // panel is gone. A newer `show()` owns the model by then, so an older fade must not touch it.
         animate(panel, alpha: 0, origin: nil, duration: Self.exitDuration) { [weak self, weak panel] in
-            guard let self, let panel, !self.visible else { return }
+            guard let self, let panel, !self.visible, self.currentSeq == hiddenSeq else { return }
             panel.orderOut(nil)
+            self.stabilizer = PreviewStabilizer()
+            self.publishStabilizer()
         }
     }
 

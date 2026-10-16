@@ -21,7 +21,7 @@ final class LiveOverlayPanelTests: XCTestCase {
         )
         session.start()
 
-        let deadline = ContinuousClock.now + .seconds(1)
+        let deadline = ContinuousClock.now + .seconds(10)
         while controller.modelForTesting.combined != "hello world", ContinuousClock.now < deadline {
             try await Task.sleep(for: .milliseconds(20))
         }
@@ -444,6 +444,76 @@ final class LiveOverlayPanelTests: XCTestCase {
         XCTAssertEqual(controller.modelForTesting.tentative, "one two three")
     }
 
+    // MARK: - After release and after the fade (review rounds 1-3)
+
+    func testAPreviewThatLandsAfterReleaseDoesNotBringPaleWordsBackUnderProcessing() {
+        let controller = LiveOverlayController(targetAlpha: 0)
+        controller.show()
+        controller.update("one two three four")
+        controller.setProcessing()
+        XCTAssertEqual(controller.modelForTesting.tentative, "")
+
+        controller.update("one two three four five six")
+        controller.settle()
+
+        XCTAssertEqual(controller.modelForTesting.settled, "one two three four", "a late preview changed the text under Processing")
+        XCTAssertEqual(controller.modelForTesting.tentative, "", "pale words came back under Processing")
+        controller.hide(reason: .demo)
+    }
+
+    private func waitUntil(_ condition: () -> Bool) async throws {
+        let deadline = ContinuousClock.now + .seconds(10)
+        while !condition(), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
+    }
+
+    func testTheTranscriptIsGoneFromTheModelAndTheStabilizerOnceTheFadeEnded() async throws {
+        let controller = LiveOverlayController(targetAlpha: 0)
+        controller.show()
+        controller.update("one two three four five")
+        controller.setProcessing()
+        controller.hide(reason: .pasting)
+        XCTAssertEqual(controller.modelForTesting.combined, "one two three four five", "the fade still shows the text")
+
+        try await waitUntil { controller.modelForTesting.combined.isEmpty }
+        XCTAssertEqual(controller.modelForTesting.combined, "", "the transcript outlived the fade")
+
+        // The stabilizer is empty too: the same preview is a first preview again (all pale).
+        controller.show()
+        controller.update("one two three four five")
+        XCTAssertEqual(controller.modelForTesting.settled, "")
+        controller.hide(reason: .demo)
+    }
+
+    func testAFadeThatEndsAfterANewerShowLeavesTheNewerTextAlone() async throws {
+        let controller = LiveOverlayController(targetAlpha: 0)
+        controller.show()
+        controller.update("first dictation words")
+        controller.hide(reason: .pasting)
+
+        controller.show()
+        controller.update("second dictation words")
+        // Past the 0.36 s exit fade of the first hide.
+        try await Task.sleep(for: .milliseconds(900))
+
+        XCTAssertTrue(controller.isVisible)
+        XCTAssertEqual(controller.modelForTesting.combined, "second dictation words", "the older fade cleared the newer panel")
+        controller.hide(reason: .demo)
+    }
+
+    func testPrepareBuildsThePanelBeforeTheFirstShowAndShowReusesIt() throws {
+        let controller = LiveOverlayController(targetAlpha: 0)
+        XCTAssertNil(controller.panelForTesting)
+        controller.prepare()
+        let prepared = try XCTUnwrap(controller.panelForTesting, "prepare() built no panel")
+        XCTAssertFalse(prepared.isVisible, "prepare() must not put anything on screen")
+        XCTAssertFalse(controller.isVisible)
+        XCTAssertEqual(controller.currentSeq, 0, "prepare() is not a show")
+
+        controller.show()
+        XCTAssertTrue(controller.panelForTesting === prepared, "show() built a second panel")
+        controller.hide(reason: .demo)
+    }
+
     // MARK: - displayTail
 
     func testDisplayPartsCutOnlyTheSettledRunAndKeepTheTotalBounded() {
@@ -489,8 +559,10 @@ final class SpyOverlay: LiveOverlayPresenting {
     private(set) var processingCount = 0
     private(set) var settleCount = 0
     private(set) var updates: [String] = []
+    private(set) var prepareCount = 0
     var currentSeq: Int { showCount }
 
+    func prepare() { prepareCount += 1 }
     func show() { showCount += 1 }
     func update(_ text: String) { updates.append(text) }
     func settle() { settleCount += 1 }

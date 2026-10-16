@@ -192,6 +192,8 @@ class TranscriptionService: ObservableObject {
     func startRecording() throws {
         guard state == .idle else { throw TranscriptionError.busy }
         sampleBuffer.clear()
+        // Stats belong to one hold; a hold without a preview must not report the previous one's.
+        lastLivePreviewStats = nil
 
         let inputNode = audioEngine.inputNode
         let inputFormat = inputNode.outputFormat(forBus: 0)

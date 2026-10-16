@@ -356,6 +356,14 @@ final class HotkeyManagerTests: XCTestCase {
                        "the older dictation hid the newer press's panel")
     }
 
+    func testTheOverlayPanelIsBuiltWhenTheServicesAreWiredNotOnTheFirstPress() {
+        XCTAssertEqual(rig.spy.prepareCount, 1, "attach() did not prepare the panel")
+        XCTAssertEqual(rig.spy.showCount, 0)
+        rig.manager.handleKeyDown(mode: .plain)
+        XCTAssertEqual(rig.spy.prepareCount, 1, "the key-down path must not build the panel")
+        rig.manager.handleKeyUp(mode: .plain)
+    }
+
     func testToggleOffStartsNeitherPanelNorPreviewButStillRecordsAndPastes() async {
         DicticusDefaults.suite.set(false, forKey: LivePreviewSession.enabledKey)
         await rig.dictate()

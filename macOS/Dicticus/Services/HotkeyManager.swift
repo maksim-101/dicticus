@@ -200,13 +200,15 @@ class HotkeyManager: ObservableObject {
     }
 
     /// The service wiring of `setup()` without the hotkey streams, so a test can drive the press and
-    /// release handlers directly.
+    /// release handlers directly. The overlay panel is built here, after warm-up, so the first press
+    /// does not pay for it on the key-down path.
     func attach(transcriptionService: any DictationTranscribing, warmupService: ModelWarmupService) {
         self.transcriptionService = transcriptionService
         self.warmupService = warmupService
         self.cleanupService = warmupService.cleanupServiceInstance
 
         bindState()
+        overlay.prepare()
     }
 
     /// Wire ModifierHotkeyListener into the push-to-talk state machine and start the CGEventTap.
@@ -564,17 +566,28 @@ class HotkeyManager: ObservableObject {
         // so self.textInjector access is safe without crossing isolation boundaries.
         Task { [weak self] in
             guard let self else { return }
+            #if DEBUG_RECORDER
+            // Read right after the release returns, not at the end of this Task: a later dictation's
+            // release would otherwise overwrite the service's stats before this one records them.
+            var previewStats: LivePreviewSession.Stats?
+            #endif
             // D-06: covers every throw and discard path below; hide is idempotent.
             defer {
                 if self.overlay.currentSeq == overlaySeq { self.overlay.hide(reason: .taskEnd) }
                 #if DEBUG_RECORDER
-                if recordPreviewSession, let stats = service.lastLivePreviewStats {
+                if recordPreviewSession, let stats = previewStats {
                     Task { await OverlayProbe.shared.recordSession(stats: stats, seq: overlaySeq) }
                 }
                 #endif
             }
             do {
-                let result = try await service.stopRecordingAndTranscribe()
+                let result: DicticusTranscriptionResult
+                do {
+                    #if DEBUG_RECORDER
+                    defer { previewStats = service.lastLivePreviewStats }
+                    #endif
+                    result = try await service.stopRecordingAndTranscribe()
+                }
 
                 // Phase 50 D-11: if the key-down reload is still running, wait for it
                 // HERE — before TextProcessingService.process's isLoaded gate
