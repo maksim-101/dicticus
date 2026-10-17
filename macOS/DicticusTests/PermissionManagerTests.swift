@@ -94,19 +94,4 @@ final class PermissionManagerTests: XCTestCase {
         // Cleanup: reset so other tests start clean
         UserDefaults.standard.removeObject(forKey: "hasCompletedOnboarding")
     }
-
-    // MARK: - checkMultipleInstalls bundle id pin (D-11)
-
-    func testCheckMultipleInstallsUsesCorrectBundleID() {
-        // Verify the mdfind query targets com.dicticus.app (the real CFBundleIdentifier),
-        // not the old wrong value com.dicticus.macos. The observable assertion: any URL
-        // returned by the query must be a Dicticus.app bundle — wrong bundle id would
-        // return zero or spurious results, but correct id returns only Dicticus.app paths.
-        let manager = PermissionManager()
-        manager.checkMultipleInstalls()
-        for url in manager.multipleDicticusCopies {
-            XCTAssertTrue(url.lastPathComponent == "Dicticus.app",
-                          "Unexpected path: \(url.path)")
-        }
-    }
 }

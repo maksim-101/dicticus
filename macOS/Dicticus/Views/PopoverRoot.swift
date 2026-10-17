@@ -13,8 +13,9 @@ enum PopoverTab: String, CaseIterable {
 ///   - Fixed-height 348×320pt surface — ONE explicit frame, never per-pane (Pitfall 2).
 ///   - Manual @State-driven tab switch using Group { switch } — NOT a native TabView.
 ///   - Always opens to Home (Discretion default; tab is not persisted across opens).
-///   - Lifecycle re-attached here (Pitfall 3): startPolling / loadOnboardingState /
-///     checkMultipleInstalls fire on every popover open via .onAppear.
+///   - Lifecycle re-attached here (Pitfall 3): startPolling / loadOnboardingState fire on
+///     every popover open via .onAppear. (The synchronous mdfind probe that used to run here
+///     blocked the main thread whenever Spotlight stalled; removed 2026-10-17.)
 ///
 /// The onboarding gate still routes to OnboardingView when hasCompletedOnboarding is false,
 /// matching MenuBarView behaviour (lines 32–34).
@@ -64,9 +65,6 @@ struct PopoverRoot: View {
 
             // Load persisted onboarding state and show flow if not yet completed.
             permissionManager.loadOnboardingState()
-
-            // Launch-only mdfind probe for stale Dicticus.app copies on disk.
-            permissionManager.checkMultipleInstalls()
 
             if !permissionManager.hasCompletedOnboarding {
                 showOnboarding = true
