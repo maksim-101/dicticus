@@ -6,7 +6,7 @@ Dicticus is a fully local, on-device dictation app (ASR via WhisperKit/Whisper l
 
 ---
 
-## Unreleased
+## 1.4.1 — Cleanup fixes and popover freeze — 2026-10-17
 
 - **Fixed: the menu bar popover no longer freezes the app when Spotlight is slow** — every time the popover opened, the app ran a Spotlight query for other Dicticus copies and waited for the answer on the main thread. On a Mac whose Spotlight index is stuck the answer never comes, so the icon click froze the app and the popover could not be closed. The query showed nothing in the interface and is removed. macOS.
 - **Fixed: AI cleanup no longer capitalizes the word after a stray period it tried to remove** — the speech recognizer sometimes writes a period inside a sentence, ahead of a lowercase word. When AI cleanup removed or moved that period and EditGuard kept it, the finishing capitalization uppercased the next word. Now that word stays lowercase when both the recognizer output and the AI text continued the sentence, and a period the AI kept still starts a capitalized sentence. Found in 9 logged dictations from 8 to 17 October; not yet replayed against the full log. macOS + iOS.

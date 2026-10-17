@@ -26,6 +26,9 @@ enum AppBuildInfo {
     }
 
     static let recentChanges: [String] = platformChanges + [
+        "Fixed: AI cleanup no longer capitalizes the word after a stray period it tried to remove",
+        "Fixed: AI cleanup no longer swaps a misheard word for an invented one",
+        "Changed: your own dictionary entries also apply after AI cleanup",
         "Fixed: AI cleanup no longer swaps a correctly dictated German compound for a different word",
         "Fixed: a dictation that starts with a number no longer capitalizes the word after it",
         "Fixed: technical terms such as WebUI or YAML are no longer \"corrected\" into a different brand or word",
@@ -35,6 +38,7 @@ enum AppBuildInfo {
 
     #if os(macOS)
     private static let platformChanges = [
+        "Fixed: the menu bar popover no longer freezes the app when Spotlight is slow",
         "Added: a live transcript panel near the text cursor while you hold the dictation key (turn it off in Settings → General); now requires macOS 26",
     ]
     #else
