@@ -11,7 +11,8 @@ enum PostEditDiff {
     static let observationLimitSeconds = 60
     static let consecutiveLostToFinalize = 2
     static let axMessagingTimeoutSeconds: Float = 0.25
-    static let fieldCapUTF16 = 100_000
+    // October 2026: 42 iTerm2 fields exceeded 100,000 UTF-16 units (100,979 to 126,442) and were skipped as too_large.
+    static let fieldCapUTF16 = 200_000
     static let minPastedTokens = 3
     static let contextTokens = 3
     static let hunkSideCap = 6
@@ -182,8 +183,15 @@ enum PostEditDiff {
         var lo = 0
         var hi = total
         if n * total > alignmentCellCap {
-            lo = max(0, caretIdx - (2 * n + 100))
-            hi = min(total, caretIdx + 2 * n + 100)
+            if window != nil {
+                // The caret is not where iTerm2 puts the paste; every alignment of cost at most maxDist that
+                // ends inside [minEnd, maxEnd] starts at or after this lo, so the result equals the full DP's.
+                lo = max(0, minEnd - 1 - n - maxDist)
+                hi = min(total, maxEnd)
+            } else {
+                lo = max(0, caretIdx - (2 * n + 100))
+                hi = min(total, caretIdx + 2 * n + 100)
+            }
         }
         let window = fieldTokens[lo..<hi].map(\.text)
         var prev = [Int](repeating: 0, count: window.count + 1)

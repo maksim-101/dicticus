@@ -289,6 +289,16 @@ final class PostEditDiffTests: XCTestCase {
         XCTAssertNil(PostEditDiff.relocate(pasted: sentence, fieldTokens: tokens, caretUTF16: nil, window: 100..<200))
     }
 
+    // 261017-g3j: past alignmentCellCap the alignment is centred on the paste-time anchor, not the caret.
+    func testRelocateOverCellCapSearchesAnchorWindowNotCaret_RED() {
+        let pasted = (0..<100).map { "w\($0)" }
+        let texts = [String](repeating: "pad", count: 20_000) + pasted + [String](repeating: "pad", count: 20_000)
+        let fieldTokens = texts.enumerated().map { PostEditDiff.Token(text: $0.element, utf16Start: 2 * $0.offset, utf16End: 2 * $0.offset + 1) }
+        XCTAssertGreaterThan(pasted.count * fieldTokens.count, PostEditDiff.alignmentCellCap)
+        let window = (2 * 20_000 - PostEditDiff.anchorSlackUTF16)..<(2 * 20_100 + PostEditDiff.anchorSlackUTF16)
+        XCTAssertEqual(PostEditDiff.relocate(pasted: pasted, fieldTokens: fieldTokens, caretUTF16: 0, window: window), 20_000..<20_100)
+    }
+
     func testAnchorSimilarSentenceBeforeOriginalPositionIsNeverLogged() throws {
         let pasteField = "Ask the MARKERA to water it twice. " + filler + sentence.joined(separator: " ") + " Closing remarks."
         let field = "Ask the MARKERA to water it twice. " + filler + "Closing remarks."
