@@ -321,7 +321,7 @@ final class EditGuardPauseSplitMergeTests: XCTestCase {
     //
     // When the gate rejects the LLM's removal of a stray mid-sentence mark
     // (records 2026-10-08T10:07:41.164Z move shape, 2026-10-10T04:54:00.547Z
-    // delete shape), the mark is restored in front of a lowercase word the
+    // delete shape), the gate restores the mark ahead of a lowercase word the
     // LLM continued. The finishing capitalizer must not uppercase that word;
     // a mark the LLM kept still starts a capitalized sentence. Invented text.
 

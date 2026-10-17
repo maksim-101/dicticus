@@ -258,7 +258,7 @@ class TextProcessingService: ObservableObject {
         // command deletion above (Phase 39/D-08) is already inside this
         // baseline — the gate cannot revert it as content-loss.
         let rulesCleanedText = processedText
-        // Seams the gate restored in front of a lowercase word the LLM continued (EditGuard.rebuild);
+        // Seams where the gate restored a mark ahead of a lowercase word the LLM continued (EditGuard.rebuild);
         // stays empty in plain mode, so plain output is unchanged (D-01).
         var keepLowercaseAfter: Set<EditGuard.RestoredMarkContinuation> = []
 

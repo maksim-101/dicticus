@@ -4445,7 +4445,7 @@ public enum EditGuard {
         }
 
         // Records 2026-10-08T10:07:41.164Z and 2026-10-10T04:54:00.547Z: a
-        // rejected removal of a terminal mark restores it in front of a word
+        // rejected removal of a terminal mark restores it ahead of a word
         // the LLM continued in lowercase, and the finishing capitalizer then
         // uppercased that word. A mark the LLM agreed with is never listed,
         // so it still starts a capitalized sentence.
