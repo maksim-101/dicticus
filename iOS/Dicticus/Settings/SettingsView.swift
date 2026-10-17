@@ -73,7 +73,7 @@ struct SettingsView: View {
                         }
                     }
 
-                    Button(role: .destructive, action: { warmupService.warmup() }) {
+                    Button(role: .destructive, action: { warmupService.forceModelUpdate() }) {
                         Label("Force Model Update", systemImage: "arrow.clockwise")
                     }
                     .disabled(warmupService.isWarming)

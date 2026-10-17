@@ -460,6 +460,19 @@ class IOSModelWarmupService: ObservableObject {
         warmupStartedAt = nil
     }
 
+    /// Settings → "Force Model Update". Before 2026-10-17 the button called
+    /// `warmup()` with no `force`, and both guards returned silently when the
+    /// model was loaded (`isReady`) or missing (`!hasModels`), so it never did
+    /// anything. Now it cancels any in-flight load, drops the ready state and
+    /// re-runs the forced path, which downloads when the files are absent and
+    /// reloads the model onto the ANE when they are present.
+    func forceModelUpdate() {
+        cancelWarmup()
+        error = nil
+        isReady = false
+        warmup(force: true)
+    }
+
     /// Reset error state and retry warmup. Explicit user action — passes
     /// `force: true` so the no-models guard does not block the download path.
     func retry() {

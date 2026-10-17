@@ -20,6 +20,17 @@ final class IOSModelWarmupServiceTests: XCTestCase {
         XCTAssertFalse(service.isWarming)
     }
 
+    /// Settings → Force Model Update must act even when the model is already
+    /// loaded; the unforced `warmup()` returned silently in that state.
+    func testForceModelUpdateStartsWarmupWhenAlreadyReady() {
+        let service = IOSModelWarmupService()
+        service.isReady = true
+        service.forceModelUpdate()
+        XCTAssertFalse(service.isReady)
+        XCTAssertTrue(service.isWarming)
+        service.cancelWarmup()
+    }
+
     // MARK: - Wave 3 (Plan 19-04) — Task 1: LlmStatus type surface
 
     func testLlmStatusIsIdleOnInit() {
