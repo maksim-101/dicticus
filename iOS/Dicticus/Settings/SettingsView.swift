@@ -4,6 +4,7 @@ struct SettingsView: View {
     @EnvironmentObject var warmupService: IOSModelWarmupService
     @Environment(\.dismiss) var dismiss
     @State private var showingModelInfo = false
+    @State private var showingForceUpdateConfirm = false
     @AppStorage("hasSeenOnboardingTour") private var hasSeenOnboardingTour = false
 
     var body: some View {
@@ -73,10 +74,31 @@ struct SettingsView: View {
                         }
                     }
 
-                    Button(role: .destructive, action: { warmupService.forceModelUpdate() }) {
+                    if warmupService.isWarming {
+                        HStack {
+                            ProgressView()
+                            Text(warmupService.downloadStatus)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    Button(role: .destructive, action: { showingForceUpdateConfirm = true }) {
                         Label("Force Model Update", systemImage: "arrow.clockwise")
                     }
                     .disabled(warmupService.isWarming)
+                    .confirmationDialog(
+                        "Download the speech model again?",
+                        isPresented: $showingForceUpdateConfirm,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Delete and re-download (~630 MB)", role: .destructive) {
+                            warmupService.forceModelUpdate()
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("The current model files are deleted first. Dictation is unavailable until the download finishes; use Wi-Fi.")
+                    }
                 }
 
                 Section("What's New") {

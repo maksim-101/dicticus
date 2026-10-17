@@ -45,6 +45,7 @@ extension AsrModelLoader {
     /// never persisted across transcribe calls).
     static func loadFluidAudio(
         maxAttempts: Int = 3,
+        redownload: Bool = false,
         progress: (@Sendable (Double) -> Void)? = nil
     ) async throws -> (AsrManager, TdtDecoderState) {
         var lastError: Error?
@@ -56,6 +57,11 @@ extension AsrModelLoader {
         }
         for attempt in 1...maxAttempts {
             do {
+                if redownload && attempt == 1 {
+                    // Settings → Force Model Update: FluidAudio deletes the cache folder and
+                    // fetches every file again; the plain call below then finds them present.
+                    try await AsrModels.download(force: true, version: parakeetModelVersion, progressHandler: progressHandler)
+                }
                 let models = try await AsrModels.downloadAndLoad(version: parakeetModelVersion, progressHandler: progressHandler)
                 let asrManager = AsrManager(config: .default)
                 try await asrManager.loadModels(models)

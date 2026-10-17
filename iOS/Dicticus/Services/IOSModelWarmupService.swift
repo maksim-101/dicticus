@@ -215,7 +215,7 @@ class IOSModelWarmupService: ObservableObject {
     /// shared bounded-retry `AsrModelLoader` (parity with macOS `ModelWarmupService`).
     /// Pass `force: true` from explicit user actions (Download / Retry button) so the
     /// download path is not blocked by the no-models guard.
-    func warmup(force: Bool = false) {
+    func warmup(force: Bool = false, redownload: Bool = false) {
         // D-D1 (Phase 19.5): Re-check FS on every warmup invocation to avoid
         // relying on stale init-time state after backgrounding / FS mutations.
         // The guard prevents auto-launch sites from silently kicking off a
@@ -241,7 +241,9 @@ class IOSModelWarmupService: ObservableObject {
         // (~60–90s observed) the first time a given build/model combination warms
         // up — the plain "Loading speech model…" copy looked hung during that
         // window. `isFirstWarmupForCurrentVersion` distinguishes that case.
-        downloadStatus = hasModels
+        downloadStatus = redownload
+            ? "Re-downloading speech model\u{2026} (~630 MB)"
+            : hasModels
             ? (isFirstWarmupForCurrentVersion
                 ? "First-time setup \u{2014} preparing the speech model. This can take up to a minute."
                 : "Loading speech model\u{2026}")
@@ -275,7 +277,7 @@ class IOSModelWarmupService: ObservableObject {
                 // Step 1: Download + load Parakeet Ultra CoreML models via the shared
                 // bounded-retry wrapper (parity with macOS ModelWarmupService).
                 warmupLog.info("Step 1: AsrModelLoader.loadFluidAudio starting")
-                let (am, _) = try await AsrModelLoader.loadFluidAudio(progress: progressHandler)
+                let (am, _) = try await AsrModelLoader.loadFluidAudio(redownload: redownload, progress: progressHandler)
                 let step1Elapsed = Date().timeIntervalSince(warmupStart)
                 warmupLog.info("Step 1: AsrModelLoader.loadFluidAudio returned (elapsed=\(step1Elapsed, privacy: .public)s)")
 
@@ -463,14 +465,14 @@ class IOSModelWarmupService: ObservableObject {
     /// Settings → "Force Model Update". Before 2026-10-17 the button called
     /// `warmup()` with no `force`, and both guards returned silently when the
     /// model was loaded (`isReady`) or missing (`!hasModels`), so it never did
-    /// anything. Now it cancels any in-flight load, drops the ready state and
-    /// re-runs the forced path, which downloads when the files are absent and
-    /// reloads the model onto the ANE when they are present.
+    /// anything; a plain forced reload then finished in under a second on a
+    /// device that already had the files, which looked like nothing too. Now it
+    /// deletes the cached model and downloads it again (~630 MB), then loads it.
     func forceModelUpdate() {
         cancelWarmup()
         error = nil
         isReady = false
-        warmup(force: true)
+        warmup(force: true, redownload: true)
     }
 
     /// Reset error state and retry warmup. Explicit user action — passes

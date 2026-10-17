@@ -28,6 +28,7 @@ final class IOSModelWarmupServiceTests: XCTestCase {
         service.forceModelUpdate()
         XCTAssertFalse(service.isReady)
         XCTAssertTrue(service.isWarming)
+        XCTAssertTrue(service.downloadStatus.hasPrefix("Re-downloading"), service.downloadStatus)
         service.cancelWarmup()
     }
 
