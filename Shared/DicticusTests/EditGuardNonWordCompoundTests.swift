@@ -25,13 +25,17 @@ import AppKit
 final class EditGuardNonWordCompoundTests: XCTestCase {
 
     /// `isKnownWord` is false only for `unknown`; `isKnownCompoundPart` is true
-    /// only for `parts`. `isListedWord` keeps its default.
+    /// only for `parts`. `isListedWord` follows `isKnownWord`.
     private struct PartLexicon: SpellLexicon {
         let unknown: Set<String>
         let parts: Set<String>
 
         func isKnownWord(_ text: String, language: String) -> Bool {
             !unknown.contains(text.lowercased())
+        }
+
+        func isListedWord(_ text: String, language: String) -> Bool {
+            isKnownWord(text, language: language)
         }
 
         func isKnownCompoundPart(_ text: String) -> Bool {
@@ -45,6 +49,10 @@ final class EditGuardNonWordCompoundTests: XCTestCase {
 
         func isKnownWord(_ text: String, language: String) -> Bool {
             !unknown.contains(text.lowercased())
+        }
+
+        func isListedWord(_ text: String, language: String) -> Bool {
+            isKnownWord(text, language: language)
         }
     }
 
@@ -150,7 +158,7 @@ final class EditGuardNonWordCompoundTests: XCTestCase {
     /// The only split with both sides of four letters or more has an unknown side.
     func testNWC_R3_realChecker_unknownPartStillRepaired() {
         assertRepaired("de", "Der Lehrling soll das Teil herausbrost, bevor wir weitermachen.",
-                       "Der Lehrling soll das Teil herausbringst, bevor wir weitermachen.",
+                       "Der Lehrling soll das Teil herausbringt, bevor wir weitermachen.",
                        lexicon: PlatformSpellLexicon())
     }
     #endif

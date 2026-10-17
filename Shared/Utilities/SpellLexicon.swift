@@ -43,6 +43,11 @@ public protocol SpellLexicon: Sendable {
     /// `nonWordRepair` off real words the platform checker lacks.
     func isListedWord(_ text: String, language: String) -> Bool
 
+    /// Quick task 261017-g3j: exact membership in the dictionary vocabulary
+    /// (DefaultLexicon and personal replacement values, idioms, injected
+    /// extras), with no hyphen split and no platform call.
+    func isAugmentedWord(_ text: String) -> Bool
+
     /// Quick task 261010-8dm: true iff the platform checker accepts `text`
     /// once capitalised, under its German or its English dictionary. Serves
     /// only to spot a dictated compound of two real words. It asks
@@ -55,6 +60,7 @@ public protocol SpellLexicon: Sendable {
 public extension SpellLexicon {
     func isCompoundAcceptedRepair(source: String, candidate: String, language: String) -> Bool { false }
     func isListedWord(_ text: String, language: String) -> Bool { false }
+    func isAugmentedWord(_ text: String) -> Bool { false }
     func isKnownCompoundPart(_ text: String) -> Bool { false }
 }
 
@@ -137,6 +143,10 @@ public final class PlatformSpellLexicon: SpellLexicon, @unchecked Sendable {
         cache[key] = result
         lock.unlock()
         return result
+    }
+
+    public func isAugmentedWord(_ text: String) -> Bool {
+        augmentation.contains(text.lowercased())
     }
 
     public func isCompoundAcceptedRepair(source: String, candidate: String, language: String) -> Bool {

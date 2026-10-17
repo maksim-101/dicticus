@@ -212,10 +212,60 @@ final class EditGuardHarmFixesTests: XCTestCase {
 
     func testNWR_unlistedNonWordStillRepaired() {
         let llm = "The wheel has one spoke missing from the rear today."
-        let lex = ListedLexicon(unknown: ["spokke"], listed: [])
+        let lex = ListedLexicon(unknown: ["spokke"], listed: ["spoke"])
         let r = run("en", "The wheel has one spokke missing from the rear today.", llm, lexicon: lex)
         XCTAssertEqual(r.text, llm)
         XCTAssertTrue(r.edits.contains { $0.acceptClass == "nonWordRepair" }, "\(r.edits)")
+    }
+
+    // MARK: - NWR target arm: dictProtected, listed or augmented (261017-g3j)
+    //
+    // Records 2026-10-16T16:46:14.833Z (CamelCase) and 2026-10-16T16:56:03.222Z
+    // (hyphen): the platform checker accepts words built from known parts, so a
+    // target known only to it no longer qualifies. Invented text.
+
+    private let camelBaseline = "The shop stocks the SpokeoDraw gauge and the SpokeoDash meter for truing wheels."
+    private let camelLLM = "The shop stocks the SpokeDraw gauge and the SpokeDash meter for truing wheels."
+
+    func testNWR_camelCaseTargetKnownOnlyToCheckerIsNotRepaired_RED() {
+        let lex = ListedLexicon(unknown: ["spokeodraw", "spokeodash"], listed: [])
+        let r = run("en", camelBaseline, camelLLM, lexicon: lex)
+        XCTAssertEqual(r.text, camelBaseline)
+        XCTAssertFalse(r.edits.contains { $0.acceptClass == "nonWordRepair" }, "\(r.edits)")
+    }
+
+    func testNWR_hyphenatedTargetKnownOnlyToCheckerIsNotRepaired_RED() {
+        let baseline = "Please true the five overspun wheels before noon."
+        let lex = ListedLexicon(unknown: ["overspun"], listed: [])
+        let r = run("en", baseline, "Please true the five over-spun wheels before noon.", lexicon: lex)
+        XCTAssertEqual(r.text, baseline)
+        XCTAssertFalse(r.edits.contains { $0.acceptClass == "nonWordRepair" }, "\(r.edits)")
+    }
+
+    func testNWR_dictProtectedTargetStillRepaired() {
+        let lex = ListedLexicon(unknown: ["spokeodraw", "spokeodash"], listed: [])
+        let r = run("en", camelBaseline, camelLLM, dictProtected: ["SpokeDraw", "SpokeDash"], lexicon: lex)
+        XCTAssertEqual(r.text, camelLLM)
+        XCTAssertEqual(r.edits.filter { $0.acceptClass == "nonWordRepair" }.count, 2, "\(r.edits)")
+    }
+
+    func testNWR_augmentedTargetStillRepaired() throws {
+        let lexicon = PlatformSpellLexicon(extraAugmentation: ["SpokeDraw"])
+        try XCTSkipUnless(!lexicon.isKnownWord("SpokeoDraw", language: "en"), "platform checker knows the invented source")
+        let baseline = "The shop stocks the SpokeoDraw gauge for truing wheels."
+        let llm = "The shop stocks the SpokeDraw gauge for truing wheels."
+        let r = run("en", baseline, llm, lexicon: lexicon)
+        XCTAssertEqual(r.text, llm)
+    }
+
+    func testNWR_realChecker_camelCaseInventionNotRepaired_RED() throws {
+        let lexicon = PlatformSpellLexicon()
+        try XCTSkipUnless(lexicon.isKnownWord("SpokeDraw", language: "en"), "platform checker does not accept the CamelCase target")
+        try XCTSkipUnless(!lexicon.isListedWord("SpokeDraw", language: "en"), "target is in the bundled list")
+        try XCTSkipUnless(!lexicon.isKnownWord("SpokeoDraw", language: "en"), "platform checker knows the invented source")
+        let baseline = "The shop stocks the SpokeoDraw gauge for truing wheels."
+        let r = run("en", baseline, "The shop stocks the SpokeDraw gauge for truing wheels.", lexicon: lexicon)
+        XCTAssertEqual(r.text, baseline)
     }
 
     func testNWR_platformLexiconListsBundledWords() {

@@ -1510,10 +1510,17 @@ public enum EditGuard {
         // Quick task 261010-8dm: a German compound of two known words, with
         // three or more letters changed, is left as dictated (see
         // `isCompoundPartSwap`).
+        //
+        // Quick task 261017-g3j (records `2026-10-16T16:46:14.833Z` and
+        // `2026-10-16T16:56:03.222Z`): the platform checker accepts CamelCase
+        // and hyphenated words built from known parts, which let an invented
+        // target through. The target must now be dictionary-protected, listed
+        // in the bundled EN+DE word list, or an exact member of the dictionary
+        // vocabulary; the platform checker alone no longer qualifies it.
         if a.kind == .word, b.kind == .word,
            !isKnownForRepair(a, language: language, dictProtectedLower: dictProtectedLower, lexicon: lexicon),
            !lexicon.isListedWord(a.text, language: language),
-           isKnownForRepair(b, language: language, dictProtectedLower: dictProtectedLower, lexicon: lexicon),
+           dictProtectedLower.contains(b.normalized) || lexicon.isListedWord(b.text, language: language) || lexicon.isAugmentedWord(b.text),
            isNonWordRepairClose(a.normalized, b.normalized, language: language),
            !isCompoundPartSwap(a, b, language: language, lexicon: lexicon) {
             return (true, .nonWordRepair, nil)

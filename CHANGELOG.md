@@ -9,6 +9,7 @@ Dicticus is a fully local, on-device dictation app (ASR via WhisperKit/Whisper l
 ## Unreleased
 
 - **Fixed: AI cleanup no longer capitalizes the word after a stray period it tried to remove** — the speech recognizer sometimes writes a period in the middle of a sentence before a lowercase word. When AI cleanup removed or moved that period and EditGuard kept it, the finishing capitalization uppercased the next word. Now that word stays lowercase when both the transcript and the AI continued the sentence, and a period the AI kept still starts a capitalized sentence. Found in 9 logged dictations from 8 to 17 October; not yet replayed against the full log. macOS + iOS.
+- **Fixed: AI cleanup no longer swaps a misheard word for an invented one** — EditGuard accepted the AI's repair of a word the spell checker did not know whenever the checker knew the replacement, and the macOS checker accepts glued and hyphenated words built from two real words, so a misheard name turned into a different invented name and a dictated word gained a hyphen. A repair now needs a replacement from Dicticus's bundled word lists, a dictionary replacement or the dictionary's own vocabulary. Found in 2 logged dictations from 8 to 17 October; of the 7 logged repairs of this kind since 3 October (3 dictations), the new rule refuses 6 and keeps 1. Not yet replayed against the full log. macOS + iOS.
 
 ---
 

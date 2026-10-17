@@ -20,15 +20,20 @@ import XCTest
 /// R7 reproduction record each RED fixture is grounded in.
 struct TestSpellLexicon: SpellLexicon {
     private let known: Set<String>
+    private let listed: Set<String>
     private let allKnownFlag: Bool
 
-    init(known: Set<String>) {
+    /// `listed` defaults to `known`: a known word is also a listed word. A fixture
+    /// that models a word only the platform checker knows passes a smaller `listed`.
+    init(known: Set<String>, listed: Set<String>? = nil) {
         self.known = Set(known.map { $0.lowercased() })
+        self.listed = Set((listed ?? known).map { $0.lowercased() })
         self.allKnownFlag = false
     }
 
     private init(allKnown: Bool) {
         self.known = []
+        self.listed = []
         self.allKnownFlag = allKnown
     }
 
@@ -45,6 +50,11 @@ struct TestSpellLexicon: SpellLexicon {
     func isKnownWord(_ text: String, language: String) -> Bool {
         if allKnownFlag { return true }
         return known.contains(text.lowercased())
+    }
+
+    func isListedWord(_ text: String, language: String) -> Bool {
+        if allKnownFlag { return true }
+        return listed.contains(text.lowercased())
     }
 }
 
