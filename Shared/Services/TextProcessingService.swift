@@ -258,6 +258,9 @@ class TextProcessingService: ObservableObject {
         // command deletion above (Phase 39/D-08) is already inside this
         // baseline — the gate cannot revert it as content-loss.
         let rulesCleanedText = processedText
+        // Seams the gate restored in front of a lowercase word the LLM continued (EditGuard.rebuild);
+        // stays empty in plain mode, so plain output is unchanged (D-01).
+        var keepLowercaseAfter: Set<EditGuard.RestoredMarkContinuation> = []
 
         #if DEBUG_RECORDER
         let dbgPostRules = processedText
@@ -384,6 +387,7 @@ class TextProcessingService: ObservableObject {
                 )
             }
             processedText = guardResult.text
+            keepLowercaseAfter = Set(guardResult.restoredMarkContinuations)
 
             #if DEBUG_RECORDER
             let dbgGateMs = Date().timeIntervalSince(dbgGateStart) * 1000.0
@@ -478,7 +482,8 @@ class TextProcessingService: ObservableObject {
         processedText = TextProcessingService.applyFinalCapitalization(
             processedText,
             language: language,
-            context: mode == .aiCleanup ? context : .default
+            context: mode == .aiCleanup ? context : .default,
+            keepLowercaseAfter: keepLowercaseAfter
         )
 
         #if DEBUG_RECORDER
@@ -707,10 +712,15 @@ class TextProcessingService: ObservableObject {
     /// (R3/R6, project CLAUDE.md) warn against introducing into the
     /// capitalization pipeline without a corpus-grounded fixture set. Left
     /// as an accepted gap rather than a silent one.
-    nonisolated static func applyFinalCapitalization(_ text: String, language: String, context: DictationContext = .default) -> String {
+    nonisolated static func applyFinalCapitalization(
+        _ text: String,
+        language: String,
+        context: DictationContext = .default,
+        keepLowercaseAfter: Set<EditGuard.RestoredMarkContinuation> = []
+    ) -> String {
         guard !text.isEmpty else { return text }
         var result = capitalizeFirstAlphabeticCharacter(text, context: context)
-        result = capitalizeSentenceInitials(result, context: context)
+        result = capitalizeSentenceInitials(result, context: context, keepLowercaseAfter: keepLowercaseAfter)
         if language.hasPrefix("en") {
             result = capitalizeEnglishIPronoun(result)
         }
@@ -807,7 +817,11 @@ class TextProcessingService: ObservableObject {
     /// Phase 38 Plan 01 (D-03): in `context == .code`, a candidate
     /// sentence-initial token that looks like a technical identifier
     /// (`looksLikeTechnicalIdentifier`) is skipped instead of capitalized.
-    nonisolated private static func capitalizeSentenceInitials(_ text: String, context: DictationContext = .default) -> String {
+    nonisolated private static func capitalizeSentenceInitials(
+        _ text: String,
+        context: DictationContext = .default,
+        keepLowercaseAfter: Set<EditGuard.RestoredMarkContinuation> = []
+    ) -> String {
         var chars = Array(text)
         let closers: Set<Character> = ["\"", "'", ")", "]", "}", "\u{201D}", "\u{2019}", "\u{00BB}", "\u{203A}"]
 
@@ -868,6 +882,26 @@ class TextProcessingService: ObservableObject {
                 let token = String(chars[k..<end])
                 if looksLikeTechnicalIdentifier(token) {
                     i = end
+                    continue
+                }
+            }
+
+            if !keepLowercaseAfter.isEmpty {
+                var runStart = i
+                while runStart > 0 && !chars[runStart - 1].isWhitespace {
+                    runStart -= 1
+                }
+                var wordEnd = k
+                while wordEnd < chars.count && (chars[wordEnd].isLetter || chars[wordEnd].isNumber) {
+                    wordEnd += 1
+                }
+                let seam = EditGuard.RestoredMarkContinuation(
+                    precedingWord: String(chars[runStart..<i]),
+                    mark: String(c),
+                    followingWord: String(chars[k..<wordEnd])
+                )
+                if keepLowercaseAfter.contains(seam) {
+                    i = k + 1
                     continue
                 }
             }

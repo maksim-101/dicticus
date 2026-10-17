@@ -221,6 +221,26 @@ final class EditGuardPipelineTests: XCTestCase {
             "the German verb-final word-order repair must reach the end of the pipeline intact — got: \(output)")
     }
 
+    // MARK: - 261017-g3j: restored terminal mark keeps a lowercase continuation
+
+    /// Delete-shape fixture (invented): the LLM drops a stray mid-sentence
+    /// period and ends the utterance with one; the gate restores the stray
+    /// period, and the finishing capitalizer must leave the next word lowercase.
+    func testRestoredMarkKeepsLowercaseThroughPipeline_RED() async {
+        let raw = "The chain needs oil. on both sides before the long ride"
+        let baseline = await rulesCleanedBaseline(for: raw, language: "en")
+        // The helper's output already went through the finishing capitalizer, so compare case-insensitively.
+        XCTAssertTrue(baseline.lowercased().contains("oil. on"), "rules pass must keep the stray period: \(baseline)")
+
+        let mock = PipelineMockCleanupProvider()
+        mock.returnValue = "The chain needs oil on both sides before the long ride."
+        let service = TextProcessingService(
+            dictionaryService: dictionaryService, cleanupService: mock, historyService: testHistory
+        )
+        let output = await service.process(text: raw, language: "en", mode: .aiCleanup)
+        XCTAssertTrue(output.contains("oil. on"), "word after the restored period must stay lowercase — got: \(output)")
+    }
+
     // MARK: - Quick task 260825-q1w (D-D): number-form policy pinned end-to-end
 
     /// Live `cleanup-2026-08-23.jsonl` #22, word -> digit direction.

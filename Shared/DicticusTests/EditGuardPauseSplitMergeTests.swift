@@ -316,4 +316,55 @@ final class EditGuardPauseSplitMergeTests: XCTestCase {
         XCTAssertEqual(result.text, baseline)
         assertPauseSplitMergeDidNotFire(result)
     }
+
+    // MARK: - 261017-g3j: restored terminal mark keeps a lowercase continuation
+    //
+    // When the gate rejects the LLM's removal of a stray mid-sentence mark
+    // (records 2026-10-08T10:07:41.164Z move shape, 2026-10-10T04:54:00.547Z
+    // delete shape), the mark is restored in front of a lowercase word the
+    // LLM continued. The finishing capitalizer must not uppercase that word;
+    // a mark the LLM kept still starts a capitalized sentence. Invented text.
+
+    private func restoredMarkEdit(_ result: EditGuard.GuardResult) -> EditGuard.ClassifiedEdit? {
+        result.edits.first { ($0.kind == "move" || $0.kind == "delete") && $0.from == "." && !$0.accepted }
+    }
+
+    func testRestoredMark_moveRejected_followingWordStaysLowercase_RED() {
+        let baseline = "The mechanic said the rear hub is a newer. model than the front one and the spokes held the same tension if so we keep it"
+        let llm = "The mechanic said the rear hub is a newer model than the front one; the spokes held the same tension. If so, we keep it."
+        let result = guardOut(baseline, llm)
+        XCTAssertNotNil(restoredMarkEdit(result), "fixture must reach a rejected move/delete of the period: \(result.edits)")
+        XCTAssertTrue(result.restoredMarkContinuations.contains(
+            EditGuard.RestoredMarkContinuation(precedingWord: "newer", mark: ".", followingWord: "model")),
+            "carrier must name the restored seam: \(result.restoredMarkContinuations)")
+        let kept = TextProcessingService.applyFinalCapitalization(
+            result.text, language: "en", keepLowercaseAfter: Set(result.restoredMarkContinuations))
+        XCTAssertTrue(kept.contains("newer. model"), "word after the restored mark must stay lowercase: \(kept)")
+        let today = TextProcessingService.applyFinalCapitalization(result.text, language: "en")
+        XCTAssertTrue(today.contains("newer. Model"), "without the carrier the default path still capitalizes: \(today)")
+    }
+
+    func testRestoredMark_deleteRejected_followingWordStaysLowercase_RED() {
+        let baseline = "The chain needs oil. on both sides before the long ride"
+        let llm = "The chain needs oil on both sides before the long ride."
+        let result = guardOut(baseline, llm)
+        XCTAssertNotNil(restoredMarkEdit(result), "fixture must reach a rejected move/delete of the period: \(result.edits)")
+        XCTAssertTrue(result.restoredMarkContinuations.contains(
+            EditGuard.RestoredMarkContinuation(precedingWord: "oil", mark: ".", followingWord: "on")),
+            "carrier must name the restored seam: \(result.restoredMarkContinuations)")
+        let kept = TextProcessingService.applyFinalCapitalization(
+            result.text, language: "en", keepLowercaseAfter: Set(result.restoredMarkContinuations))
+        XCTAssertTrue(kept.contains("oil. on"), "word after the restored mark must stay lowercase: \(kept)")
+    }
+
+    func testRestoredMark_periodKeptByLLM_nextWordCapitalized() {
+        let baseline = "The chain needs oil. on both sides before the long ride"
+        let llm = "The chain needs oil. on both sides before the long ride."
+        let result = guardOut(baseline, llm)
+        XCTAssertNil(restoredMarkEdit(result), "the LLM kept the period: \(result.edits)")
+        XCTAssertTrue(result.restoredMarkContinuations.isEmpty)
+        let out = TextProcessingService.applyFinalCapitalization(
+            result.text, language: "en", keepLowercaseAfter: Set(result.restoredMarkContinuations))
+        XCTAssertTrue(out.contains("oil. On"), "a period the LLM kept still starts a capitalized sentence: \(out)")
+    }
 }

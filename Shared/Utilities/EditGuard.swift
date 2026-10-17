@@ -352,17 +352,40 @@ public enum EditGuard {
         public let edits: [ClassifiedEdit]
         public let failedClosed: Bool
         public let failClosedReason: String?
+        /// Seams where a rejected removal of a terminal mark restored it in
+        /// front of a lowercase word the LLM had continued — see
+        /// `RestoredMarkContinuation`.
+        public let restoredMarkContinuations: [RestoredMarkContinuation]
 
         public init(
             text: String,
             edits: [ClassifiedEdit],
             failedClosed: Bool,
-            failClosedReason: String?
+            failClosedReason: String?,
+            restoredMarkContinuations: [RestoredMarkContinuation] = []
         ) {
             self.text = text
             self.edits = edits
             self.failedClosed = failedClosed
             self.failClosedReason = failClosedReason
+            self.restoredMarkContinuations = restoredMarkContinuations
+        }
+    }
+
+    /// The surface of one restored seam: `precedingWord`, the restored
+    /// `mark`, and the lowercase `followingWord`. Text-keyed so it survives
+    /// NumberRevert, `collapseDanglingPunctuation` and segment concatenation
+    /// without offset bookkeeping; a later step that changes either
+    /// neighbour makes the triple stop matching.
+    public struct RestoredMarkContinuation: Sendable, Equatable, Hashable {
+        public let precedingWord: String
+        public let mark: String
+        public let followingWord: String
+
+        public init(precedingWord: String, mark: String, followingWord: String) {
+            self.precedingWord = precedingWord
+            self.mark = mark
+            self.followingWord = followingWord
         }
     }
 
@@ -485,7 +508,11 @@ public enum EditGuard {
             return GuardResult(text: rulesCleaned, edits: [], failedClosed: true, failClosedReason: "rebuildInvariant")
         }
 
-        return GuardResult(text: collapseDanglingPunctuation(rebuilt.text), edits: rebuilt.classified, failedClosed: false, failClosedReason: nil)
+        return GuardResult(
+            text: collapseDanglingPunctuation(rebuilt.text), edits: rebuilt.classified,
+            failedClosed: false, failClosedReason: nil,
+            restoredMarkContinuations: rebuilt.restoredMarkContinuations
+        )
     }
 
     // MARK: - Quick task 260830-fp4, item 1: formatting-projection salvage
@@ -617,6 +644,7 @@ public enum EditGuard {
         var text = ""
         var edits: [ClassifiedEdit] = []
         var anySucceeded = false
+        var continuations: [RestoredMarkContinuation] = []
         for (segmentBaseline, segmentCandidate) in zip(baselineSegments, candidateSegments) {
             let segmentResult = applySingleWindow(
                 rulesCleaned: segmentBaseline, llmOutput: segmentCandidate, language: language,
@@ -629,6 +657,7 @@ public enum EditGuard {
             } else {
                 text += segmentResult.text
                 edits.append(contentsOf: segmentResult.edits)
+                continuations.append(contentsOf: segmentResult.restoredMarkContinuations)
                 if !segmentResult.failedClosed { anySucceeded = true }
             }
         }
@@ -639,7 +668,7 @@ public enum EditGuard {
         // unchanged, preserving its more informative `failClosedReason`
         // ("degenerateAlignment"/"rebuildInvariant") instead of masking it.
         guard anySucceeded else { return nil }
-        return GuardResult(text: text, edits: edits, failedClosed: false, failClosedReason: nil)
+        return GuardResult(text: text, edits: edits, failedClosed: false, failClosedReason: nil, restoredMarkContinuations: continuations)
     }
 
     /// Lossless-reconstruction sentence split: `sentenceSegments(s)
@@ -4301,7 +4330,7 @@ public enum EditGuard {
         edits: [Edit],
         classified: [ClassifiedEdit],
         language: String
-    ) -> (text: String, classified: [ClassifiedEdit])? {
+    ) -> (text: String, classified: [ClassifiedEdit], restoredMarkContinuations: [RestoredMarkContinuation])? {
         guard edits.count == classified.count else { return nil }
 
         let (edits, classified) = splitUtteranceFinalMarkCarrier(
@@ -4408,7 +4437,33 @@ public enum EditGuard {
             return nil
         }
 
+        // Records 2026-10-08T10:07:41.164Z and 2026-10-10T04:54:00.547Z: a
+        // rejected removal of a terminal mark restores it in front of a word
+        // the LLM continued in lowercase, and the finishing capitalizer then
+        // uppercased that word. A mark the LLM agreed with is never listed,
+        // so it still starts a capitalized sentence.
+        var editByBaselineIndex: [Int: Int] = [:]
+        for (i, edit) in edits.enumerated() {
+            if let from = edit.from { editByBaselineIndex[from.index] = i }
+        }
+        var continuations: [RestoredMarkContinuation] = []
+        for (i, edit) in edits.enumerated() {
+            guard edit.kind == .delete || edit.kind == .move, !verdicts[i].accepted,
+                  let mark = edit.from, mark.kind == .punctuation,
+                  mark.text == "." || mark.text == "!" || mark.text == "?",
+                  mark.index >= 1, mark.index + 1 < baseline.count else { continue }
+            let following = baseline[mark.index + 1]
+            guard following.kind == .word, following.text.first?.isLowercase == true,
+                  let followingEdit = editByBaselineIndex[following.index],
+                  edits[followingEdit].kind == .keep || edits[followingEdit].kind == .substitute,
+                  let candidateWord = edits[followingEdit].to,
+                  candidateWord.text.first?.isLowercase == true else { continue }
+            continuations.append(RestoredMarkContinuation(
+                precedingWord: baseline[mark.index - 1].text, mark: mark.text, followingWord: following.text
+            ))
+        }
+
         let text = tokens.map { $0.text + $0.trailing }.joined()
-        return (text, verdicts)
+        return (text, verdicts, continuations)
     }
 }
