@@ -17,7 +17,7 @@ packages:
     from: 7.0.0
   FluidAudio:
     url: https://github.com/FluidInference/FluidAudio.git
-    from: 0.15.5
+    from: 0.17.7
   llama:
     url: https://github.com/mattt/llama.swift.git
     from: 2.8832.0

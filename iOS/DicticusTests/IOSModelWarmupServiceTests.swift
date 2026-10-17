@@ -93,13 +93,13 @@ final class IOSModelWarmupServiceTests: XCTestCase {
     ///
     /// `hasModels` must equal a value this test derives itself, at the same
     /// moment, from the same on-disk location `IOSModelWarmupService` reads
-    /// (FluidAudio's own sandboxed cache dir, `AsrModels.defaultCacheDirectory()` —
-    /// Phase 47.1). Two services created in the same process must also agree with
+    /// (FluidAudio's own sandboxed Ultra cache dir,
+    /// `AsrModels.defaultCacheDirectory(for: .ultra)`, quick task 261017-qlv). Two services created in the same process must also agree with
     /// each other, confirming the value is computed from the same filesystem source
     /// rather than a per-instance async race. This pins the synchronous-init contract.
     ///
-    /// The check is re-derived here via FluidAudio's own real `AsrModels.modelsExist(at:)`
-    /// rather than reaching into `AsrModelLoader`/`IOSModelWarmupService` production
+    /// The check is re-derived here via FluidAudio's own real version-explicit
+    /// `AsrModels.modelsExist(at:version:)` rather than reaching into `AsrModelLoader`/`IOSModelWarmupService` production
     /// code for it: it's an independent cross-check of the same fact, so a future
     /// divergence between the two derivations surfaces as a loud failure instead of
     /// both sides silently agreeing on a shared bug.
@@ -115,10 +115,41 @@ final class IOSModelWarmupServiceTests: XCTestCase {
         XCTAssertEqual(service1.hasModels, service2.hasModels,
                        "hasModels must be computed synchronously from the filesystem at init — both instances read the same cache directory")
 
-        let expectedHasModels = AsrModels.modelsExist(at: AsrModels.defaultCacheDirectory())
+        let expectedHasModels = AsrModels.modelsExist(
+            at: AsrModels.defaultCacheDirectory(for: .ultra), version: .ultra
+        )
 
         XCTAssertEqual(service1.hasModels, expectedHasModels,
                        "hasModels must match whether the Parakeet model directory is currently populated on disk — this test derives the expectation from the filesystem instead of assuming a clean simulator")
+    }
+
+    // MARK: - 261017-qlv: Parakeet Ultra cache folder cross-checks
+
+    /// Writes the `.ultra` literal itself, independent of the production constant, so a
+    /// revert of `parakeetModelVersion` fails this on any simulator, cached or not.
+    func testLoaderCacheFolderIsFluidAudiosUltraFolder() {
+        XCTAssertEqual(AsrModelLoader.parakeetCacheDirectory, AsrModels.defaultCacheDirectory(for: .ultra))
+        XCTAssertEqual(AsrModelLoader.parakeetCacheDirectory.lastPathComponent, "parakeet-ultra")
+    }
+
+    /// Ties the warm-up version key's literal repo id to the folder FluidAudio derives
+    /// from the version enum (cache folder = repo name without its `-coreml` suffix).
+    func testModelNameMatchesCacheFolder() {
+        let repoName = AsrModelLoader.parakeetModelName.components(separatedBy: "/").last ?? ""
+        XCTAssertEqual(
+            repoName.replacingOccurrences(of: "-coreml", with: ""),
+            AsrModelLoader.parakeetCacheDirectory.lastPathComponent
+        )
+    }
+
+    /// Guards the post-warm-up purge against ever targeting the live model or the
+    /// shared Models folder.
+    func testRetiredV3CacheIsSiblingOfLiveCache() {
+        let retired = AsrModelLoader.retiredParakeetV3CacheDirectory
+        let live = AsrModelLoader.parakeetCacheDirectory
+        XCTAssertEqual(retired.lastPathComponent, "parakeet-tdt-0.6b-v3")
+        XCTAssertNotEqual(retired, live)
+        XCTAssertEqual(retired.deletingLastPathComponent(), live.deletingLastPathComponent())
     }
 
     // MARK: - 260815-ait Fix 5: isFirstWarmup pure predicate

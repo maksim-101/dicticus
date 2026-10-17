@@ -170,13 +170,11 @@ class IOSModelWarmupService: ObservableObject {
         pathMonitor.start(queue: pathMonitorQueue)
     }
 
-    /// Whether the Parakeet TDT v3 model is already cached on disk — FluidAudio's own
-    /// `AsrModels.modelsExist(at:)` over its sandboxed Application Support cache
-    /// directory (`<App Support>/FluidAudio/Models/parakeet-tdt-0.6b-v3-coreml/`,
-    /// identical mechanism on iOS + macOS, no hand-built Documents-dir path logic
-    /// needed unlike WhisperKit's HuggingFace cache — 47.1-RESEARCH.md).
+    /// Whether the Parakeet Ultra model is already cached on disk, via the loader's
+    /// version-explicit `AsrModels.modelsExist(at:version:)` over FluidAudio's sandboxed
+    /// cache folder (`<App Support>/FluidAudio/Models/parakeet-ultra/`).
     private static func checkFluidAudioCache() -> Bool {
-        AsrModels.modelsExist(at: AsrModels.defaultCacheDirectory())
+        AsrModelLoader.parakeetModelsExist()
     }
 
     /// Check if models are already downloaded.
@@ -327,6 +325,19 @@ class IOSModelWarmupService: ObservableObject {
                         } catch {
                             warmupLog.error("Failed to purge WhisperKit cache: \(error.localizedDescription)")
                         }
+                    }
+                }
+
+                // Reclaim the retired Parakeet v3 model on devices upgraded from a v3 build.
+                // Runs only here, after Ultra loaded, so a failed download leaves the old state intact.
+                let retiredV3Cache = AsrModelLoader.retiredParakeetV3CacheDirectory
+                if retiredV3Cache.path != AsrModelLoader.parakeetCacheDirectory.path,
+                   FileManager.default.fileExists(atPath: retiredV3Cache.path) {
+                    do {
+                        try FileManager.default.removeItem(at: retiredV3Cache)
+                        warmupLog.info("Purged retired Parakeet v3 cache at \(retiredV3Cache.path)")
+                    } catch {
+                        warmupLog.error("Failed to purge retired Parakeet v3 cache: \(error.localizedDescription)")
                     }
                 }
 

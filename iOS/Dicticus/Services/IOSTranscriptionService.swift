@@ -405,12 +405,13 @@ extension IOSTranscriptionService {
         }
     }
 
-    /// Returns true if the Parakeet TDT v3 model is cached on this machine.
+    /// Returns true if the Parakeet Ultra model is cached on this machine.
     /// Used by tests to conditionally skip model-dependent tests. Renamed from
     /// `isWhisperKitAvailable` (Phase 47.1 Task 3) to reflect the FluidAudio engine
-    /// swap — the implementation is FluidAudio's real `AsrModels.modelsExist(at:)`.
+    /// swap — the implementation is the loader's version-explicit check of the
+    /// `parakeet-ultra` cache folder.
     static func isModelAvailable() -> Bool {
-        AsrModels.modelsExist(at: AsrModels.defaultCacheDirectory())
+        AsrModelLoader.parakeetModelsExist()
     }
 
     /// Attempt to create an IOSTranscriptionService using a warm FluidAudio AsrManager.
