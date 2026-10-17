@@ -5,15 +5,23 @@
 #   ./scripts/install-local.sh
 #
 # Behavior:
-#   1. Gracefully quits any running Dicticus instance.
-#   2. Enumerates every com.dicticus.app bundle on disk via mdfind.
-#   3. Trashes (mv ~/.Trash/) every copy that is NOT /Applications/Dicticus.app,
+#   1. Quits every running Dicticus instance, including xcodebuild test hosts
+#      and old DerivedData builds (pkill by path, not only the bundle id).
+#   2. Enumerates Dicticus.app bundles from the LaunchServices database plus a
+#      `find` over the known build locations. Spotlight (`mdfind`) is not used:
+#      it hung for 30 minutes on this query on 2026-10-17 and a hung sweep
+#      silently installs on top of the stale copies it was meant to remove.
+#   3. Trashes (mv ~/.Trash/) every on-disk copy that is NOT /Applications/Dicticus.app,
 #      excluding ~/.Trash, Time Machine snapshots, and dev build artifacts
-#      (project build/ subdir + Xcode DerivedData).
-#   4. Wipes the specific Dicticus DerivedData folder to prevent identity confusion.
+#      (project build/ subdir + Xcode DerivedData), and unregisters EVERY
+#      non-canonical LaunchServices entry, dead paths included, then compacts
+#      the database. Stale registrations are what let a bundle-id launch pick
+#      an old copy (73 of them had accumulated by 2026-10-17).
+#   4. Wipes every Dicticus-* DerivedData folder to prevent identity confusion.
 #   5. Copies the freshly-built Release .app from macOS/build/ to /Applications/.
 #   6. Re-signs the app with the Developer ID identity in DEVID_SIGNING_HASH for TCC persistence.
-#   7. Re-launches via explicit `open "$CANONICAL_APP"` path and verifies the running process.
+#   7. Re-launches via explicit `open "$CANONICAL_APP"` path and FAILS (exit 1)
+#      unless the only running Dicticus binary is the canonical one.
 #
 # Dev-only — do not run on end-user machines.
 set -euo pipefail
@@ -54,11 +62,38 @@ if pgrep -x "Dicticus" >/dev/null 2>&1; then
     pkill -f "Dicticus.app" || true
     sleep 1
 fi
+# The AppleScript quit reaches one process per bundle id; a test host or an old
+# DerivedData build running alongside survives it. Kill by binary path.
+STRAYS=$(ps -axo pid=,comm= | grep "Dicticus.app/Contents/MacOS/Dicticus$" || true)
+if [ -n "$STRAYS" ]; then
+    echo "  Killing Dicticus processes still running:"
+    printf '%s\n' "$STRAYS" | awk '{print "    pid " $1 ": " $2}'
+    printf '%s\n' "$STRAYS" | awk '{print $1}' | xargs kill -9 2>/dev/null || true
+    sleep 1
+fi
 
-echo "=== Step 3: Enumerate stale Dicticus.app copies ==="
+LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+
+echo "=== Step 3: Enumerate stale Dicticus.app copies (LaunchServices + find, no Spotlight) ==="
+# Every registered path, live or dead, minus the canonical one. Dead paths are
+# unregistered below; live ones also go through the trash step.
+LS_REGISTERED=()
+while IFS= read -r path; do
+    [ -z "$path" ] && continue
+    [ "$path" = "$CANONICAL_APP" ] && continue
+    LS_REGISTERED+=("$path")
+done < <("$LSREGISTER" -dump 2>/dev/null \
+    | grep -E '^[[:space:]]*path:[[:space:]]*.*Dicticus' \
+    | sed -e 's/^[[:space:]]*path:[[:space:]]*//' -e 's/ (0x[0-9a-f]*)$//' \
+    | grep -E '/Dicticus(-[^/]*)?\.app$' \
+    | grep -v -E 'Debug-iphone|DicticusUITests|\.xcarchive/|XcodeDistPipeline' \
+    | sort -u)
+echo "  LaunchServices entries besides canonical: ${#LS_REGISTERED[@]}"
+
 STALE_COPIES=()
 while IFS= read -r path; do
     [ -z "$path" ] && continue
+    [ -d "$path" ] || continue
     # Whitelist guard — must be a Dicticus.app bundle
     case "$path" in
       */Dicticus.app) ;;
@@ -74,7 +109,11 @@ while IFS= read -r path; do
       */build/Build/Products/*) continue ;;        # local xcodebuild output
     esac
     STALE_COPIES+=("$path")
-done < <(mdfind "kMDItemCFBundleIdentifier == '$BUNDLE_ID'")
+done < <( { printf '%s\n' "${LS_REGISTERED[@]+"${LS_REGISTERED[@]}"}"; \
+            find /Applications "$HOME/Applications" "$HOME/Desktop" "$HOME/Downloads" \
+                 "$HOME/Library/Developer/Xcode/DerivedData" "$PROJECT_DIR/build" \
+                 -maxdepth 6 -name 'Dicticus.app' -type d 2>/dev/null; } \
+          | grep -v -E 'Debug-iphone|\.xcarchive/' | sort -u)
 
 if [ ${#STALE_COPIES[@]} -eq 0 ]; then
     echo "  No stale copies found."
@@ -97,12 +136,28 @@ if [ ${#STALE_COPIES[@]} -gt 0 ]; then
         mv "$p" "$dest"
     done
 fi
-# Wipe Dicticus-specific DerivedData to prevent identity desync
-DD_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "Dicticus-*" -type d -maxdepth 1 2>/dev/null || true)
-if [ -n "$DD_PATH" ]; then
-    echo "  Cleaning DerivedData: $DD_PATH"
-    rm -rf "$DD_PATH"
-fi
+# Wipe Dicticus-specific DerivedData to prevent identity desync. One folder per
+# line: with two folders (macOS + iOS) the old single-variable form passed a
+# path containing a newline to rm -rf, which deleted nothing and said nothing.
+while IFS= read -r dd; do
+    [ -z "$dd" ] && continue
+    echo "  Cleaning DerivedData: $dd"
+    rm -rf "$dd"
+done < <(find ~/Library/Developer/Xcode/DerivedData -maxdepth 1 -name "Dicticus-*" -type d 2>/dev/null || true)
+
+echo "=== Step 4a: Unregister stale LaunchServices entries ==="
+# Trashing a bundle leaves its registration behind, and a dead registration is
+# enough for a bundle-id launch (osascript, open -b, Sparkle, login item) to
+# resolve to the wrong copy. Unregister everything that is not canonical.
+UNREG=0
+for p in "${LS_REGISTERED[@]+"${LS_REGISTERED[@]}"}" "${STALE_COPIES[@]+"${STALE_COPIES[@]}"}"; do
+    [ -z "$p" ] && continue
+    "$LSREGISTER" -u "$p" >/dev/null 2>&1 || true
+    "$LSREGISTER" -u "$p" >/dev/null 2>&1 || true   # duplicate IDs for one path need a second pass
+    UNREG=$((UNREG + 1))
+done
+"$LSREGISTER" -gc >/dev/null 2>&1 || true
+echo "  Unregistered $UNREG path(s), database compacted."
 
 echo "=== Step 5: Install fresh build to $CANONICAL_APP ==="
 if [ -d "$CANONICAL_APP" ]; then
@@ -151,7 +206,6 @@ echo "=== Step 5c: Remove build artifacts to prevent LaunchServices identity con
 # unsigned build artifact. If both that copy and the signed /Applications copy
 # exist simultaneously, macOS TCC sees conflicting signing identities for the
 # same bundle ID and invalidates permissions on every restart.
-LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 for artifact in "$BUILD_APP" "$RECORDER_APP" "$DEBUG_APP"; do
     if [ -d "$artifact" ]; then
         echo "  Unregistering: $artifact"
@@ -192,12 +246,13 @@ codesign -vvv --deep --strict "$CANONICAL_APP" >/dev/null 2>&1 || {
 
 echo "=== Step 7: Relaunch ==="
 open "$CANONICAL_APP"
-sleep 2
-RUNNING_PATH=$(lsappinfo info -only bundlepath -app Dicticus 2>/dev/null \
-    | sed 's/.*="\(.*\)"/\1/' || true)
-echo "  Running bundle path: $RUNNING_PATH"
-if [ "$RUNNING_PATH" != "$CANONICAL_APP" ]; then
-    echo "WARNING: running Dicticus is not the canonical copy ($RUNNING_PATH)"
+sleep 4
+# Hard check by binary path (lsappinfo's output format is not stable across
+# macOS versions and the old parse printed garbage). Exit 1 so an automated
+# caller sees the failure instead of a WARNING line scrolling past.
+if ! "$SCRIPT_DIR/check-running-copy.sh"; then
+    echo "ERROR: the running Dicticus is not (only) $CANONICAL_APP — see above."
+    exit 1
 fi
 
 echo ""
