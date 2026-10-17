@@ -6,6 +6,18 @@
         <description>Most recent changes with links to updates.</description>
         <language>en</language>
         <item>
+            <title>Version 1.4.1</title>
+            <sparkle:releaseNotesLink>https://github.com/maksim-101/dicticus/releases/tag/macos-v1.4.1</sparkle:releaseNotesLink>
+            <pubDate>Fri, 17 Oct 2026 16:20:00 +0000</pubDate>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/maksim-101/dicticus/releases/download/macos-v1.4.1/Dicticus.dmg"
+                       sparkle:version="16"
+                       sparkle:shortVersionString="1.4.1"
+                       sparkle:edSignature="LfktcNAck2ITkPMrW9Y3D4kxXPOcQmiRknj0dnK6Nb9WSd3othoRkyoFFuIoGF0Ev5Y7kB5/3hGiw68kcym4CA=="
+                       length="15283189"
+                       type="application/octet-stream" />
+        </item>
+        <item>
             <title>Version 1.4.0</title>
             <sparkle:releaseNotesLink>https://github.com/maksim-101/dicticus/releases/tag/macos-v1.4.0</sparkle:releaseNotesLink>
             <pubDate>Fri, 16 Oct 2026 17:28:13 +0000</pubDate>
