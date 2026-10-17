@@ -404,6 +404,24 @@ class DictionaryService: ObservableObject {
         return (result, replacements)
     }
 
+    /// Quick task 261017-g3j (Step 3a.10): the exact pass over the user's own entries
+    /// (`.user`, `.imported`) once more after the AI step. Built-in entries stay pre-LLM only,
+    /// and an entry whose key sits inside a value the pre-LLM pass already wrote is skipped.
+    nonisolated static func applyPostGatePass(
+        to text: String,
+        entries: [String: DictionaryMetadata],
+        caseSensitive: Bool,
+        dictProtected: Set<String>
+    ) -> (text: String, replacements: [Replacement]) {
+        let protectedValues = dictProtected.map { $0.lowercased() }
+        let eligible = entries.filter { key, metadata in
+            guard metadata.source != .default else { return false }
+            let lowerKey = key.lowercased()
+            return !protectedValues.contains { $0.contains(lowerKey) }
+        }
+        return applyExactPass(to: text, entries: eligible, caseSensitive: caseSensitive)
+    }
+
     /// Rolling one-step backup key: `save()` copies the PREVIOUS persisted blob
     /// here before overwriting, so a single bad overwrite is always recoverable
     /// (belt-and-suspenders behind the init data-loss guard; 2026-07-19).

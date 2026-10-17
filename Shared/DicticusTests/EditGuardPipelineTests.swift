@@ -241,6 +241,26 @@ final class EditGuardPipelineTests: XCTestCase {
         XCTAssertTrue(output.contains("oil. on"), "word after the restored period must stay lowercase — got: \(output)")
     }
 
+    // MARK: - 261017-g3j: post-gate exact pass over the user's own entries
+
+    /// The inserted `the` forms the key `the tandem` only after the LLM step, so the pre-LLM
+    /// dictionary pass cannot see it; the post-gate pass rewrites it. Invented text.
+    func testPostGateUserEntryRewritesLLMFormedKey_RED() async {
+        dictionaryService.setReplacement(for: "the tandem", with: "Tandemly")
+        defer { dictionaryService.removeAll() }
+        let raw = "we fit tandem frames in the shop today"
+        let baseline = await rulesCleanedBaseline(for: raw, language: "en")
+        XCTAssertFalse(baseline.lowercased().contains("the tandem"), "rules baseline must not contain the key: \(baseline)")
+
+        let mock = PipelineMockCleanupProvider()
+        mock.returnValue = "We fit the tandem frames in the shop today."
+        let service = TextProcessingService(
+            dictionaryService: dictionaryService, cleanupService: mock, historyService: testHistory
+        )
+        let output = await service.process(text: raw, language: "en", mode: .aiCleanup)
+        XCTAssertTrue(output.contains("Tandemly frames"), "post-gate pass must rewrite the LLM-formed key — got: \(output)")
+    }
+
     // MARK: - Quick task 260825-q1w (D-D): number-form policy pinned end-to-end
 
     /// Live `cleanup-2026-08-23.jsonl` #22, word -> digit direction.

@@ -110,4 +110,41 @@ final class DictionaryExactPassCaseTests: XCTestCase {
 
         XCTAssertEqual(result.text, input)
     }
+
+    // MARK: - 261017-g3j: post-gate exact pass over the user's own entries
+
+    private func entry(_ replacement: String, source: LexiconSource) -> DictionaryMetadata {
+        DictionaryMetadata(replacement: replacement, createdAt: Date(), source: source)
+    }
+
+    /// User and imported entries fire after the gate; built-in entries do not. Invented tokens.
+    func testPostGatePass_userAndImportedFireDefaultDoesNot_RED() {
+        let result = DictionaryService.applyPostGatePass(
+            to: "The SpokeDraw and SpokeDash and SpokeBell parts arrived.",
+            entries: [
+                "SpokeDraw": entry("Spokedrawly", source: .user),
+                "SpokeDash": entry("Spokedashly", source: .imported),
+                "SpokeBell": entry("Spokebelly", source: .default),
+            ],
+            caseSensitive: false,
+            dictProtected: []
+        )
+        XCTAssertEqual(result.text, "The Spokedrawly and Spokedashly and SpokeBell parts arrived.")
+        XCTAssertEqual(result.replacements.count, 2)
+    }
+
+    /// A key that occurs inside a value the pre-LLM pass wrote is skipped, so the value is not rewritten twice.
+    func testPostGatePass_skipsKeyInsideProtectedValue_RED() {
+        let entries = ["spoke": entry("spoke wrench", source: .user)]
+        let text = "Hand me the spoke wrench now."
+
+        let protected = DictionaryService.applyPostGatePass(
+            to: text, entries: entries, caseSensitive: false, dictProtected: ["spoke wrench"])
+        XCTAssertEqual(protected.text, text)
+        XCTAssertEqual(protected.replacements.count, 0)
+
+        let unprotected = DictionaryService.applyPostGatePass(
+            to: text, entries: entries, caseSensitive: false, dictProtected: [])
+        XCTAssertEqual(unprotected.text, "Hand me the spoke wrench wrench now.")
+    }
 }

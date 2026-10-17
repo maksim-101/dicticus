@@ -66,6 +66,9 @@ public struct DebugCleanupRecord: Codable, Sendable {
     /// AI step then cut below that count. nil: not checked (plain mode, no LLM run, no mark added);
     /// []: checked, none short; otherwise the short kinds.
     public let dictated_mark_shortfall: [String]?
+    /// Quick task 261017-g3j (Step 3a.10): replacements the post-gate exact pass made over the user's
+    /// own entries. nil: the pass did not run (plain mode, no LLM run); []: ran, nothing replaced.
+    public let post_gate_dict_replacements: [DictionaryReplacementEntry]?
 
     // Phase 27 WR-02: custom decoder tolerates pre-Phase-27 JSONL where the
     // dictionary_replacements / dictionary_blocked keys are absent. Both
@@ -78,6 +81,7 @@ public struct DebugCleanupRecord: Codable, Sendable {
         case dictionary_context_keys, dictionary_replacements, dictionary_blocked
         case anomaly, emission_counter, prompt_version
         case detected_bundle_id, resolved_context, brand_rewrites, lexicon_vetoed, asr_tokens, dictated_mark_shortfall
+        case post_gate_dict_replacements
     }
 
     public init(
@@ -100,7 +104,8 @@ public struct DebugCleanupRecord: Codable, Sendable {
         brand_rewrites: [BrandRewriteEntry]? = nil,
         lexicon_vetoed: [DictionaryBlockedEntry]? = nil,
         asr_tokens: AsrTokenTrace? = nil,
-        dictated_mark_shortfall: [String]? = nil
+        dictated_mark_shortfall: [String]? = nil,
+        post_gate_dict_replacements: [DictionaryReplacementEntry]? = nil
     ) {
         self.ts = ts
         self.session_id = session_id
@@ -122,6 +127,7 @@ public struct DebugCleanupRecord: Codable, Sendable {
         self.lexicon_vetoed = lexicon_vetoed
         self.asr_tokens = asr_tokens
         self.dictated_mark_shortfall = dictated_mark_shortfall
+        self.post_gate_dict_replacements = post_gate_dict_replacements
     }
 
     public init(from decoder: Decoder) throws {
@@ -151,6 +157,7 @@ public struct DebugCleanupRecord: Codable, Sendable {
         // Quick task 261003-jej: tolerant decode for JSONL written before the ASR token trace.
         self.asr_tokens = try c.decodeIfPresent(AsrTokenTrace.self, forKey: .asr_tokens) ?? nil
         self.dictated_mark_shortfall = try c.decodeIfPresent([String].self, forKey: .dictated_mark_shortfall) ?? nil
+        self.post_gate_dict_replacements = try c.decodeIfPresent([DictionaryReplacementEntry].self, forKey: .post_gate_dict_replacements) ?? nil
     }
 
     public struct ModelInfo: Codable, Sendable {

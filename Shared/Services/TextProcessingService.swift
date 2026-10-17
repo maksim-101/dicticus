@@ -268,6 +268,7 @@ class TextProcessingService: ObservableObject {
         var dbgGateEntry: DebugCleanupRecord.GateEntry? = nil
         var dbgDictKeys: [String] = []
         var dbgMarkShortfall: [String]? = nil
+        var dbgPostGateDict: [DictionaryService.Replacement]? = nil
         #endif
 
         // Step 3: AI Cleanup
@@ -465,6 +466,20 @@ class TextProcessingService: ObservableObject {
                     processedText = rulesCleanedText
                 }
             }
+
+            // Step 3a.10 (quick 261017-g3j): the user's own entries (user and imported) once more, exact
+            // only, after the gate, so a spelling the AI writes that the user already mapped is corrected;
+            // built-in entries stay pre-LLM only.
+            let postGate = DictionaryService.applyPostGatePass(
+                to: processedText,
+                entries: dictionaryService.dictionary,
+                caseSensitive: dictionaryService.isCaseSensitive,
+                dictProtected: Set(dictTrace.replacements.map { $0.to })
+            )
+            processedText = postGate.text
+            #if DEBUG_RECORDER
+            dbgPostGateDict = postGate.replacements
+            #endif
         }
 
         // Step 3a.6 (42-07/MLANG-01): deterministic post-gate capitalization.
@@ -641,7 +656,8 @@ class TextProcessingService: ObservableObject {
             // Quick task 260930-s1e: always an array; [] = "ran, nothing vetoed".
             lexicon_vetoed: dbgVetoed.map { DebugCleanupRecord.DictionaryBlockedEntry(key: $0.key, from: $0.from, to: $0.to, ratio: $0.ratio) },
             asr_tokens: dbgAsrTokens,
-            dictated_mark_shortfall: dbgMarkShortfall   // Quick task 261003-p7e
+            dictated_mark_shortfall: dbgMarkShortfall,   // Quick task 261003-p7e
+            post_gate_dict_replacements: dbgPostGateDict.map { $0.map { DebugCleanupRecord.DictionaryReplacementEntry(key: $0.key, from: $0.from, to: $0.to) } }   // Quick task 261017-g3j
         )
         await DebugRecorder.shared.record(record)
         #endif
