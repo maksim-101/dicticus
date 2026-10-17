@@ -44,7 +44,7 @@ import Foundation
 /// detection-layer change: TranscriptionService.detectLanguage (D-13) is
 /// still the sole source. Neither engine's native language code is used for
 /// this field — as of quick task 260827-81z, macOS runs WhisperKit / Whisper
-/// large-v3-turbo and iOS runs FluidAudio / Parakeet TDT v3, and both
+/// large-v3-turbo and iOS runs FluidAudio / Parakeet Ultra, and both
 /// platforms detect language post-hoc from the decoded text with Apple's
 /// `NLLanguageRecognizer`, constrained to {de, en}, in each platform's own
 /// `detectLanguage(_:)`.

@@ -42,7 +42,9 @@ enum AppBuildInfo {
         "Added: a live transcript panel near the text cursor while you hold the dictation key (turn it off in Settings → General); now requires macOS 26",
     ]
     #else
-    private static let platformChanges: [String] = []
+    private static let platformChanges = [
+        "Changed: dictation uses the more accurate Parakeet Ultra speech model (one-time download, about 630 MB)",
+    ]
     #endif
 
     static let releasesURL = URL(string: "https://github.com/maksim-101/dicticus/releases")!

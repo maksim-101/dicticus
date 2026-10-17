@@ -3,8 +3,8 @@ import FluidAudio
 import Network
 import os.log
 
-/// Manages FluidAudio/Parakeet TDT v3 CoreML warm-up state for iOS (Phase 47.1, D-04
-/// engine swap — replaces WhisperKit large-v3-turbo), via the shared bounded-retry
+/// Manages FluidAudio/Parakeet Ultra CoreML warm-up state for iOS (Phase 47.1, D-04
+/// engine swap — replaces WhisperKit large-v3-turbo; Ultra replaced Parakeet v3 in 261017-qlv), via the shared bounded-retry
 /// `AsrModelLoader` (parity with macOS `ModelWarmupService`, WHISP-02).
 ///
 /// iOS v2.0 focuses on plain dictation; AI cleanup (LLM) is excluded to reduce memory pressure
@@ -211,7 +211,7 @@ class IOSModelWarmupService: ObservableObject {
         storedVersionKey != currentVersionKey
     }
 
-    /// Start Parakeet TDT v3 initialization in a background Task via the
+    /// Start Parakeet Ultra initialization in a background Task via the
     /// shared bounded-retry `AsrModelLoader` (parity with macOS `ModelWarmupService`).
     /// Pass `force: true` from explicit user actions (Download / Retry button) so the
     /// download path is not blocked by the no-models guard.
@@ -219,7 +219,7 @@ class IOSModelWarmupService: ObservableObject {
         // D-D1 (Phase 19.5): Re-check FS on every warmup invocation to avoid
         // relying on stale init-time state after backgrounding / FS mutations.
         // The guard prevents auto-launch sites from silently kicking off a
-        // ~2.7 GB download; explicit user actions bypass it via `force`.
+        // ~630 MB download; explicit user actions bypass it via `force`.
         checkHasModels()
         guard hasModels || force else { return }
         guard !isWarming && !isReady else { return }
@@ -234,9 +234,8 @@ class IOSModelWarmupService: ObservableObject {
         // Honest stage text: on a fresh install this is a large one-time download; on every
         // later launch the model is already on disk and this is just an ANE load. The old copy
         // said "Downloading…" in BOTH cases, which is why a restart showed a misleading state.
-        // Phase 47.1: size updated to the Parakeet TDT v3 CoreML package's ~1.1 GB
-        // (`FluidInference/parakeet-tdt-0.6b-v3-coreml`, 47.1-RESEARCH.md) — the prior
-        // "~626 MB" figure was WhisperKit large-v3-turbo's on-disk size.
+        // Size: the Parakeet Ultra CoreML package is ~630 MB
+        // (`FluidInference/parakeet-ultra-coreml`, 632.3 MB summed from the HF tree, 261017-qlv).
         //
         // 260815-ait Fix 5: an on-disk model still pays a one-time ANE recompile
         // (~60–90s observed) the first time a given build/model combination warms
@@ -246,7 +245,7 @@ class IOSModelWarmupService: ObservableObject {
             ? (isFirstWarmupForCurrentVersion
                 ? "First-time setup \u{2014} preparing the speech model. This can take up to a minute."
                 : "Loading speech model\u{2026}")
-            : "Downloading speech model\u{2026} (first run, ~1.1 GB)"
+            : "Downloading speech model\u{2026} (first run, ~630 MB)"
 
         let warmupLog = Logger(subsystem: "com.dicticus", category: "warmup")
         let warmupStart = Date()
@@ -273,7 +272,7 @@ class IOSModelWarmupService: ObservableObject {
 
         warmupTask = Task.detached(priority: .userInitiated) { [weak self] in
             do {
-                // Step 1: Download + load Parakeet TDT v3 CoreML models via the shared
+                // Step 1: Download + load Parakeet Ultra CoreML models via the shared
                 // bounded-retry wrapper (parity with macOS ModelWarmupService).
                 warmupLog.info("Step 1: AsrModelLoader.loadFluidAudio starting")
                 let (am, _) = try await AsrModelLoader.loadFluidAudio(progress: progressHandler)

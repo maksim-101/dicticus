@@ -2,7 +2,13 @@
 
 All notable changes to Dicticus (macOS + iOS). This is a high-level history — when things were added, changed, or fixed — consolidated from git history, tags, GitHub releases, and `.planning/` milestone records. Day-to-day fixes are rolled up into their release.
 
-Dicticus is a fully local, on-device dictation app (ASR via WhisperKit/Whisper large-v3-turbo on macOS, FluidAudio/Parakeet TDT v3 on iOS; AI cleanup via llama.cpp/Qwen3.5-4B) for macOS and iOS. Versioning note: the product milestone line (v1.0 → v2.3) and the macOS release-tag line (`v0.1.0` … `macos-v1.2.0`) evolved separately; both are shown where they apply.
+Dicticus is a fully local, on-device dictation app (ASR via WhisperKit/Whisper large-v3-turbo on macOS, FluidAudio/Parakeet Ultra on iOS; AI cleanup via llama.cpp/Qwen3.5-4B) for macOS and iOS. Versioning note: the product milestone line (v1.0 → v2.3) and the macOS release-tag line (`v0.1.0` … `macos-v1.2.0`) evolved separately; both are shown where they apply.
+
+---
+
+## Unreleased
+
+- **Changed: iPhone dictation uses the Parakeet Ultra speech model** — Ultra is Moondream's retraining of NVIDIA's Parakeet v3, with the same 25 languages and speed. Its published FLEURS word error rate is 3.6 % in German and 3.6 % in English, against 4.1 % and 4.3 % for Parakeet v3. After updating, the app asks once to download it (about 630 MB) and deletes the previous model when the new one has loaded. iOS.
 
 ---
 

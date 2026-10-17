@@ -186,7 +186,7 @@ final class IOSTranscriptionServiceTests: XCTestCase {
     // `IOSTranscriptionService.transcribe(wavURL:)` now calls `FillerWordRemover.strip`
     // directly (iOS-local, see the call site's doc comment) with the exact language code
     // its own `detectLanguage(_:)` produces ("de"/"en"/"other"). A live decode requires
-    // the ~1.1GB Parakeet model (not cached in this execution environment — see
+    // the ~630 MB Parakeet Ultra model (not cached in this execution environment — see
     // 47.1-01-SUMMARY.md), so these tests exercise the identical
     // `FillerWordRemover.strip(_:language:)` call shape `transcribe()` now makes, proving
     // the exact behavior wired into the plain path without needing a live model.

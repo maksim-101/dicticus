@@ -108,19 +108,19 @@ struct SettingsView: View {
                 NavigationStack {
                     List {
                         Section("Model") {
-                            LabeledContent("Name", value: "Parakeet TDT v3")
-                            LabeledContent("Provider", value: "NVIDIA (via FluidAudio)")
+                            LabeledContent("Name", value: "Parakeet Ultra")
+                            LabeledContent("Provider", value: "Moondream, from NVIDIA Parakeet v3 (via FluidAudio)")
                             LabeledContent("Parameters", value: "~600M")
-                            LabeledContent("Size on Disk", value: "~1.1 GB (CoreML)")
+                            LabeledContent("Size on Disk", value: "~630 MB (CoreML)")
                         }
                         Section("Capabilities") {
                             LabeledContent("Languages", value: "25 (incl. DE, EN)")
-                            LabeledContent("German WER", value: "TBD (pending D-07)")
-                            LabeledContent("English WER", value: "TBD (pending D-07)")
+                            LabeledContent("German WER", value: "3.6 % (FLEURS, model card)")
+                            LabeledContent("English WER", value: "3.6 % (FLEURS, model card)")
                             LabeledContent("Compute", value: "Apple Neural Engine")
                         }
                         Section {
-                            Text("Parakeet TDT v3 is a multilingual speech recognition model optimized for Apple Neural Engine via CoreML. It runs entirely on-device — no audio is sent to any server.")
+                            Text("Parakeet Ultra is a retrained version of NVIDIA's multilingual Parakeet v3 speech recognition model, optimized for the Apple Neural Engine via CoreML. It runs entirely on-device — no audio is sent to any server.")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }

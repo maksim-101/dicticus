@@ -36,7 +36,7 @@ protocol TranscriptionProviding: AnyObject {
     func transcribe(wavURL: URL) async throws -> DicticusTranscriptionResult
 }
 
-/// Core ASR pipeline for iOS: transcribe a WAV file via FluidAudio/Parakeet TDT v3
+/// Core ASR pipeline for iOS: transcribe a WAV file via FluidAudio/Parakeet Ultra
 /// (Phase 47.1, D-04 engine swap — replaces WhisperKit large-v3-turbo), applying an
 /// input-energy pre-filter, and detect language post-hoc with NLLanguageRecognizer.
 /// As of Phase 46-02 this class owns transcription only — recording moved to
@@ -141,7 +141,7 @@ final class IOSTranscriptionService: TranscriptionProviding {
             throw TranscriptionError.silenceOnly
         }
 
-        // Layer 3: Transcribe via FluidAudio/Parakeet TDT v3.
+        // Layer 3: Transcribe via FluidAudio/Parakeet Ultra.
         //
         // Restore the trailing-silence tail-pad Parakeet's TDT decoder needs to flush its
         // final token (spike 008 Fix B, git ccbad01) — WhisperKit's seq2seq decoder never
