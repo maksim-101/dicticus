@@ -116,6 +116,15 @@
 // `drop_reason` (`boilerplateSegment` or `nonDeEnLanguage`). A `pass` record with a
 // `drop_reason` segment is a clip whose remaining chunks were pasted.
 //
+// Cycle 9 (quick task 261018-go0, CAPTURE DEVICE): every macOS record of a live hold carries
+// `input_device_name` and `input_sample_rate`. `input_sample_rate` is the hardware-side rate read
+// after the input pin at key-down; `hw_sample_rate` is the rate the clip is resampled from. They
+// agree by construction, so a divergence means the tap is again built from a different source.
+// New reason `inputInterrupted`: the engine stopped during the hold (device change). `detected_by`
+// is `notification` (AVAudioEngineConfigurationChange while stopped) or `release` (engine found
+// not running at key-up). The hold throws instead of being decoded, so such a record has no
+// energy or segment fields.
+//
 // Output: ~/Library/Application Support/Dicticus/DebugRecordings/discard-YYYY-MM-DD.jsonl
 // Retention: 14 days, purged once per launch.
 
@@ -234,7 +243,9 @@ public actor DiscardProbe {
         lowConfidenceShort: Bool? = nil,
         noSpeechProbSource: String? = nil,
         energyMetricsSource: String? = nil,
-        gateBypassedByDuration: Bool? = nil
+        gateBypassedByDuration: Bool? = nil,
+        inputDeviceName: String? = nil,
+        inputSampleRate: Double? = nil
     ) {
         ensureDirectory()
         purgeIfNeeded()
@@ -263,6 +274,8 @@ public actor DiscardProbe {
         // detected voice. Sizes the accepted-risk class on noResult/boilerplateHallucination
         // records, not only pass.
         if let gateBypassedByDuration { line["gate_bypassed_by_duration"] = gateBypassedByDuration }
+        if let inputDeviceName { line["input_device_name"] = inputDeviceName }
+        if let inputSampleRate { line["input_sample_rate"] = inputSampleRate }
         if let segments {
             line["segment_count"] = segments.count
             line["segments"] = segments.map { seg -> [String: Any] in
@@ -282,6 +295,32 @@ public actor DiscardProbe {
         }
 
         appendJsonl(line)
+    }
+
+    /// Record a hold whose engine stopped before release (quick task 261018-go0). `detectedBy` is
+    /// "notification" (AVAudioEngineConfigurationChange seen while the engine was stopped) or "release"
+    /// (engine found not running at key-up before any notification arrived).
+    public func recordInputInterrupted(
+        detectedBy: String,
+        capturedSampleCount: Int,
+        captureSampleRate: Double,
+        inputDeviceName: String
+    ) {
+        ensureDirectory()
+        purgeIfNeeded()
+
+        let duration = captureSampleRate > 0 ? Double(capturedSampleCount) / captureSampleRate : 0
+        appendJsonl([
+            "ts": Self.iso8601Timestamp(),
+            "reason": "inputInterrupted",
+            "platform": "macOS",
+            "detected_by": detectedBy,
+            "raw_sample_count": capturedSampleCount,
+            "hw_sample_rate": captureSampleRate,
+            "input_sample_rate": captureSampleRate,
+            "duration_s": duration,
+            "input_device_name": inputDeviceName
+        ])
     }
 
     // MARK: - Plumbing (mirrors AudioCaptureProbe)
