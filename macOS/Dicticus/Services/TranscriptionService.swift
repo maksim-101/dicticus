@@ -5,6 +5,8 @@ import WhisperKit
 import NaturalLanguage
 import os
 
+private let audioLog = Logger(subsystem: "com.dicticus", category: "audio")
+
 /// Errors thrown by TranscriptionService during the record-transcribe cycle.
 enum TranscriptionError: Error, Sendable {
     /// Recording was shorter than minimumDurationSeconds (D-06 in 02-RESEARCH.md).
@@ -178,12 +180,69 @@ class TranscriptionService: ObservableObject {
     /// Target sample rate for WhisperKit (16kHz mono).
     private let sampleRate: Double = 16000
 
+    /// The input a hold was captured from, fixed at key-down: the device the audio unit was on and the
+    /// hardware-side rate the tap was built from. Later reads of the engine's formats can go stale mid-hold.
+    struct CaptureInput: Sendable, Equatable {
+        let deviceName: String
+        let sampleRate: Double
+    }
+    private var captureInput: CaptureInput?
+    /// Set when AVAudioEngineConfigurationChange arrives while the engine has stopped during a hold.
+    private var recordingInterrupted = false
+    private var configurationObserver: NSObjectProtocol?
+
     // MARK: - Initialization
 
     /// Initialize with a warm WhisperKit instance from ModelWarmupService.
     /// - Parameter whisperKit: Initialized WhisperKit instance from ModelWarmupService.whisperKitInstance
     init(whisperKit: WhisperKit) {
         self.whisperKit = whisperKit
+        pinInputDevice(site: "init")
+        configurationObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: audioEngine, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.handleConfigurationChange() }
+        }
+    }
+
+    // MARK: - Input device
+
+    /// Point the engine's input unit at the built-in microphone (see `AudioInputDevice.select`).
+    /// Get-compare-set: an unconditional set reconfigures the unit on every press, which can post a
+    /// configuration change at the start of the hold. Returns the name of the device the unit ends on.
+    @discardableResult
+    private func pinInputDevice(site: String) -> String {
+        guard let unit = audioEngine.inputNode.audioUnit else {
+            audioLog.error("input pin site=\(site, privacy: .public) no audio unit")
+            return "unknown"
+        }
+        let candidates = AudioInputDevice.inputCandidates()
+        let target = AudioInputDevice.select(from: candidates, systemDefault: AudioInputDevice.systemDefaultInput())
+        let before = AudioInputDevice.currentDevice(of: unit)
+        var status: OSStatus = noErr
+        if let target, target != before {
+            status = AudioInputDevice.setCurrentDevice(target, on: unit)
+        }
+        let after = AudioInputDevice.currentDevice(of: unit)
+        let current = candidates.first { $0.id == after }
+        let isBuiltIn = { (c: AudioInputDevice.Candidate) in
+            c.hasInput && c.transportType == kAudioDeviceTransportTypeBuiltIn
+        }
+        let name = current?.name ?? "unknown"
+        let onBuiltIn = current.map(isBuiltIn) ?? false
+        let builtInAvailable = candidates.contains(where: isBuiltIn)
+        audioLog.notice("input pin site=\(site, privacy: .public) device=\(Int(after ?? 0), privacy: .public) builtIn=\(onBuiltIn, privacy: .public) builtInAvailable=\(builtInAvailable, privacy: .public) changed=\(after != before, privacy: .public) status=\(Int(status), privacy: .public) name=\(name, privacy: .private)")
+        return name
+    }
+
+    private func handleConfigurationChange() {
+        let running = audioEngine.isRunning
+        guard state == .recording, !running else {
+            audioLog.notice("configuration change ignored state=\(String(describing: self.state), privacy: .public) running=\(running, privacy: .public)")
+            return
+        }
+        recordingInterrupted = true
+        audioLog.error("configuration change stopped the engine mid-hold samples=\(self.sampleBuffer.count, privacy: .public)")
     }
 
     // MARK: - Recording
@@ -202,14 +261,32 @@ class TranscriptionService: ObservableObject {
         // Stats belong to one hold; a hold without a preview must not report the previous one's.
         lastLivePreviewStats = nil
 
+        let deviceName = pinInputDevice(site: "start")
         let inputNode = audioEngine.inputNode
-        let inputFormat = inputNode.outputFormat(forBus: 0)
+        // The tap rate comes from the hardware side: the client-side rate went stale in the 2026-10-18
+        // incident and AVFAudio raised an NSException on the mismatch. The client side supplies only the
+        // channel count (WhisperKit's recipe).
+        let hardwareFormat = inputNode.inputFormat(forBus: 0)
+        let clientFormat = inputNode.outputFormat(forBus: 0)
+        guard hardwareFormat.channelCount > 0, clientFormat.sampleRate > 0 else {
+            throw TranscriptionError.inputUnavailable
+        }
+        let tapFormat = try AudioInputDevice.tapFormat(
+            sampleRate: hardwareFormat.sampleRate, channelCount: clientFormat.channelCount)
 
         // Install tap via nonisolated helper to prevent the closure from
         // inheriting @MainActor isolation (Swift 6 strict concurrency).
-        Self.installTap(on: inputNode, format: inputFormat, buffer: sampleBuffer)
+        Self.installTap(on: inputNode, format: tapFormat, buffer: sampleBuffer)
 
-        try audioEngine.start()
+        do {
+            try audioEngine.start()
+        } catch {
+            // A tap left behind makes the next press's installTap raise an NSException.
+            inputNode.removeTap(onBus: 0)
+            throw error
+        }
+        captureInput = CaptureInput(deviceName: deviceName, sampleRate: tapFormat.sampleRate)
+        recordingInterrupted = false
         state = .recording
     }
 
@@ -252,7 +329,12 @@ class TranscriptionService: ObservableObject {
     /// - Returns: DicticusTranscriptionResult with text, language, and confidence
     /// - Throws: TranscriptionError for pipeline failures (tooShort, silenceOnly, noResult)
     func stopRecordingAndTranscribe() async throws -> DicticusTranscriptionResult {
-        guard state == .recording else { throw TranscriptionError.notRecording }
+        guard state == .recording, let capture = captureInput else { throw TranscriptionError.notRecording }
+
+        // Read before stopping: stop() makes isRunning false. An engine found not running here died
+        // before its notification was delivered.
+        let detectedBy: String? = recordingInterrupted ? "notification" : (audioEngine.isRunning ? nil : "release")
+        recordingInterrupted = false
 
         // Always stop before accessing audioSamples
         audioEngine.stop()
@@ -262,9 +344,24 @@ class TranscriptionService: ObservableObject {
         // Ensure state always resets to .idle even if transcription throws
         defer { if state == .transcribing { state = .idle } }
 
-        let inputSampleRate = audioEngine.inputNode.outputFormat(forBus: 0).sampleRate
         let session = livePreview
         livePreview = nil
+
+        if let detectedBy {
+            // D-02: one WhisperKit instance, so an in-flight preview decode must finish before the next hold.
+            if let session { lastLivePreviewStats = await session.cancelAndDrain() }
+            audioLog.error("hold interrupted detectedBy=\(detectedBy, privacy: .public) samples=\(self.sampleBuffer.count, privacy: .public)")
+            #if DEBUG_RECORDER
+            await DiscardProbe.shared.recordInputInterrupted(
+                detectedBy: detectedBy,
+                capturedSampleCount: sampleBuffer.count,
+                captureSampleRate: capture.sampleRate,
+                inputDeviceName: capture.deviceName
+            )
+            #endif
+            throw TranscriptionError.inputInterrupted
+        }
+        let inputSampleRate = capture.sampleRate
 
         let buffer = sampleBuffer
         let transcriptionResult = try await finishTranscription(
@@ -277,7 +374,8 @@ class TranscriptionService: ObservableObject {
                 #endif
                 return samples
             },
-            inputSampleRate: inputSampleRate
+            inputSampleRate: inputSampleRate,
+            capture: capture
         ).result
         #if DEBUG_RECORDER
         if session != nil {
@@ -305,11 +403,11 @@ class TranscriptionService: ObservableObject {
         publish: @escaping @MainActor (String) -> Void,
         silence: (@MainActor () -> Void)? = nil
     ) {
-        guard state == .recording, livePreview == nil else { return }
+        guard state == .recording, livePreview == nil, let captureInput else { return }
         let decoder = LivePreviewDecoder(
             whisperKit: whisperKit,
             buffer: sampleBuffer,
-            inputSampleRate: audioEngine.inputNode.outputFormat(forBus: 0).sampleRate,
+            inputSampleRate: captureInput.sampleRate,
             onSilence: silence
         )
         let session = LivePreviewSession(
@@ -330,13 +428,14 @@ class TranscriptionService: ObservableObject {
     private func finishTranscription(
         previewSession: LivePreviewSession?,
         takeSamples: () -> [Float],
-        inputSampleRate: Double
+        inputSampleRate: Double,
+        capture: CaptureInput? = nil
     ) async throws -> (result: DicticusTranscriptionResult, avgLogprobs: [Float], compressionRatios: [Float]) {
         try await Self.releaseSequence(
             previewSession: previewSession,
             onDrained: { self.lastLivePreviewStats = $0 },
             takeSamples: takeSamples,
-            decode: { try await self.transcribe(rawSamples: $0, inputSampleRate: inputSampleRate) }
+            decode: { try await self.transcribe(rawSamples: $0, inputSampleRate: inputSampleRate, capture: capture) }
         )
     }
 
@@ -371,7 +470,8 @@ class TranscriptionService: ObservableObject {
     /// cycle-4 header note), so that array only ever held fabricated zeros.
     private func transcribe(
         rawSamples samples: [Float],
-        inputSampleRate: Double
+        inputSampleRate: Double,
+        capture: CaptureInput? = nil
     ) async throws -> (result: DicticusTranscriptionResult, avgLogprobs: [Float], compressionRatios: [Float]) {
         // Resample to 16kHz mono if hardware sample rate differs.
         // WhisperKit requires 16kHz Float32 mono input.
@@ -408,7 +508,9 @@ class TranscriptionService: ObservableObject {
                 vadMaxFrameEnergy: probeDecision.maxFrameEnergy,
                 gateNoiseFloor: probeDecision.noiseFloor,
                 gateThreshold: probeDecision.threshold,
-                energyMetricsSource: DiscardProbe.energyMetricsSourceProbeRecompute
+                energyMetricsSource: DiscardProbe.energyMetricsSourceProbeRecompute,
+                inputDeviceName: capture?.deviceName,
+                inputSampleRate: capture?.sampleRate
             )
             #endif
             throw TranscriptionError.tooShort  // defer resets to .idle
@@ -456,7 +558,9 @@ class TranscriptionService: ObservableObject {
                 vadMaxFrameEnergy: gateDecision.maxFrameEnergy,
                 gateNoiseFloor: gateDecision.noiseFloor,
                 gateThreshold: gateDecision.threshold,
-                energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate
+                energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
+                inputDeviceName: capture?.deviceName,
+                inputSampleRate: capture?.sampleRate
             )
             #endif
             throw TranscriptionError.silenceOnly  // defer resets to .idle
@@ -536,7 +640,9 @@ class TranscriptionService: ObservableObject {
                 segments: segmentInfos,
                 noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable,
                 energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
-                gateBypassedByDuration: gateBypassedByDuration
+                gateBypassedByDuration: gateBypassedByDuration,
+                inputDeviceName: capture?.deviceName,
+                inputSampleRate: capture?.sampleRate
             )
             #endif
             // A clip emptied by a language drop becomes the existing "Unexpected language"
@@ -586,7 +692,9 @@ class TranscriptionService: ObservableObject {
                 segments: segmentInfos,
                 noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable,
                 energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
-                gateBypassedByDuration: gateBypassedByDuration
+                gateBypassedByDuration: gateBypassedByDuration,
+                inputDeviceName: capture?.deviceName,
+                inputSampleRate: capture?.sampleRate
             )
             #endif
             _ = discardReason
@@ -616,7 +724,9 @@ class TranscriptionService: ObservableObject {
                 segments: segmentInfos,
                 noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable,
                 energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
-                gateBypassedByDuration: gateBypassedByDuration
+                gateBypassedByDuration: gateBypassedByDuration,
+                inputDeviceName: capture?.deviceName,
+                inputSampleRate: capture?.sampleRate
             )
             #endif
             throw TranscriptionError.silenceOnly  // defer resets to .idle
@@ -648,7 +758,9 @@ class TranscriptionService: ObservableObject {
                 segments: segmentInfos,
                 noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable,
                 energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
-                gateBypassedByDuration: gateBypassedByDuration
+                gateBypassedByDuration: gateBypassedByDuration,
+                inputDeviceName: capture?.deviceName,
+                inputSampleRate: capture?.sampleRate
             )
             #endif
             throw TranscriptionError.silenceOnly  // defer resets to .idle
@@ -689,7 +801,9 @@ class TranscriptionService: ObservableObject {
             ),
             noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable,
             energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
-            gateBypassedByDuration: gateBypassedByDuration
+            gateBypassedByDuration: gateBypassedByDuration,
+            inputDeviceName: capture?.deviceName,
+            inputSampleRate: capture?.sampleRate
         )
         #endif
 
@@ -729,7 +843,9 @@ class TranscriptionService: ObservableObject {
                 segments: segmentInfos,
                 noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable,
                 energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
-                gateBypassedByDuration: gateBypassedByDuration
+                gateBypassedByDuration: gateBypassedByDuration,
+                inputDeviceName: capture?.deviceName,
+                inputSampleRate: capture?.sampleRate
             )
             #endif
             throw TranscriptionError.noResult  // defer resets to .idle
