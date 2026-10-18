@@ -22,6 +22,13 @@ enum TranscriptionError: Error, Sendable {
     /// ASR output contains non-Latin script (Cyrillic, CJK, Arabic, etc.) — likely an
     /// ASR hallucination when the spoken language doesn't match model expectations.
     case unexpectedLanguage
+    /// The input device reports zero channels or a zero sample rate after the pin, so no tap can be built.
+    /// Thrown from startRecording() so HotkeyManager's existing catch posts recordingFailed instead of an
+    /// NSException escaping installTap.
+    case inputUnavailable
+    /// The engine stopped during a hold, typically because CoreAudio reconfigured the input or output
+    /// device. Thrown from stopRecordingAndTranscribe() so the hold notifies instead of becoming a silent tooShort.
+    case inputInterrupted
 }
 
 /// Thread-safe audio sample buffer for real-time AVAudioEngine tap callbacks.

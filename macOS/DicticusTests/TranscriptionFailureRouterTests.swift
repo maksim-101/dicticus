@@ -39,6 +39,15 @@ final class TranscriptionFailureRouterTests: XCTestCase {
         XCTAssertEqual(TranscriptionFailureRouter.route(.busy), .notifyTranscriptionFailed)
     }
 
+    func testInputUnavailableNotifiesTranscriptionFailed() {
+        XCTAssertEqual(TranscriptionFailureRouter.route(.inputUnavailable), .notifyTranscriptionFailed)
+    }
+
+    func testInputInterruptedNotifiesTranscriptionFailed() {
+        // A hold whose audio vanished must notify, never route silent (quick task 261018-go0).
+        XCTAssertEqual(TranscriptionFailureRouter.route(.inputInterrupted), .notifyTranscriptionFailed)
+    }
+
     // MARK: - Unexpected language keeps its own distinct notification
 
     func testUnexpectedLanguageNotifiesUnexpectedLanguage() {
@@ -49,7 +58,8 @@ final class TranscriptionFailureRouterTests: XCTestCase {
 
     func testEveryTranscriptionErrorCaseHasARoute() {
         let errors: [TranscriptionError] = [
-            .tooShort, .silenceOnly, .noResult, .modelNotReady, .notRecording, .busy, .unexpectedLanguage
+            .tooShort, .silenceOnly, .noResult, .modelNotReady, .notRecording, .busy, .unexpectedLanguage,
+            .inputUnavailable, .inputInterrupted
         ]
         for error in errors {
             _ = TranscriptionFailureRouter.route(error)  // must not crash / must be exhaustive

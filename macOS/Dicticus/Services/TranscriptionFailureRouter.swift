@@ -21,7 +21,7 @@ enum TranscriptionFailureRouter {
     /// "voice detected" on an otherwise-silent clip — not evidence the ASR model is broken.
     static func route(_ error: TranscriptionError) -> TranscriptionFailureOutcome {
         switch error {
-        case .tooShort, .silenceOnly, .noResult:
+        case .tooShort, .silenceOnly, .noResult, .inputUnavailable, .inputInterrupted:
             return .silent
         case .unexpectedLanguage:
             return .notifyUnexpectedLanguage
