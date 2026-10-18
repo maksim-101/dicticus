@@ -19,14 +19,24 @@ enum AudioInputDevice {
     /// mid-hold; falls back to the system default when the Mac has no built-in input (nil leaves
     /// the audio unit alone).
     static func select(from candidates: [Candidate], systemDefault: AudioDeviceID?) -> AudioDeviceID? {
-        systemDefault
+        let builtInInput = { (id: AudioDeviceID) -> Bool in
+            candidates.contains { $0.id == id && $0.hasInput && $0.transportType == kAudioDeviceTransportTypeBuiltIn }
+        }
+        if let systemDefault, builtInInput(systemDefault) { return systemDefault }
+        if let first = candidates.first(where: { $0.hasInput && $0.transportType == kAudioDeviceTransportTypeBuiltIn }) {
+            return first.id
+        }
+        return systemDefault
     }
 
     /// Tap format built from the hardware-side rate. AVFAudio raises an NSException, not an NSError,
     /// when the tap's rate differs from the hardware's; the Swift catch in HotkeyManager cannot see
     /// it, so an unusable format must be rejected here, before `installTap`.
     static func tapFormat(sampleRate: Double, channelCount: AVAudioChannelCount) throws -> AVAudioFormat {
-        AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1)!
+        guard channelCount > 0, sampleRate > 0,
+              let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: channelCount)
+        else { throw TranscriptionError.inputUnavailable }
+        return format
     }
 
     // MARK: - CoreAudio (not unit-tested)

@@ -19,13 +19,14 @@ enum TranscriptionFailureRouter {
     /// presses (RMS 0.0042-0.0054 vs. 0.015-0.018 for presses with real speech), i.e. it's
     /// AdaptiveVoiceGate's clip-relative noise floor letting ambient room noise register as
     /// "voice detected" on an otherwise-silent clip — not evidence the ASR model is broken.
+    /// `.inputUnavailable`/`.inputInterrupted` notify: a hold whose audio vanished must never route silent.
     static func route(_ error: TranscriptionError) -> TranscriptionFailureOutcome {
         switch error {
-        case .tooShort, .silenceOnly, .noResult, .inputUnavailable, .inputInterrupted:
+        case .tooShort, .silenceOnly, .noResult:
             return .silent
         case .unexpectedLanguage:
             return .notifyUnexpectedLanguage
-        case .modelNotReady, .notRecording, .busy:
+        case .modelNotReady, .notRecording, .busy, .inputUnavailable, .inputInterrupted:
             return .notifyTranscriptionFailed
         }
     }
