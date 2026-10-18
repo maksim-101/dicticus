@@ -8,6 +8,7 @@ Dicticus is a fully local, on-device dictation app (ASR via WhisperKit/Whisper l
 
 ## Unreleased
 
+- **Fixed: dictation no longer fails silently when AirPods or another microphone connects** — When AirPods or another headset connected, macOS made its microphone the default input and Dicticus followed it. A dictation held during the switch captured a tenth of a second of silence and was discarded without a notice, and the next dictations failed to start, also without a notice. Dicticus now records from the Mac's built-in microphone whenever the Mac has one (otherwise from the system input selected at the moment the key is pressed), reads the microphone's format afresh at every key press, and shows the "Transcription failed" notice when the microphone stops during a dictation, so you know to dictate again. macOS.
 - **Changed: iPhone dictation uses the Parakeet Ultra speech model** — Ultra is Moondream's retraining of NVIDIA's Parakeet v3, with the same 25 languages and speed. Its published FLEURS word error rate is 3.6 % in German and 3.6 % in English, against 4.1 % and 4.3 % for Parakeet v3. After updating, the app asks once to download it (about 630 MB) and deletes the previous model when the new one has loaded. iOS.
 
 ---

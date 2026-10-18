@@ -38,6 +38,7 @@ enum AppBuildInfo {
 
     #if os(macOS)
     private static let platformChanges = [
+        "Fixed: dictation keeps working when AirPods or another microphone connects",
         "Fixed: the menu bar popover no longer freezes the app when Spotlight is slow",
         "Added: a live transcript panel near the text cursor while you hold the dictation key (turn it off in Settings → General); now requires macOS 26",
     ]
