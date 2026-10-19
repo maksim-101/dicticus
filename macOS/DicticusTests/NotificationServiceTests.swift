@@ -27,6 +27,12 @@ final class NotificationServiceTests: XCTestCase {
         XCTAssertEqual(notification.message, "Could not start recording. Check microphone permission.")
     }
 
+    func testInputLostMessage() {
+        let notification = DicticusNotification.inputLost
+        XCTAssertEqual(notification.message, "Microphone dropped out \u{2014} the end of the dictation may be missing.")
+        XCTAssertEqual(notification.caseName, "inputLost")
+    }
+
     func testAllNotificationsHaveDicticusTitle() {
         let cases: [DicticusNotification] = [
             .busy,

@@ -35,6 +35,9 @@ enum DicticusNotification {
     /// Quick 260920-9m8 D-3: pre-check failed and the clipboard fallback setting is off — the
     /// pasteboard was not touched; the transcript is in history and the popover's last transcript.
     case pasteUndeliverableClipboardUntouched
+    /// The recording stopped mid-dictation and could not be restarted; the text recorded before the stop
+    /// was inserted (quick 261019-87x plan 02).
+    case inputLost
 
     /// Notification title — always "Dicticus" per UI-SPEC copywriting contract.
     var title: String { "Dicticus" }
@@ -70,6 +73,8 @@ enum DicticusNotification {
             return "Couldn't paste \u{2014} text is on your clipboard, \u{2318}V to paste."
         case .pasteUndeliverableClipboardUntouched:
             return "Couldn't paste \u{2014} open Dicticus to copy the transcript."
+        case .inputLost:
+            return "Microphone dropped out \u{2014} the end of the dictation may be missing."
         }
     }
 
@@ -89,6 +94,7 @@ enum DicticusNotification {
         case .llmLoading: return "llmLoading"
         case .pasteUndeliverable: return "pasteUndeliverable"
         case .pasteUndeliverableClipboardUntouched: return "pasteUndeliverableClipboardUntouched"
+        case .inputLost: return "inputLost"
         }
     }
 }
