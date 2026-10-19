@@ -38,9 +38,14 @@ enum AudioInputDevice {
         return unitDevice == pressDevice ? .none : .repin(pressDevice)
     }
 
-    /// RED A stub: re-pins to the press device whether or not it still exists.
+    /// The device a hold restarts on after its engine stopped mid-hold (owner decision 2026-10-19,
+    /// 261019-87x plan 02): the microphone the hold started with while it is listed, alive and has input,
+    /// otherwise the system default, otherwise the first input device. nil leaves the unit alone.
     static func restartDevice(pressDevice: AudioDeviceID?, candidates: [Candidate], systemDefault: AudioDeviceID?) -> AudioDeviceID? {
-        pressDevice
+        if let pressDevice, candidates.contains(where: { $0.id == pressDevice && $0.hasInput }) {
+            return pressDevice
+        }
+        return select(from: candidates, systemDefault: systemDefault)
     }
 
     /// Tap format built from the hardware-side rate. AVFAudio raises an NSException, not an NSError,
@@ -53,9 +58,19 @@ enum AudioInputDevice {
         return format
     }
 
-    /// RED A stub: real converter, convert returns its input unchanged.
+    /// AVFAudio refuses a tap whose rate differs from the hardware's (261018-go0), so a restarted segment
+    /// on a device with another rate is converted here to the press-time rate. That keeps one rate per
+    /// hold for `transcribe`, its duration guard and `LivePreviewDecoder`. One converter lives for the whole
+    /// segment: its filter state carries across tap buffers, while a converter per buffer would click at every
+    /// seam. The last few frames still inside the converter at the end of a segment (about a millisecond)
+    /// are not flushed.
     final class SegmentResampler: @unchecked Sendable {
         private let converter: AVAudioConverter
+        private let inputFormat: AVAudioFormat
+        private let outputFormat: AVAudioFormat
+        private let ratio: Double
+        private let sourceRate: Double
+        private let targetRate: Double
 
         init?(from sourceRate: Double, to targetRate: Double) {
             guard sourceRate > 0, targetRate > 0,
@@ -64,9 +79,40 @@ enum AudioInputDevice {
                   let converter = AVAudioConverter(from: source, to: target)
             else { return nil }
             self.converter = converter
+            self.inputFormat = source
+            self.outputFormat = target
+            self.ratio = targetRate / sourceRate
+            self.sourceRate = sourceRate
+            self.targetRate = targetRate
         }
 
-        func convert(_ samples: [Float]) -> [Float] { samples }
+        func convert(_ samples: [Float]) -> [Float] {
+            guard !samples.isEmpty else { return [] }
+            let outputCapacity = AVAudioFrameCount((Double(samples.count) * ratio).rounded(.up)) + 64
+            guard let source = AVAudioPCMBuffer(pcmFormat: inputFormat, frameCapacity: AVAudioFrameCount(samples.count)),
+                  let output = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: outputCapacity),
+                  let sourceData = source.floatChannelData?[0]
+            else { return TranscriptionService.resampleLinear(samples, from: sourceRate, to: targetRate) }
+            samples.withUnsafeBufferPointer { sourceData.update(from: $0.baseAddress!, count: samples.count) }
+            source.frameLength = AVAudioFrameCount(samples.count)
+
+            var supplied = false
+            var conversionError: NSError?
+            // noDataNow, not endOfStream: endOfStream would flush the converter and reset it on every tap buffer.
+            let status = converter.convert(to: output, error: &conversionError) { _, outStatus in
+                if supplied {
+                    outStatus.pointee = .noDataNow
+                    return nil
+                }
+                supplied = true
+                outStatus.pointee = .haveData
+                return source
+            }
+            guard status != .error, conversionError == nil, let outputData = output.floatChannelData?[0] else {
+                return TranscriptionService.resampleLinear(samples, from: sourceRate, to: targetRate)
+            }
+            return Array(UnsafeBufferPointer(start: outputData, count: Int(output.frameLength)))
+        }
     }
 
     // MARK: - CoreAudio (not unit-tested)
