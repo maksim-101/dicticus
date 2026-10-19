@@ -180,16 +180,29 @@ class TranscriptionService: ObservableObject {
     /// Target sample rate for WhisperKit (16kHz mono).
     private let sampleRate: Double = 16000
 
-    /// The input a hold was captured from, fixed at key-down: the device the audio unit was on and the
-    /// hardware-side rate the tap was built from. Later reads of the engine's formats can go stale mid-hold.
+    /// The input a hold was captured from. `deviceName` and `sampleRate` are fixed at key-down: the device
+    /// the audio unit was on and the hardware-side rate the tap was built from (later reads of the engine's
+    /// formats can go stale mid-hold). `deviceNameAtRelease` and `repinCount` are filled at key-up for the
+    /// discard log.
     struct CaptureInput: Sendable, Equatable {
         let deviceName: String
         let sampleRate: Double
+        var deviceNameAtRelease: String? = nil
+        var repinCount: Int? = nil
     }
     private var captureInput: CaptureInput?
     /// Set when AVAudioEngineConfigurationChange arrives while the engine has stopped during a hold.
     private var recordingInterrupted = false
-    private var configurationObserver: NSObjectProtocol?
+    // Written once in init and read only in deinit, which is nonisolated in Swift 6 (CleanupService precedent).
+    private nonisolated(unsafe) var configurationObserver: NSObjectProtocol?
+    private nonisolated(unsafe) var defaultInputListener: AudioObjectPropertyListenerBlock?
+
+    private var holdPressDevice: AudioDeviceID?
+    private var holdRepinCount = 0
+    private var holdFollowLogged = false
+    private var holdRecheck: Task<Void, Never>?
+    private static let maxHoldRepins = 5
+    private static let holdRecheckDelay: Duration = .milliseconds(300)
 
     // MARK: - Initialization
 
@@ -203,21 +216,40 @@ class TranscriptionService: ObservableObject {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.handleConfigurationChange() }
         }
+        let block: AudioObjectPropertyListenerBlock = { @Sendable [weak self] _, _ in
+            MainActor.assumeIsolated { self?.handleDefaultInputChange() }
+        }
+        let listenerStatus = AudioInputDevice.addDefaultInputListener(block)
+        if listenerStatus == noErr {
+            defaultInputListener = block
+        } else {
+            audioLog.error("input default listener status=\(Int(listenerStatus), privacy: .public)")
+        }
+    }
+
+    deinit {
+        if let configurationObserver { NotificationCenter.default.removeObserver(configurationObserver) }
+        if let defaultInputListener {
+            let status = AudioInputDevice.removeDefaultInputListener(defaultInputListener)
+            if status != noErr { audioLog.error("input default listener remove status=\(Int(status), privacy: .public)") }
+        }
     }
 
     // MARK: - Input device
 
-    /// Point the engine's input unit at the built-in microphone (see `AudioInputDevice.select`).
-    /// Get-compare-set: an unconditional set reconfigures the unit on every press, which can post a
-    /// configuration change at the start of the hold. Returns the name of the device the unit ends on.
+    /// Point the engine's input unit at the device `AudioInputDevice.select` picks, which is the system
+    /// default input at this moment. Get-compare-set: an unconditional set reconfigures the unit on every
+    /// press, which can post a configuration change at the start of the hold. Returns the id and name of
+    /// the device the unit ends on.
     @discardableResult
-    private func pinInputDevice(site: String) -> String {
+    private func pinInputDevice(site: String) -> (id: AudioDeviceID?, name: String) {
         guard let unit = audioEngine.inputNode.audioUnit else {
             audioLog.error("input pin site=\(site, privacy: .public) no audio unit")
-            return "unknown"
+            return (nil, "unknown")
         }
         let candidates = AudioInputDevice.inputCandidates()
-        let target = AudioInputDevice.select(from: candidates, systemDefault: AudioInputDevice.systemDefaultInput())
+        let systemDefault = AudioInputDevice.systemDefaultInput()
+        let target = AudioInputDevice.select(from: candidates, systemDefault: systemDefault)
         let before = AudioInputDevice.currentDevice(of: unit)
         var status: OSStatus = noErr
         if let target, target != before {
@@ -231,18 +263,70 @@ class TranscriptionService: ObservableObject {
         let name = current?.name ?? "unknown"
         let onBuiltIn = current.map(isBuiltIn) ?? false
         let builtInAvailable = candidates.contains(where: isBuiltIn)
-        audioLog.notice("input pin site=\(site, privacy: .public) device=\(Int(after ?? 0), privacy: .public) builtIn=\(onBuiltIn, privacy: .public) builtInAvailable=\(builtInAvailable, privacy: .public) changed=\(after != before, privacy: .public) status=\(Int(status), privacy: .public) name=\(name, privacy: .private)")
-        return name
+        audioLog.notice("input pin site=\(site, privacy: .public) device=\(Int(after ?? 0), privacy: .public) systemDefault=\(Int(systemDefault ?? 0), privacy: .public) builtIn=\(onBuiltIn, privacy: .public) builtInAvailable=\(builtInAvailable, privacy: .public) changed=\(after != before, privacy: .public) status=\(Int(status), privacy: .public) name=\(name, privacy: .private)")
+        return (after, name)
     }
 
     private func handleConfigurationChange() {
         let running = audioEngine.isRunning
-        guard state == .recording, !running else {
+        guard state == .recording else {
             audioLog.notice("configuration change ignored state=\(String(describing: self.state), privacy: .public) running=\(running, privacy: .public)")
+            return
+        }
+        if running {
+            audioLog.notice("configuration change ignored state=\(String(describing: self.state), privacy: .public) running=\(running, privacy: .public)")
+            evaluateHold(trigger: "configurationChange")
             return
         }
         recordingInterrupted = true
         audioLog.error("configuration change stopped the engine mid-hold samples=\(self.sampleBuffer.count, privacy: .public)")
+    }
+
+    /// Between holds the next key-down's pin reads the then-current default, so only a live hold reacts.
+    private func handleDefaultInputChange() {
+        guard state == .recording else { return }
+        evaluateHold(trigger: "defaultInput")
+        scheduleHoldRecheck()
+    }
+
+    /// Keep the hold on the device it started with. A vanished press device is not re-pinned: the engine
+    /// moves its unit to the new default by itself (disconnect run, 2026-10-19). Nothing here throws, so a
+    /// failed set leaves the engine running on whatever device it has.
+    private func evaluateHold(trigger: String) {
+        guard state == .recording, audioEngine.isRunning, let press = holdPressDevice,
+              let unit = audioEngine.inputNode.audioUnit else { return }
+        let unitDevice = AudioInputDevice.currentDevice(of: unit)
+        let candidates = AudioInputDevice.inputCandidates(includeNames: false)
+        switch AudioInputDevice.holdAction(pressDevice: press, candidates: candidates, unitDevice: unitDevice) {
+        case .none:
+            return
+        case .follow:
+            guard !holdFollowLogged else { return }
+            holdFollowLogged = true
+            audioLog.notice("input hold device gone, following default press=\(Int(press), privacy: .public) unit=\(Int(unitDevice ?? 0), privacy: .public) trigger=\(trigger, privacy: .public)")
+        case .repin(let target):
+            guard holdRepinCount < Self.maxHoldRepins else {
+                audioLog.error("input hold re-pin cap reached count=\(self.holdRepinCount, privacy: .public) press=\(Int(press), privacy: .public) unit=\(Int(unitDevice ?? 0), privacy: .public) trigger=\(trigger, privacy: .public)")
+                return
+            }
+            let status = AudioInputDevice.setCurrentDevice(target, on: unit)
+            holdRepinCount += 1
+            let hwRate = audioEngine.inputNode.inputFormat(forBus: 0).sampleRate
+            audioLog.notice("input hold re-pin from=\(Int(unitDevice ?? 0), privacy: .public) to=\(Int(target), privacy: .public) status=\(Int(status), privacy: .public) count=\(self.holdRepinCount, privacy: .public) trigger=\(trigger, privacy: .public) hwRate=\(hwRate, privacy: .public) tapRate=\(self.captureInput?.sampleRate ?? 0, privacy: .public)")
+        }
+    }
+
+    /// AVAudioEngine issues its own migration asynchronously and can land after the immediate set-back
+    /// (the 2026-10-19 connect run took 3.3 s across four devices); one pending re-check at most, and it
+    /// never schedules another.
+    private func scheduleHoldRecheck() {
+        guard holdRecheck == nil else { return }
+        holdRecheck = Task { [weak self] in
+            do { try await Task.sleep(for: Self.holdRecheckDelay) } catch { return }
+            guard let self else { return }
+            self.holdRecheck = nil
+            self.evaluateHold(trigger: "recheck")
+        }
     }
 
     // MARK: - Recording
@@ -261,7 +345,7 @@ class TranscriptionService: ObservableObject {
         // Stats belong to one hold; a hold without a preview must not report the previous one's.
         lastLivePreviewStats = nil
 
-        let deviceName = pinInputDevice(site: "start")
+        let pin = pinInputDevice(site: "start")
         let inputNode = audioEngine.inputNode
         // The tap rate comes from the hardware side: the client-side rate went stale in the 2026-10-18
         // incident and AVFAudio raised an NSException on the mismatch. The client side supplies only the
@@ -285,7 +369,10 @@ class TranscriptionService: ObservableObject {
             inputNode.removeTap(onBus: 0)
             throw error
         }
-        captureInput = CaptureInput(deviceName: deviceName, sampleRate: tapFormat.sampleRate)
+        captureInput = CaptureInput(deviceName: pin.name, sampleRate: tapFormat.sampleRate)
+        holdPressDevice = pin.id
+        holdRepinCount = 0
+        holdFollowLogged = false
         recordingInterrupted = false
         state = .recording
     }
@@ -329,12 +416,21 @@ class TranscriptionService: ObservableObject {
     /// - Returns: DicticusTranscriptionResult with text, language, and confidence
     /// - Throws: TranscriptionError for pipeline failures (tooShort, silenceOnly, noResult)
     func stopRecordingAndTranscribe() async throws -> DicticusTranscriptionResult {
-        guard state == .recording, let capture = captureInput else { throw TranscriptionError.notRecording }
+        guard state == .recording, var capture = captureInput else { throw TranscriptionError.notRecording }
 
         // Read before stopping: stop() makes isRunning false. An engine found not running here died
         // before its notification was delivered.
         let detectedBy: String? = recordingInterrupted ? "notification" : (audioEngine.isRunning ? nil : "release")
         recordingInterrupted = false
+
+        // The release device is read before stop(), which changes the unit's state.
+        holdRecheck?.cancel()
+        holdRecheck = nil
+        let releaseDevice = audioEngine.inputNode.audioUnit.flatMap { AudioInputDevice.currentDevice(of: $0) }
+        capture.deviceNameAtRelease = releaseDevice.map { AudioInputDevice.deviceName($0) } ?? "unknown"
+        capture.repinCount = holdRepinCount
+        audioLog.notice("input hold end press=\(Int(self.holdPressDevice ?? 0), privacy: .public) release=\(Int(releaseDevice ?? 0), privacy: .public) repins=\(self.holdRepinCount, privacy: .public) hwRate=\(self.audioEngine.inputNode.inputFormat(forBus: 0).sampleRate, privacy: .public) tapRate=\(capture.sampleRate, privacy: .public)")
+        holdPressDevice = nil
 
         // Always stop before accessing audioSamples
         audioEngine.stop()
@@ -356,7 +452,9 @@ class TranscriptionService: ObservableObject {
                 detectedBy: detectedBy,
                 capturedSampleCount: sampleBuffer.count,
                 captureSampleRate: capture.sampleRate,
-                inputDeviceName: capture.deviceName
+                inputDeviceName: capture.deviceName,
+                inputDeviceNameAtRelease: capture.deviceNameAtRelease,
+                inputRepinCount: capture.repinCount
             )
             #endif
             throw TranscriptionError.inputInterrupted
@@ -510,7 +608,9 @@ class TranscriptionService: ObservableObject {
                 gateThreshold: probeDecision.threshold,
                 energyMetricsSource: DiscardProbe.energyMetricsSourceProbeRecompute,
                 inputDeviceName: capture?.deviceName,
-                inputSampleRate: capture?.sampleRate
+                inputSampleRate: capture?.sampleRate,
+                inputDeviceNameAtRelease: capture?.deviceNameAtRelease,
+                inputRepinCount: capture?.repinCount
             )
             #endif
             throw TranscriptionError.tooShort  // defer resets to .idle
@@ -560,7 +660,9 @@ class TranscriptionService: ObservableObject {
                 gateThreshold: gateDecision.threshold,
                 energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
                 inputDeviceName: capture?.deviceName,
-                inputSampleRate: capture?.sampleRate
+                inputSampleRate: capture?.sampleRate,
+                inputDeviceNameAtRelease: capture?.deviceNameAtRelease,
+                inputRepinCount: capture?.repinCount
             )
             #endif
             throw TranscriptionError.silenceOnly  // defer resets to .idle
@@ -642,7 +744,9 @@ class TranscriptionService: ObservableObject {
                 energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
                 gateBypassedByDuration: gateBypassedByDuration,
                 inputDeviceName: capture?.deviceName,
-                inputSampleRate: capture?.sampleRate
+                inputSampleRate: capture?.sampleRate,
+                inputDeviceNameAtRelease: capture?.deviceNameAtRelease,
+                inputRepinCount: capture?.repinCount
             )
             #endif
             // A clip emptied by a language drop becomes the existing "Unexpected language"
@@ -694,7 +798,9 @@ class TranscriptionService: ObservableObject {
                 energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
                 gateBypassedByDuration: gateBypassedByDuration,
                 inputDeviceName: capture?.deviceName,
-                inputSampleRate: capture?.sampleRate
+                inputSampleRate: capture?.sampleRate,
+                inputDeviceNameAtRelease: capture?.deviceNameAtRelease,
+                inputRepinCount: capture?.repinCount
             )
             #endif
             _ = discardReason
@@ -726,7 +832,9 @@ class TranscriptionService: ObservableObject {
                 energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
                 gateBypassedByDuration: gateBypassedByDuration,
                 inputDeviceName: capture?.deviceName,
-                inputSampleRate: capture?.sampleRate
+                inputSampleRate: capture?.sampleRate,
+                inputDeviceNameAtRelease: capture?.deviceNameAtRelease,
+                inputRepinCount: capture?.repinCount
             )
             #endif
             throw TranscriptionError.silenceOnly  // defer resets to .idle
@@ -760,7 +868,9 @@ class TranscriptionService: ObservableObject {
                 energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
                 gateBypassedByDuration: gateBypassedByDuration,
                 inputDeviceName: capture?.deviceName,
-                inputSampleRate: capture?.sampleRate
+                inputSampleRate: capture?.sampleRate,
+                inputDeviceNameAtRelease: capture?.deviceNameAtRelease,
+                inputRepinCount: capture?.repinCount
             )
             #endif
             throw TranscriptionError.silenceOnly  // defer resets to .idle
@@ -803,7 +913,9 @@ class TranscriptionService: ObservableObject {
             energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
             gateBypassedByDuration: gateBypassedByDuration,
             inputDeviceName: capture?.deviceName,
-            inputSampleRate: capture?.sampleRate
+            inputSampleRate: capture?.sampleRate,
+            inputDeviceNameAtRelease: capture?.deviceNameAtRelease,
+            inputRepinCount: capture?.repinCount
         )
         #endif
 
@@ -845,7 +957,9 @@ class TranscriptionService: ObservableObject {
                 energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
                 gateBypassedByDuration: gateBypassedByDuration,
                 inputDeviceName: capture?.deviceName,
-                inputSampleRate: capture?.sampleRate
+                inputSampleRate: capture?.sampleRate,
+                inputDeviceNameAtRelease: capture?.deviceNameAtRelease,
+                inputRepinCount: capture?.repinCount
             )
             #endif
             throw TranscriptionError.noResult  // defer resets to .idle
