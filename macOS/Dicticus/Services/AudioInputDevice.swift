@@ -2,9 +2,9 @@ import AVFoundation
 import AudioToolbox
 import CoreAudio
 
-/// Input-device selection and tap-format rules for `TranscriptionService` (quick task 261018-go0).
+/// Input-device rules for `TranscriptionService` (quick tasks 261018-go0 and 261019-87x).
 ///
-/// The two pure rules are separated from CoreAudio so they are testable without hardware.
+/// The pure rules are separated from CoreAudio so they are testable without hardware.
 enum AudioInputDevice {
 
     struct Candidate: Equatable, Sendable {
@@ -20,24 +20,22 @@ enum AudioInputDevice {
         case follow
     }
 
-    /// RED stub (build 17 behaviour: nothing re-asserts the press device).
-    static func holdAction(pressDevice: AudioDeviceID, candidates: [Candidate], unitDevice: AudioDeviceID?) -> HoldAction {
-        .none
+    /// The device a dictation records from: the system default input at key-down, whatever its
+    /// transport; otherwise the first input-capable device in list order; nil leaves the audio unit
+    /// alone. `holdAction` then keeps the hold on this device.
+    static func select(from candidates: [Candidate], systemDefault: AudioDeviceID?) -> AudioDeviceID? {
+        if let systemDefault, candidates.contains(where: { $0.id == systemDefault && $0.hasInput }) {
+            return systemDefault
+        }
+        return candidates.first(where: { $0.hasInput })?.id
     }
 
-    /// The device the engine's input unit should use. Prefers a built-in input so that a headset,
-    /// Continuity or virtual device becoming the system default cannot reconfigure a dictation
-    /// mid-hold; falls back to the system default when the Mac has no built-in input (nil leaves
-    /// the audio unit alone).
-    static func select(from candidates: [Candidate], systemDefault: AudioDeviceID?) -> AudioDeviceID? {
-        let builtInInput = { (id: AudioDeviceID) -> Bool in
-            candidates.contains { $0.id == id && $0.hasInput && $0.transportType == kAudioDeviceTransportTypeBuiltIn }
-        }
-        if let systemDefault, builtInInput(systemDefault) { return systemDefault }
-        if let first = candidates.first(where: { $0.hasInput && $0.transportType == kAudioDeviceTransportTypeBuiltIn }) {
-            return first.id
-        }
-        return systemDefault
+    /// What to do when the default input or the engine's input unit changes during a hold.
+    /// "Gone" is checked before "unit already on the press device": a unit that still reports a
+    /// vanished device is mid-migration, and the follow case must be recognised there too.
+    static func holdAction(pressDevice: AudioDeviceID, candidates: [Candidate], unitDevice: AudioDeviceID?) -> HoldAction {
+        guard candidates.contains(where: { $0.id == pressDevice && $0.hasInput }) else { return .follow }
+        return unitDevice == pressDevice ? .none : .repin(pressDevice)
     }
 
     /// Tap format built from the hardware-side rate. AVFAudio raises an NSException, not an NSError,
