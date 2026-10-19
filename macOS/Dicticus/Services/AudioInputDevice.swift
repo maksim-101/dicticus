@@ -14,6 +14,17 @@ enum AudioInputDevice {
         let hasInput: Bool
     }
 
+    enum HoldAction: Equatable, Sendable {
+        case none
+        case repin(AudioDeviceID)
+        case follow
+    }
+
+    /// RED stub (build 17 behaviour: nothing re-asserts the press device).
+    static func holdAction(pressDevice: AudioDeviceID, candidates: [Candidate], unitDevice: AudioDeviceID?) -> HoldAction {
+        .none
+    }
+
     /// The device the engine's input unit should use. Prefers a built-in input so that a headset,
     /// Continuity or virtual device becoming the system default cannot reconfigure a dictation
     /// mid-hold; falls back to the system default when the Mac has no built-in input (nil leaves
