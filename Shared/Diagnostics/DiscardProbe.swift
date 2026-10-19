@@ -125,6 +125,12 @@
 // not running at key-up). The hold throws instead of being decoded, so such a record has no
 // energy or segment fields.
 //
+// Cycle 10 (quick task 261019-87x, HOLD DEVICE): `input_device_name` is the device the hold was
+// pinned to at key-down (the system default at that moment). `input_device_name_at_release` is the
+// input unit's device read just before the engine stops. The two match unless the press device
+// vanished mid-hold (the hold followed the new default) or the engine moved the unit after the last
+// re-pin. `input_repin_count` counts re-pin attempts during the hold (cap 5).
+//
 // Output: ~/Library/Application Support/Dicticus/DebugRecordings/discard-YYYY-MM-DD.jsonl
 // Retention: 14 days, purged once per launch.
 
@@ -245,7 +251,9 @@ public actor DiscardProbe {
         energyMetricsSource: String? = nil,
         gateBypassedByDuration: Bool? = nil,
         inputDeviceName: String? = nil,
-        inputSampleRate: Double? = nil
+        inputSampleRate: Double? = nil,
+        inputDeviceNameAtRelease: String? = nil,
+        inputRepinCount: Int? = nil
     ) {
         ensureDirectory()
         purgeIfNeeded()
@@ -276,6 +284,8 @@ public actor DiscardProbe {
         if let gateBypassedByDuration { line["gate_bypassed_by_duration"] = gateBypassedByDuration }
         if let inputDeviceName { line["input_device_name"] = inputDeviceName }
         if let inputSampleRate { line["input_sample_rate"] = inputSampleRate }
+        if let inputDeviceNameAtRelease { line["input_device_name_at_release"] = inputDeviceNameAtRelease }
+        if let inputRepinCount { line["input_repin_count"] = inputRepinCount }
         if let segments {
             line["segment_count"] = segments.count
             line["segments"] = segments.map { seg -> [String: Any] in
@@ -304,13 +314,15 @@ public actor DiscardProbe {
         detectedBy: String,
         capturedSampleCount: Int,
         captureSampleRate: Double,
-        inputDeviceName: String
+        inputDeviceName: String,
+        inputDeviceNameAtRelease: String? = nil,
+        inputRepinCount: Int? = nil
     ) {
         ensureDirectory()
         purgeIfNeeded()
 
         let duration = captureSampleRate > 0 ? Double(capturedSampleCount) / captureSampleRate : 0
-        appendJsonl([
+        var line: [String: Any] = [
             "ts": Self.iso8601Timestamp(),
             "reason": "inputInterrupted",
             "platform": "macOS",
@@ -320,7 +332,10 @@ public actor DiscardProbe {
             "input_sample_rate": captureSampleRate,
             "duration_s": duration,
             "input_device_name": inputDeviceName
-        ])
+        ]
+        if let inputDeviceNameAtRelease { line["input_device_name_at_release"] = inputDeviceNameAtRelease }
+        if let inputRepinCount { line["input_repin_count"] = inputRepinCount }
+        appendJsonl(line)
     }
 
     // MARK: - Plumbing (mirrors AudioCaptureProbe)

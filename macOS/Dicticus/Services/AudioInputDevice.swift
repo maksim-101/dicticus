@@ -50,7 +50,7 @@ enum AudioInputDevice {
 
     // MARK: - CoreAudio (not unit-tested)
 
-    static func inputCandidates() -> [Candidate] {
+    static func inputCandidates(includeNames: Bool = true) -> [Candidate] {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDevices,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -63,7 +63,8 @@ enum AudioInputDevice {
             return []
         }
         return ids.map { id in
-            Candidate(id: id, name: deviceName(id), transportType: transportType(id), hasInput: hasInputStreams(id))
+            Candidate(id: id, name: includeNames ? deviceName(id) : "", transportType: transportType(id),
+                      hasInput: hasInputStreams(id) && isAlive(id))
         }
     }
 
@@ -92,6 +93,18 @@ enum AudioInputDevice {
             &device, UInt32(MemoryLayout<AudioDeviceID>.size))
     }
 
+    /// A failed read counts as alive, so an unreadable property never hides a working microphone.
+    private static func isAlive(_ id: AudioDeviceID) -> Bool {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceIsAlive,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+        var value: UInt32 = 1
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        let status = AudioObjectGetPropertyData(id, &address, 0, nil, &size, &value)
+        return !(status == noErr && value == 0)
+    }
+
     private static func hasInputStreams(_ id: AudioDeviceID) -> Bool {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyStreams,
@@ -112,7 +125,7 @@ enum AudioInputDevice {
         return status == noErr ? value : kAudioDeviceTransportTypeUnknown
     }
 
-    private static func deviceName(_ id: AudioDeviceID) -> String {
+    static func deviceName(_ id: AudioDeviceID) -> String {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyDeviceNameCFString,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -122,5 +135,27 @@ enum AudioInputDevice {
         let status = AudioObjectGetPropertyData(id, &address, 0, nil, &size, &name)
         guard status == noErr, let resolved = name?.takeRetainedValue() else { return "unknown" }
         return resolved as String
+    }
+
+    private static func defaultInputAddress() -> AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultInputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain)
+    }
+
+    /// The queue is fixed to main because the handler hops to the main actor with
+    /// `MainActor.assumeIsolated`; under Swift 6 a main-actor closure run on any other queue traps
+    /// (see the AudioSampleBuffer doc comment).
+    static func addDefaultInputListener(_ block: @escaping AudioObjectPropertyListenerBlock) -> OSStatus {
+        var address = defaultInputAddress()
+        return AudioObjectAddPropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject), &address, DispatchQueue.main, block)
+    }
+
+    static func removeDefaultInputListener(_ block: @escaping AudioObjectPropertyListenerBlock) -> OSStatus {
+        var address = defaultInputAddress()
+        return AudioObjectRemovePropertyListenerBlock(
+            AudioObjectID(kAudioObjectSystemObject), &address, DispatchQueue.main, block)
     }
 }
