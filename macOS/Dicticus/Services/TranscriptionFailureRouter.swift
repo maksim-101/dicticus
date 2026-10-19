@@ -30,4 +30,23 @@ enum TranscriptionFailureRouter {
             return .notifyTranscriptionFailed
         }
     }
+
+    enum HoldEnd: Equatable, Sendable {
+        case transcribe
+        case transcribeWithLossNotice
+        case failInterrupted
+    }
+
+    /// RED A stub: a stopped engine always fails the dictation (build 18).
+    static func holdEnd(audioLost: Bool, capturedSeconds: Double, minimumSeconds: Double) -> HoldEnd {
+        audioLost ? .failInterrupted : .transcribe
+    }
+
+    /// RED A stub.
+    static func afterInputLoss(_ error: TranscriptionError) -> TranscriptionError { error }
+
+    /// RED A stub: only the engine state counts.
+    static func audioLost(engineRunning: Bool, totalGapMs: Double, maxGapMs: Double) -> Bool {
+        !engineRunning
+    }
 }

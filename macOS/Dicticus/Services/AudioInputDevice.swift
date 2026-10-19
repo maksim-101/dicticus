@@ -38,6 +38,11 @@ enum AudioInputDevice {
         return unitDevice == pressDevice ? .none : .repin(pressDevice)
     }
 
+    /// RED A stub: re-pins to the press device whether or not it still exists.
+    static func restartDevice(pressDevice: AudioDeviceID?, candidates: [Candidate], systemDefault: AudioDeviceID?) -> AudioDeviceID? {
+        pressDevice
+    }
+
     /// Tap format built from the hardware-side rate. AVFAudio raises an NSException, not an NSError,
     /// when the tap's rate differs from the hardware's; the Swift catch in HotkeyManager cannot see
     /// it, so an unusable format must be rejected here, before `installTap`.
@@ -46,6 +51,22 @@ enum AudioInputDevice {
               let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: channelCount)
         else { throw TranscriptionError.inputUnavailable }
         return format
+    }
+
+    /// RED A stub: real converter, convert returns its input unchanged.
+    final class SegmentResampler: @unchecked Sendable {
+        private let converter: AVAudioConverter
+
+        init?(from sourceRate: Double, to targetRate: Double) {
+            guard sourceRate > 0, targetRate > 0,
+                  let source = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: sourceRate, channels: 1, interleaved: false),
+                  let target = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: targetRate, channels: 1, interleaved: false),
+                  let converter = AVAudioConverter(from: source, to: target)
+            else { return nil }
+            self.converter = converter
+        }
+
+        func convert(_ samples: [Float]) -> [Float] { samples }
     }
 
     // MARK: - CoreAudio (not unit-tested)

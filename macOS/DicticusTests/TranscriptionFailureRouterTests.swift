@@ -65,4 +65,61 @@ final class TranscriptionFailureRouterTests: XCTestCase {
             _ = TranscriptionFailureRouter.route(error)  // must not crash / must be exhaustive
         }
     }
+
+    // MARK: - End of a hold whose input was lost (quick task 261019-87x plan 02)
+
+    func testHoldWithoutLossTranscribes() {
+        XCTAssertEqual(TranscriptionFailureRouter.holdEnd(audioLost: false, capturedSeconds: 0, minimumSeconds: 0.3),
+                       .transcribe)
+    }
+
+    func testLostHoldWithAudioTranscribesWithNotice() {
+        XCTAssertEqual(TranscriptionFailureRouter.holdEnd(audioLost: true, capturedSeconds: 12.5, minimumSeconds: 0.3),
+                       .transcribeWithLossNotice)
+    }
+
+    func testLostHoldAtMinimumTranscribesWithNotice() {
+        XCTAssertEqual(TranscriptionFailureRouter.holdEnd(audioLost: true, capturedSeconds: 0.3, minimumSeconds: 0.3),
+                       .transcribeWithLossNotice)
+    }
+
+    func testLostHoldBelowMinimumFails() {
+        XCTAssertEqual(TranscriptionFailureRouter.holdEnd(audioLost: true, capturedSeconds: 0.29, minimumSeconds: 0.3),
+                       .failInterrupted)
+    }
+
+    func testLostHoldWithoutAudioFails() {
+        XCTAssertEqual(TranscriptionFailureRouter.holdEnd(audioLost: true, capturedSeconds: 0, minimumSeconds: 0.3),
+                       .failInterrupted)
+    }
+
+    func testTooShortAfterLossBecomesInterrupted() {
+        XCTAssertEqual(TranscriptionFailureRouter.afterInputLoss(.tooShort), .inputInterrupted)
+    }
+
+    func testSilenceOnlyAfterLossBecomesInterrupted() {
+        XCTAssertEqual(TranscriptionFailureRouter.afterInputLoss(.silenceOnly), .inputInterrupted)
+    }
+
+    func testNoResultAfterLossBecomesInterrupted() {
+        XCTAssertEqual(TranscriptionFailureRouter.afterInputLoss(.noResult), .inputInterrupted)
+    }
+
+    func testUnexpectedLanguageAfterLossIsKept() {
+        XCTAssertEqual(TranscriptionFailureRouter.afterInputLoss(.unexpectedLanguage), .unexpectedLanguage)
+    }
+
+    // MARK: - Silent gap threshold (orchestrator patch W3)
+
+    func testEngineDownIsLostWhateverTheGap() {
+        XCTAssertTrue(TranscriptionFailureRouter.audioLost(engineRunning: false, totalGapMs: 0, maxGapMs: 2000))
+    }
+
+    func testShortRestartGapKeepsAudio() {
+        XCTAssertFalse(TranscriptionFailureRouter.audioLost(engineRunning: true, totalGapMs: 2000, maxGapMs: 2000))
+    }
+
+    func testLongRestartGapCountsAsLostAudio() {
+        XCTAssertTrue(TranscriptionFailureRouter.audioLost(engineRunning: true, totalGapMs: 2001, maxGapMs: 2000))
+    }
 }
