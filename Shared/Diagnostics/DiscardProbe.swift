@@ -128,8 +128,20 @@
 // Cycle 10 (quick task 261019-87x, HOLD DEVICE): `input_device_name` is the device the hold was
 // pinned to at key-down (the system default at that moment). `input_device_name_at_release` is the
 // input unit's device read just before the engine stops. The two match unless the press device
-// vanished mid-hold (the hold followed the new default) or the engine moved the unit after the last
-// re-pin. `input_repin_count` counts re-pin attempts during the hold (cap 5).
+// vanished mid-hold (the hold followed the new default) or the engine moved the unit. Records written
+// by build 18 also carry the re-pin count field `input_repin_count`, which Cycle 11 removes.
+//
+// Cycle 11 (quick task 261019-87x plan 02, ENGINE RESTART): when the engine stops mid-hold, the hold is
+// restarted on the press device while it exists, otherwise on the system default, at most 3 attempts.
+// `input_restart_count` counts attempts. `input_devices` lists the device of every recorded segment, press
+// device first. Every segment is converted to `input_sample_rate`, so `raw_sample_count` / `hw_sample_rate`
+// is the recorded audio of the whole hold, without the gaps between stop and restart. `input_audio_lost` is
+// true when the engine was down at key-up, or when the restarts left a silent gap over 2 s in total. A
+// restarted, fully recorded hold reads `pass` with `input_restart_count` >= 1 and `input_audio_lost` false.
+// A lost hold with at least 0.3 s recorded keeps its decode reason with `input_audio_lost` true, and a
+// silent decode reason there was notified as "Transcription failed". The `inputInterrupted` reason now
+// means a lost hold with under 0.3 s recorded. Its `detected_by` is `notification` when the hold saw at
+// least one engine stop and `release` when the engine was found stopped at key-up without one.
 //
 // Output: ~/Library/Application Support/Dicticus/DebugRecordings/discard-YYYY-MM-DD.jsonl
 // Retention: 14 days, purged once per launch.
@@ -253,7 +265,9 @@ public actor DiscardProbe {
         inputDeviceName: String? = nil,
         inputSampleRate: Double? = nil,
         inputDeviceNameAtRelease: String? = nil,
-        inputRepinCount: Int? = nil
+        inputRestartCount: Int? = nil,
+        inputDevices: [String]? = nil,
+        inputAudioLost: Bool? = nil
     ) {
         ensureDirectory()
         purgeIfNeeded()
@@ -285,7 +299,9 @@ public actor DiscardProbe {
         if let inputDeviceName { line["input_device_name"] = inputDeviceName }
         if let inputSampleRate { line["input_sample_rate"] = inputSampleRate }
         if let inputDeviceNameAtRelease { line["input_device_name_at_release"] = inputDeviceNameAtRelease }
-        if let inputRepinCount { line["input_repin_count"] = inputRepinCount }
+        if let inputRestartCount { line["input_restart_count"] = inputRestartCount }
+        if let inputDevices { line["input_devices"] = inputDevices }
+        if let inputAudioLost { line["input_audio_lost"] = inputAudioLost }
         if let segments {
             line["segment_count"] = segments.count
             line["segments"] = segments.map { seg -> [String: Any] in
@@ -316,7 +332,9 @@ public actor DiscardProbe {
         captureSampleRate: Double,
         inputDeviceName: String,
         inputDeviceNameAtRelease: String? = nil,
-        inputRepinCount: Int? = nil
+        inputRestartCount: Int? = nil,
+        inputDevices: [String]? = nil,
+        inputAudioLost: Bool? = nil
     ) {
         ensureDirectory()
         purgeIfNeeded()
@@ -334,7 +352,9 @@ public actor DiscardProbe {
             "input_device_name": inputDeviceName
         ]
         if let inputDeviceNameAtRelease { line["input_device_name_at_release"] = inputDeviceNameAtRelease }
-        if let inputRepinCount { line["input_repin_count"] = inputRepinCount }
+        if let inputRestartCount { line["input_restart_count"] = inputRestartCount }
+        if let inputDevices { line["input_devices"] = inputDevices }
+        if let inputAudioLost { line["input_audio_lost"] = inputAudioLost }
         appendJsonl(line)
     }
 

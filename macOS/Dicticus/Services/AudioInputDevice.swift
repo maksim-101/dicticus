@@ -4,6 +4,9 @@ import CoreAudio
 
 /// Input-device rules for `TranscriptionService` (quick tasks 261018-go0 and 261019-87x).
 ///
+/// Three rules: the device at key-down (`select`: the system default at that moment), the device after a
+/// mid-hold engine stop (`restartDevice`: the press device while it exists, else the system default), and
+/// one sample rate per hold (`SegmentResampler`).
 /// The pure rules are separated from CoreAudio so they are testable without hardware.
 enum AudioInputDevice {
 
@@ -14,28 +17,14 @@ enum AudioInputDevice {
         let hasInput: Bool
     }
 
-    enum HoldAction: Equatable, Sendable {
-        case none
-        case repin(AudioDeviceID)
-        case follow
-    }
-
     /// The device a dictation records from: the system default input at key-down, whatever its
     /// transport; otherwise the first input-capable device in list order; nil leaves the audio unit
-    /// alone. `holdAction` then keeps the hold on this device.
+    /// alone. `restartDevice` keeps a restarted hold on this device while it exists.
     static func select(from candidates: [Candidate], systemDefault: AudioDeviceID?) -> AudioDeviceID? {
         if let systemDefault, candidates.contains(where: { $0.id == systemDefault && $0.hasInput }) {
             return systemDefault
         }
         return candidates.first(where: { $0.hasInput })?.id
-    }
-
-    /// What to do when the default input or the engine's input unit changes during a hold.
-    /// "Gone" is checked before "unit already on the press device": a unit that still reports a
-    /// vanished device is mid-migration, and the follow case must be recognised there too.
-    static func holdAction(pressDevice: AudioDeviceID, candidates: [Candidate], unitDevice: AudioDeviceID?) -> HoldAction {
-        guard candidates.contains(where: { $0.id == pressDevice && $0.hasInput }) else { return .follow }
-        return unitDevice == pressDevice ? .none : .repin(pressDevice)
     }
 
     /// The device a hold restarts on after its engine stopped mid-hold (owner decision 2026-10-19,
