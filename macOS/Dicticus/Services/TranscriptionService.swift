@@ -191,6 +191,8 @@ class TranscriptionService: ObservableObject {
     // MARK: - Private
 
     private let whisperKit: WhisperKit
+    /// Each input device's recent speaking level, read for the Layer 2 gate's absolute floor.
+    private let voiceLevels: InputVoiceLevelStore
     private let audioEngine = AVAudioEngine()
     /// Thread-safe buffer for audio samples — see AudioSampleBuffer doc comment.
     private let sampleBuffer = AudioSampleBuffer()
@@ -243,8 +245,9 @@ class TranscriptionService: ObservableObject {
 
     /// Initialize with a warm WhisperKit instance from ModelWarmupService.
     /// - Parameter whisperKit: Initialized WhisperKit instance from ModelWarmupService.whisperKitInstance
-    init(whisperKit: WhisperKit) {
+    init(whisperKit: WhisperKit, voiceLevels: InputVoiceLevelStore = InputVoiceLevelStore()) {
         self.whisperKit = whisperKit
+        self.voiceLevels = voiceLevels
         pinInputDevice(site: "init")
         configurationObserver = NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange, object: audioEngine, queue: .main
@@ -647,8 +650,9 @@ class TranscriptionService: ObservableObject {
 
         let buffer = sampleBuffer
         let transcriptionResult: DicticusTranscriptionResult
+        let gateMaxFrameEnergy: Float
         do {
-            transcriptionResult = try await finishTranscription(
+            let finished = try await finishTranscription(
                 previewSession: session,
                 takeSamples: {
                     let samples = buffer.drain()
@@ -660,7 +664,9 @@ class TranscriptionService: ObservableObject {
                 },
                 inputSampleRate: inputSampleRate,
                 capture: capture
-            ).result
+            )
+            transcriptionResult = finished.result
+            gateMaxFrameEnergy = finished.gateMaxFrameEnergy
         } catch let error as TranscriptionError where route == .transcribeWithLossNotice {
             throw TranscriptionFailureRouter.afterInputLoss(error)
         }
@@ -672,6 +678,10 @@ class TranscriptionService: ObservableObject {
 
         if route == .transcribeWithLossNotice {
             NotificationService.shared.post(.inputLost)
+        }
+
+        if InputVoiceLevelStore.isLearnable(restartCount: capture.restartCount, audioLost: capture.audioLost) {
+            voiceLevels.record(peak: gateMaxFrameEnergy, forDevice: capture.deviceName)
         }
 
         lastResult = transcriptionResult
@@ -721,7 +731,7 @@ class TranscriptionService: ObservableObject {
         takeSamples: () -> [Float],
         inputSampleRate: Double,
         capture: CaptureInput? = nil
-    ) async throws -> (result: DicticusTranscriptionResult, avgLogprobs: [Float], compressionRatios: [Float]) {
+    ) async throws -> (result: DicticusTranscriptionResult, avgLogprobs: [Float], compressionRatios: [Float], gateMaxFrameEnergy: Float) {
         try await Self.releaseSequence(
             previewSession: previewSession,
             onDrained: { self.lastLivePreviewStats = $0 },
@@ -763,7 +773,7 @@ class TranscriptionService: ObservableObject {
         rawSamples samples: [Float],
         inputSampleRate: Double,
         capture: CaptureInput? = nil
-    ) async throws -> (result: DicticusTranscriptionResult, avgLogprobs: [Float], compressionRatios: [Float]) {
+    ) async throws -> (result: DicticusTranscriptionResult, avgLogprobs: [Float], compressionRatios: [Float], gateMaxFrameEnergy: Float) {
         // Resample to 16kHz mono if hardware sample rate differs.
         // WhisperKit requires 16kHz Float32 mono input.
         let resampledSamples: [Float]
@@ -784,7 +794,8 @@ class TranscriptionService: ObservableObject {
             // to the log and read by nothing; no branch below consults it.
             let energy = AudioProcessor.calculateEnergy(of: resampledSamples)
             let probeFrameEnergies = Self.frameEnergies(of: resampledSamples, sampleRate: sampleRate)
-            let probeDecision = AdaptiveVoiceGate.evaluate(frameEnergies: probeFrameEnergies)
+            let probeAbsoluteFloor = voiceLevels.absoluteFloor(forDevice: capture?.deviceName)
+            let probeDecision = AdaptiveVoiceGate.evaluate(frameEnergies: probeFrameEnergies, absoluteFloor: probeAbsoluteFloor)
             await DiscardProbe.shared.record(
                 reason: "tooShort",
                 platform: "macOS",
@@ -799,6 +810,7 @@ class TranscriptionService: ObservableObject {
                 vadMaxFrameEnergy: probeDecision.maxFrameEnergy,
                 gateNoiseFloor: probeDecision.noiseFloor,
                 gateThreshold: probeDecision.threshold,
+                gateAbsoluteFloor: probeAbsoluteFloor,
                 energyMetricsSource: DiscardProbe.energyMetricsSourceProbeRecompute,
                 inputDeviceName: capture?.deviceName,
                 inputSampleRate: capture?.sampleRate,
@@ -817,8 +829,12 @@ class TranscriptionService: ObservableObject {
         // ceiling. This exists because Layer 3 (NoSpeechDiscard, below) cannot catch a
         // CONFIDENT Whisper silence hallucination — a low noSpeechProb by definition —
         // so an energy gate ahead of WhisperKit is the only mechanism that can.
+        //
+        // The absolute floor is the press microphone's learned one (quick task 261020-dvf): a quiet
+        // microphone such as an Elgato Wave XLR peaks under the built-in microphone's 0.006.
         let gateFrameEnergies = Self.frameEnergies(of: resampledSamples, sampleRate: sampleRate)
-        let gateDecision = AdaptiveVoiceGate.evaluate(frameEnergies: gateFrameEnergies)
+        let gateAbsoluteFloor = voiceLevels.absoluteFloor(forDevice: capture?.deviceName)
+        let gateDecision = AdaptiveVoiceGate.evaluate(frameEnergies: gateFrameEnergies, absoluteFloor: gateAbsoluteFloor)
         // Phase 50 D-01: true exactly when this clip reaches WhisperKit only because
         // of the duration bypass (gate found no voice, but duration >= the constant
         // above). Used both by the guard below and by every post-gate discard-log
@@ -851,6 +867,7 @@ class TranscriptionService: ObservableObject {
                 vadMaxFrameEnergy: gateDecision.maxFrameEnergy,
                 gateNoiseFloor: gateDecision.noiseFloor,
                 gateThreshold: gateDecision.threshold,
+                gateAbsoluteFloor: gateAbsoluteFloor,
                 energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
                 inputDeviceName: capture?.deviceName,
                 inputSampleRate: capture?.sampleRate,
@@ -932,6 +949,7 @@ class TranscriptionService: ObservableObject {
                 vadMaxFrameEnergy: gateDecision.maxFrameEnergy,
                 gateNoiseFloor: gateDecision.noiseFloor,
                 gateThreshold: gateDecision.threshold,
+                gateAbsoluteFloor: gateAbsoluteFloor,
                 segments: segmentInfos,
                 noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable,
                 energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
@@ -986,6 +1004,7 @@ class TranscriptionService: ObservableObject {
                 vadMaxFrameEnergy: gateDecision.maxFrameEnergy,
                 gateNoiseFloor: gateDecision.noiseFloor,
                 gateThreshold: gateDecision.threshold,
+                gateAbsoluteFloor: gateAbsoluteFloor,
                 segments: segmentInfos,
                 noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable,
                 energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
@@ -1020,6 +1039,7 @@ class TranscriptionService: ObservableObject {
                 vadMaxFrameEnergy: gateDecision.maxFrameEnergy,
                 gateNoiseFloor: gateDecision.noiseFloor,
                 gateThreshold: gateDecision.threshold,
+                gateAbsoluteFloor: gateAbsoluteFloor,
                 segments: segmentInfos,
                 noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable,
                 energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
@@ -1056,6 +1076,7 @@ class TranscriptionService: ObservableObject {
                 vadMaxFrameEnergy: gateDecision.maxFrameEnergy,
                 gateNoiseFloor: gateDecision.noiseFloor,
                 gateThreshold: gateDecision.threshold,
+                gateAbsoluteFloor: gateAbsoluteFloor,
                 segments: segmentInfos,
                 noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable,
                 energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
@@ -1097,6 +1118,7 @@ class TranscriptionService: ObservableObject {
             vadMaxFrameEnergy: gateDecision.maxFrameEnergy,
             gateNoiseFloor: gateDecision.noiseFloor,
             gateThreshold: gateDecision.threshold,
+            gateAbsoluteFloor: gateAbsoluteFloor,
             segments: segmentInfos,
             lowConfidenceShort: LowConfidenceShort.flag(
                 durationSeconds: durationSeconds,
@@ -1145,6 +1167,7 @@ class TranscriptionService: ObservableObject {
                 vadMaxFrameEnergy: gateDecision.maxFrameEnergy,
                 gateNoiseFloor: gateDecision.noiseFloor,
                 gateThreshold: gateDecision.threshold,
+                gateAbsoluteFloor: gateAbsoluteFloor,
                 segments: segmentInfos,
                 noSpeechProbSource: DiscardProbe.noSpeechProbUnavailable,
                 energyMetricsSource: DiscardProbe.energyMetricsSourceLiveGate,
@@ -1203,7 +1226,7 @@ class TranscriptionService: ObservableObject {
         }
         #endif
 
-        return (transcriptionResult, avgLogprobs, allSegments.map(\.compressionRatio))
+        return (transcriptionResult, avgLogprobs, allSegments.map(\.compressionRatio), gateDecision.maxFrameEnergy)
     }
 
     // MARK: - Adaptive voice gate support
@@ -1487,7 +1510,7 @@ extension TranscriptionService {
     func testTranscribe(
         samples: [Float],
         inputSampleRate: Double
-    ) async throws -> (result: DicticusTranscriptionResult, avgLogprobs: [Float], compressionRatios: [Float]) {
+    ) async throws -> (result: DicticusTranscriptionResult, avgLogprobs: [Float], compressionRatios: [Float], gateMaxFrameEnergy: Float) {
         try await transcribe(rawSamples: samples, inputSampleRate: inputSampleRate)
     }
 

@@ -149,6 +149,11 @@
 // while the engine kept running). A recording that stops receiving audio for 500 ms (1500 ms before its
 // first audio) is restarted by a watchdog; its starved time counts toward the silent gap.
 //
+// Cycle 13 (quick task 261020-dvf, PER-MICROPHONE FLOOR): `gate_absolute_floor` is the absolute floor the
+// Layer 2 gate used for the clip, next to `gate_threshold` (the larger of that floor and the clip's
+// noise-floor ratio). It is 0.006 until the press microphone has history, then 0.5 x the median loudest
+// frame of that microphone's last 20 successful holds, between 0.001 and 0.006. macOS only.
+//
 // Output: ~/Library/Application Support/Dicticus/DebugRecordings/discard-YYYY-MM-DD.jsonl
 // Retention: 14 days, purged once per launch.
 
@@ -263,6 +268,7 @@ public actor DiscardProbe {
         vadMaxFrameEnergy: Float? = nil,
         gateNoiseFloor: Float? = nil,
         gateThreshold: Float? = nil,
+        gateAbsoluteFloor: Float? = nil,
         segments: [SegmentInfo]? = nil,
         lowConfidenceShort: Bool? = nil,
         noSpeechProbSource: String? = nil,
@@ -295,6 +301,7 @@ public actor DiscardProbe {
         if let vadMaxFrameEnergy { line["vad_max_frame_energy"] = vadMaxFrameEnergy }
         if let gateNoiseFloor { line["gate_noise_floor"] = gateNoiseFloor }
         if let gateThreshold { line["gate_threshold"] = gateThreshold }
+        if let gateAbsoluteFloor { line["gate_absolute_floor"] = gateAbsoluteFloor }
         if let lowConfidenceShort { line["low_confidence_short"] = lowConfidenceShort }
         if let noSpeechProbSource { line["no_speech_prob_source"] = noSpeechProbSource }
         if let energyMetricsSource { line["energy_metrics_source"] = energyMetricsSource }
