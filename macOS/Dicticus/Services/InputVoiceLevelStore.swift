@@ -35,6 +35,15 @@ struct InputVoiceLevelStore {
         return min(max(floorFactor * median, minimumFloor), AdaptiveVoiceGate.defaultAbsoluteFloor)
     }
 
+    /// Whether the near-silent short-clip discard applies. On a quiet microphone (learned floor below the default)
+    /// a real one-syllable word has only 1-2 frames above the ratio threshold (room tone ~0.0009 x 3.5 = ~0.003):
+    /// on-device 2026-10-20 Wave XLR "Ja."/"Nein."/"Doch." had 2/2/1 voiced frames and were discarded as
+    /// nearSilentShortClip, while the logged real short passes on the built-in mic had 6-19. The gate's own
+    /// >= 1 voiced frame requirement still applies.
+    static func appliesNearSilentRule(absoluteFloor: Float) -> Bool {
+        absoluteFloor >= AdaptiveVoiceGate.defaultAbsoluteFloor
+    }
+
     /// A hold that restarted its engine or lost audio can contain another microphone's sound, so it never
     /// teaches the press device.
     static func isLearnable(restartCount: Int?, audioLost: Bool?) -> Bool {

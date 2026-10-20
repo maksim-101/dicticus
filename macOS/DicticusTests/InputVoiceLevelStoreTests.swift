@@ -149,4 +149,28 @@ final class InputVoiceLevelStoreTests: XCTestCase {
         XCTAssertFalse(decision.voiceDetected)
         XCTAssertEqual(decision.threshold, 0.006)
     }
+
+    // MARK: - Near-silent short-clip rule
+
+    func testNearSilentRuleAppliesAtAndAboveTheDefaultFloor() {
+        XCTAssertTrue(InputVoiceLevelStore.appliesNearSilentRule(absoluteFloor: 0.006))
+    }
+
+    func testNearSilentRuleSkippedBelowTheDefaultFloor() {
+        XCTAssertFalse(InputVoiceLevelStore.appliesNearSilentRule(absoluteFloor: 0.0016))
+    }
+
+    func testNearSilentRuleAppliesOnColdStart() {
+        XCTAssertTrue(InputVoiceLevelStore.appliesNearSilentRule(absoluteFloor: store.absoluteFloor(forDevice: "Elgato Wave XLR")))
+    }
+
+    func testNearSilentRuleAppliesOnALearnedMacBook() {
+        for peak: Float in [0.035, 0.04, 0.05, 0.09, 0.04] { store.record(peak: peak, forDevice: "MacBook Pro Microphone") }
+        XCTAssertTrue(InputVoiceLevelStore.appliesNearSilentRule(absoluteFloor: store.absoluteFloor(forDevice: "MacBook Pro Microphone")))
+    }
+
+    func testNearSilentRuleSkippedOnALearnedWaveXlr() {
+        store.record(peak: 0.0072, forDevice: "Elgato Wave XLR")
+        XCTAssertFalse(InputVoiceLevelStore.appliesNearSilentRule(absoluteFloor: store.absoluteFloor(forDevice: "Elgato Wave XLR")))
+    }
 }

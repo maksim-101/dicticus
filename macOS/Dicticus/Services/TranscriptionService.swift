@@ -1063,8 +1063,11 @@ class TranscriptionService: ObservableObject {
         // discard record keeps the decoded segments (a future false positive stays visible)
         // and every earlier reason keeps its label. It narrows Phase 50 D-01 for 2.0-2.5 s
         // clips with no voiced frame: D-01's shortest low-gain real speech lasts 2.7 s, and
-        // the 0-voiced real passes since 2026-09-16 start at 3.5 s.
-        if AdaptiveVoiceGate.isNearSilentShortClip(durationSeconds: durationSeconds, voicedFrames: gateFramesAboveThreshold) {
+        // the 0-voiced real passes since 2026-09-16 start at 3.5 s. It does not apply on a quiet
+        // microphone (learned floor below the default), where a real one-word clip has 1-2 voiced
+        // frames (quick task 261020-dvf).
+        if InputVoiceLevelStore.appliesNearSilentRule(absoluteFloor: gateAbsoluteFloor),
+           AdaptiveVoiceGate.isNearSilentShortClip(durationSeconds: durationSeconds, voicedFrames: gateFramesAboveThreshold) {
             #if DEBUG_RECORDER
             let nearSilentEnergy = AudioProcessor.calculateEnergy(of: resampledSamples)
             await DiscardProbe.shared.record(
