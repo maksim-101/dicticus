@@ -38,6 +38,7 @@ enum AppBuildInfo {
 
     #if os(macOS)
     private static let platformChanges = [
+        "Fixed: short dictations on a quiet microphone such as an Elgato Wave XLR are no longer discarded as silence",
         "Fixed: the live preview shows text for quiet microphones such as an Elgato Wave XLR",
         "Fixed: a dictation that loses its sound mid-hold, for example when AirPods leave, is restarted on your microphone or shows a notice",
         "Fixed: a dictation keeps recording when AirPods or another microphone connects or disconnects",
