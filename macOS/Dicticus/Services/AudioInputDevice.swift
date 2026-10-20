@@ -30,11 +30,48 @@ enum AudioInputDevice {
     /// The device a hold restarts on after its engine stopped mid-hold (owner decision 2026-10-19,
     /// 261019-87x plan 02): the microphone the hold started with while it is listed, alive and has input,
     /// otherwise the system default, otherwise the first input device. nil leaves the unit alone.
-    static func restartDevice(pressDevice: AudioDeviceID?, candidates: [Candidate], systemDefault: AudioDeviceID?) -> AudioDeviceID? {
+    ///
+    /// With `skipPress` (see `shouldSkipPress`) the press device is excluded: the system default when it is
+    /// another listed input, else the built-in input, else the first other input. Built-in comes before list
+    /// order so a skipped AirPods hold never lands on an iPhone Continuity microphone.
+    static func restartDevice(
+        pressDevice: AudioDeviceID?,
+        candidates: [Candidate],
+        systemDefault: AudioDeviceID?,
+        skipPress: Bool = false
+    ) -> AudioDeviceID? {
+        if skipPress {
+            let others = candidates.filter { $0.hasInput && $0.id != pressDevice }
+            if let systemDefault, others.contains(where: { $0.id == systemDefault }) {
+                return systemDefault
+            }
+            return (others.first { $0.transportType == kAudioDeviceTransportTypeBuiltIn } ?? others.first)?.id
+        }
         if let pressDevice, candidates.contains(where: { $0.id == pressDevice && $0.hasInput }) {
             return pressDevice
         }
         return select(from: candidates, systemDefault: systemDefault)
+    }
+
+    /// A Bluetooth press device after a default-input change during the hold is leaving. In the 2026-10-19
+    /// check (c) the system default still read as the AirPods when the restart ran, although the change
+    /// notifications had already fired, and trying the departing device cost a CoreAudio timeout of about 3 s.
+    static func shouldSkipPress(pressDevice: AudioDeviceID?, candidates: [Candidate], defaultChangedDuringHold: Bool) -> Bool {
+        guard defaultChangedDuringHold, let pressDevice,
+              let press = candidates.first(where: { $0.id == pressDevice })
+        else { return false }
+        return press.transportType == kAudioDeviceTransportTypeBluetooth
+            || press.transportType == kAudioDeviceTransportTypeBluetoothLE
+    }
+
+    /// The tap delivers a 4096-frame buffer every 85 ms at 48 kHz (171 ms at 24 kHz), silence included, so a
+    /// recording that makes no progress for this long has lost its input. A segment that never produced audio
+    /// gets longer, because the first buffer after a restart or key-down takes a moment.
+    static let starvationAfterAudioMs: Double = 500
+    static let starvationBeforeAudioMs: Double = 1500
+
+    static func isStarved(msSinceProgress: Double, segmentHasAudio: Bool) -> Bool {
+        msSinceProgress >= (segmentHasAudio ? starvationAfterAudioMs : starvationBeforeAudioMs)
     }
 
     /// Tap format built from the hardware-side rate. AVFAudio raises an NSException, not an NSError,

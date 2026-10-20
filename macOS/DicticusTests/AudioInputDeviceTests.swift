@@ -82,6 +82,88 @@ final class AudioInputDeviceTests: XCTestCase {
         XCTAssertNil(AudioInputDevice.restartDevice(pressDevice: 2, candidates: [], systemDefault: nil))
     }
 
+    // MARK: - restartDevice with skipPress
+
+    private let waveLink = Candidate(id: 5, name: "Wave Link",
+                                     transportType: kAudioDeviceTransportTypeVirtual, hasInput: true)
+    private let bluetoothLE = Candidate(id: 8, name: "LE Headset",
+                                        transportType: kAudioDeviceTransportTypeBluetoothLE, hasInput: true)
+
+    func testSkippedPressDeviceStillDefaultFallsBackToBuiltIn() {
+        XCTAssertEqual(AudioInputDevice.restartDevice(pressDevice: 2, candidates: [usbMic, headset, builtIn],
+                                                      systemDefault: 2, skipPress: true), 1)
+    }
+
+    func testSkippedPressDeviceFollowsDefaultMovedElsewhere() {
+        XCTAssertEqual(AudioInputDevice.restartDevice(pressDevice: 2, candidates: [builtIn, headset, waveLink],
+                                                      systemDefault: 5, skipPress: true), 5)
+    }
+
+    func testSkippedPressDeviceWithoutBuiltInUsesFirstOtherInput() {
+        XCTAssertEqual(AudioInputDevice.restartDevice(pressDevice: 2, candidates: [headset, usbMic, waveLink],
+                                                      systemDefault: 2, skipPress: true), 4)
+    }
+
+    func testSkippedPressDeviceAloneSelectsNothing() {
+        XCTAssertNil(AudioInputDevice.restartDevice(pressDevice: 2, candidates: [headset],
+                                                    systemDefault: 2, skipPress: true))
+    }
+
+    func testSkippedPressDeviceIgnoresDefaultWithoutInput() {
+        let output = Candidate(id: 7, name: "USB Output",
+                               transportType: kAudioDeviceTransportTypeUSB, hasInput: false)
+        XCTAssertEqual(AudioInputDevice.restartDevice(pressDevice: 2, candidates: [output, headset, builtIn],
+                                                      systemDefault: 7, skipPress: true), 1)
+    }
+
+    func testNotSkippedPressDeviceKeepsPressRule() {
+        XCTAssertEqual(AudioInputDevice.restartDevice(pressDevice: 2, candidates: [builtIn, headset],
+                                                      systemDefault: 1, skipPress: false), 2)
+    }
+
+    // MARK: - shouldSkipPress
+
+    func testBluetoothPressWithDefaultChangeIsSkipped() {
+        XCTAssertTrue(AudioInputDevice.shouldSkipPress(pressDevice: 2, candidates: [builtIn, headset],
+                                                       defaultChangedDuringHold: true))
+    }
+
+    func testBluetoothLEPressWithDefaultChangeIsSkipped() {
+        XCTAssertTrue(AudioInputDevice.shouldSkipPress(pressDevice: 8, candidates: [builtIn, bluetoothLE],
+                                                       defaultChangedDuringHold: true))
+    }
+
+    func testBluetoothPressWithoutDefaultChangeIsKept() {
+        XCTAssertFalse(AudioInputDevice.shouldSkipPress(pressDevice: 2, candidates: [builtIn, headset],
+                                                        defaultChangedDuringHold: false))
+    }
+
+    func testNonBluetoothPressWithDefaultChangeIsKept() {
+        for press in [builtIn, usbMic, waveLink, aggregate] {
+            XCTAssertFalse(AudioInputDevice.shouldSkipPress(pressDevice: press.id, candidates: [press, headset],
+                                                            defaultChangedDuringHold: true), press.name)
+        }
+    }
+
+    func testUnlistedPressDeviceIsNotSkipped() {
+        XCTAssertFalse(AudioInputDevice.shouldSkipPress(pressDevice: 2, candidates: [builtIn],
+                                                        defaultChangedDuringHold: true))
+        XCTAssertFalse(AudioInputDevice.shouldSkipPress(pressDevice: nil, candidates: [builtIn, headset],
+                                                        defaultChangedDuringHold: true))
+    }
+
+    // MARK: - isStarved
+
+    func testStarvationAfterAudioStartsAtFiveHundredMs() {
+        XCTAssertFalse(AudioInputDevice.isStarved(msSinceProgress: 499, segmentHasAudio: true))
+        XCTAssertTrue(AudioInputDevice.isStarved(msSinceProgress: 500, segmentHasAudio: true))
+    }
+
+    func testStarvationBeforeAudioStartsAtFifteenHundredMs() {
+        XCTAssertFalse(AudioInputDevice.isStarved(msSinceProgress: 1499, segmentHasAudio: false))
+        XCTAssertTrue(AudioInputDevice.isStarved(msSinceProgress: 1500, segmentHasAudio: false))
+    }
+
     // MARK: - SegmentResampler
 
     private func sine(rate: Double, seconds: Double, frequency: Double = 440) -> [Float] {
