@@ -200,7 +200,7 @@ class TranscriptionService: ObservableObject {
     /// The input a hold was captured from. `deviceName` and `sampleRate` are fixed at key-down: the device
     /// the audio unit was on and the hardware-side rate the tap was built from (later reads of the engine's
     /// formats can go stale mid-hold). Every restarted segment is converted to `sampleRate`. `deviceNameAtRelease`,
-    /// `restartCount`, `deviceNames` and `audioLost` are filled at key-up for the discard log.
+    /// `restartCount`, `deviceNames`, `audioLost` and `missingMs` are filled at key-up for the discard log.
     struct CaptureInput: Sendable, Equatable {
         let deviceName: String
         let sampleRate: Double
@@ -208,6 +208,7 @@ class TranscriptionService: ObservableObject {
         var restartCount: Int? = nil
         var deviceNames: [String]? = nil
         var audioLost: Bool? = nil
+        var missingMs: Double? = nil
     }
     private var captureInput: CaptureInput?
     // Written once in init and read only in deinit, which is nonisolated in Swift 6 (CleanupService precedent).
@@ -222,6 +223,17 @@ class TranscriptionService: ObservableObject {
     /// Set at key-up so no new restart starts while the hold is released; reset by the next key-down.
     private var holdReleasing = false
     private var restartTask: Task<Void, Never>?
+    /// A default-input change was seen during the hold; reset by the next key-down.
+    private var holdDefaultChanged = false
+    private var holdStartedAt = ContinuousClock.now
+    /// Polls the sample count during a hold; a recording that stops receiving audio without the engine
+    /// stopping (2026-10-19 check (b): AUHAL moved the running unit itself) is restarted from here.
+    private var watchdogTask: Task<Void, Never>?
+    private var watchdogLastCount = 0
+    private var watchdogProgressAt = ContinuousClock.now
+    private var watchdogSegmentHasAudio = false
+    private var watchdogCapLogged = false
+    private static let watchdogInterval: Duration = .milliseconds(100)
     private static let maxHoldRestarts = 3
     private nonisolated static let restartRetryDelay: Duration = .milliseconds(500)
     /// Restart gaps up to this long are not announced to the user.
@@ -309,6 +321,7 @@ class TranscriptionService: ObservableObject {
     /// default change after a restart.
     private func handleDefaultInputChange() {
         guard state == .recording else { return }
+        holdDefaultChanged = true
         audioLog.notice("input default changed restarting=\(self.restartTask != nil, privacy: .public)")
     }
 
@@ -325,12 +338,13 @@ class TranscriptionService: ObservableObject {
         let begun = ContinuousClock.now
         let press = holdPressDevice
         let pressRate = capture.sampleRate
+        let defaultChanged = holdDefaultChanged
         audioLog.notice("input restart begin attempt=\(attempt, privacy: .public) press=\(Int(press ?? 0), privacy: .public) pressRate=\(pressRate, privacy: .public) samples=\(self.sampleBuffer.count, privacy: .public)")
         let handle = CaptureEngine(engine: audioEngine)
         let buffer = sampleBuffer
         restartTask = Task { [weak self] in
             let outcome = await Task.detached(priority: .userInitiated) {
-                await Self.restartEngine(handle, buffer: buffer, pressDevice: press, pressRate: pressRate, attempt: attempt)
+                await Self.restartEngine(handle, buffer: buffer, pressDevice: press, pressRate: pressRate, defaultChanged: defaultChanged, attempt: attempt)
             }.value
             self?.finishRestart(outcome, attempt: attempt, begun: begun)
         }
@@ -338,6 +352,9 @@ class TranscriptionService: ObservableObject {
 
     private func finishRestart(_ outcome: InputRestartOutcome, attempt: Int, begun: ContinuousClock.Instant) {
         restartTask = nil
+        watchdogProgressAt = ContinuousClock.now
+        watchdogLastCount = sampleBuffer.count
+        watchdogSegmentHasAudio = false
         let elapsedMs = Self.milliseconds(ContinuousClock.now - begun)
         holdGapMs += elapsedMs
         if outcome.started { holdDeviceNames.append(outcome.deviceName) }
@@ -363,6 +380,7 @@ class TranscriptionService: ObservableObject {
         buffer: AudioSampleBuffer,
         pressDevice: AudioDeviceID?,
         pressRate: Double,
+        defaultChanged: Bool,
         attempt: Int
     ) async -> InputRestartOutcome {
         let engine = handle.engine
@@ -374,7 +392,10 @@ class TranscriptionService: ObservableObject {
             engine.stop()
             let candidates = AudioInputDevice.inputCandidates(includeNames: false)
             let systemDefault = AudioInputDevice.systemDefaultInput()
-            let target = AudioInputDevice.restartDevice(pressDevice: pressDevice, candidates: candidates, systemDefault: systemDefault)
+            let skipPress = AudioInputDevice.shouldSkipPress(
+                pressDevice: pressDevice, candidates: candidates, defaultChangedDuringHold: defaultChanged)
+            let target = AudioInputDevice.restartDevice(
+                pressDevice: pressDevice, candidates: candidates, systemDefault: systemDefault, skipPress: skipPress)
             let unit = inputNode.audioUnit
             var setStatus: OSStatus = noErr
             if let unit, let target, AudioInputDevice.currentDevice(of: unit) != target {
@@ -400,7 +421,7 @@ class TranscriptionService: ObservableObject {
                 errorCode = (error as NSError).code
             }
             let tryMs = milliseconds(ContinuousClock.now - tryBegun)
-            audioLog.notice("input restart try attempt=\(attempt, privacy: .public) try=\(attemptTry, privacy: .public) started=\(started, privacy: .public) press=\(Int(pressDevice ?? 0), privacy: .public) device=\(Int(device ?? 0), privacy: .public) systemDefault=\(Int(systemDefault ?? 0), privacy: .public) setStatus=\(Int(setStatus), privacy: .public) hwRate=\(tapRate, privacy: .public) pressRate=\(pressRate, privacy: .public) converted=\(converted, privacy: .public) error=\(errorCode, privacy: .public) ms=\(tryMs, privacy: .public)")
+            audioLog.notice("input restart try attempt=\(attempt, privacy: .public) try=\(attemptTry, privacy: .public) started=\(started, privacy: .public) press=\(Int(pressDevice ?? 0), privacy: .public) device=\(Int(device ?? 0), privacy: .public) systemDefault=\(Int(systemDefault ?? 0), privacy: .public) skipPress=\(skipPress, privacy: .public) setStatus=\(Int(setStatus), privacy: .public) hwRate=\(tapRate, privacy: .public) pressRate=\(pressRate, privacy: .public) converted=\(converted, privacy: .public) error=\(errorCode, privacy: .public) ms=\(tryMs, privacy: .public)")
             if started {
                 return InputRestartOutcome(
                     started: true, tries: attemptTry, device: device,
@@ -450,7 +471,50 @@ class TranscriptionService: ObservableObject {
         holdDeviceNames = [pin.name]
         holdGapMs = 0
         holdReleasing = false
+        holdDefaultChanged = false
+        holdStartedAt = ContinuousClock.now
         state = .recording
+        startWatchdog()
+    }
+
+    private func startWatchdog() {
+        watchdogTask?.cancel()
+        watchdogLastCount = sampleBuffer.count
+        watchdogProgressAt = holdStartedAt
+        watchdogSegmentHasAudio = false
+        watchdogCapLogged = false
+        watchdogTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: Self.watchdogInterval)
+                guard let self, !Task.isCancelled, self.state == .recording, !self.holdReleasing else { return }
+                self.watchdogTick()
+            }
+        }
+    }
+
+    /// No audio-engine read here: `restartEngine` stops the engine itself before it sets the device.
+    private func watchdogTick() {
+        guard restartTask == nil else { return }
+        let count = sampleBuffer.count
+        let now = ContinuousClock.now
+        if count != watchdogLastCount {
+            watchdogLastCount = count
+            watchdogProgressAt = now
+            watchdogSegmentHasAudio = true
+            return
+        }
+        let sinceProgressMs = Self.milliseconds(now - watchdogProgressAt)
+        guard AudioInputDevice.isStarved(msSinceProgress: sinceProgressMs, segmentHasAudio: watchdogSegmentHasAudio) else { return }
+        guard holdRestartCount < Self.maxHoldRestarts else {
+            if !watchdogCapLogged {
+                watchdogCapLogged = true
+                audioLog.error("input starved after restart cap count=\(self.holdRestartCount, privacy: .public) samples=\(count, privacy: .public)")
+            }
+            return
+        }
+        audioLog.error("input starved ms=\(sinceProgressMs, privacy: .public) samples=\(count, privacy: .public) segmentHasAudio=\(self.watchdogSegmentHasAudio, privacy: .public)")
+        holdGapMs += sinceProgressMs
+        restartCapture()
     }
 
     /// The single place that reads the input formats and installs the capture tap, for key-down and for every
@@ -518,14 +582,19 @@ class TranscriptionService: ObservableObject {
         // A restart owns the engine until it finishes. Suspending here keeps the main actor free, and
         // holdReleasing keeps a finishing restart from starting another.
         holdReleasing = true
+        watchdogTask?.cancel()
+        watchdogTask = nil
         let waitBegun = ContinuousClock.now
         while let task = restartTask { await task.value }
         audioLog.notice("input restart wait ms=\(Self.milliseconds(ContinuousClock.now - waitBegun), privacy: .public) restarts=\(self.holdRestartCount, privacy: .public)")
 
         // Read before stopping: stop() makes isRunning false. An engine found down here has no restart left.
         let running = audioEngine.isRunning
+        let wallMs = Self.milliseconds(ContinuousClock.now - holdStartedAt)
+        let capturedMs = Double(sampleBuffer.count) / capture.sampleRate * 1000
+        let missingMs = wallMs - capturedMs
         let audioLost = TranscriptionFailureRouter.audioLost(
-            engineRunning: running, totalGapMs: holdGapMs, maxGapMs: Self.maxRestartGapMs)
+            engineRunning: running, totalGapMs: holdGapMs, missingMs: missingMs, maxGapMs: Self.maxRestartGapMs)
         let detectedBy: String? = audioLost ? (holdRestartCount > 0 ? "notification" : "release") : nil
 
         // The release device is read before stop(), which changes the unit's state.
@@ -534,7 +603,8 @@ class TranscriptionService: ObservableObject {
         capture.restartCount = holdRestartCount
         capture.deviceNames = holdDeviceNames
         capture.audioLost = audioLost
-        audioLog.notice("input hold end press=\(Int(self.holdPressDevice ?? 0), privacy: .public) release=\(Int(releaseDevice ?? 0), privacy: .public) restarts=\(self.holdRestartCount, privacy: .public) lost=\(audioLost, privacy: .public) hwRate=\(self.audioEngine.inputNode.inputFormat(forBus: 0).sampleRate, privacy: .public) tapRate=\(capture.sampleRate, privacy: .public)")
+        capture.missingMs = missingMs
+        audioLog.notice("input hold end press=\(Int(self.holdPressDevice ?? 0), privacy: .public) release=\(Int(releaseDevice ?? 0), privacy: .public) restarts=\(self.holdRestartCount, privacy: .public) lost=\(audioLost, privacy: .public) wallMs=\(wallMs, privacy: .public) capturedMs=\(capturedMs, privacy: .public) hwRate=\(self.audioEngine.inputNode.inputFormat(forBus: 0).sampleRate, privacy: .public) tapRate=\(capture.sampleRate, privacy: .public)")
         holdPressDevice = nil
 
         // Always stop before accessing audioSamples
@@ -567,7 +637,8 @@ class TranscriptionService: ObservableObject {
                 inputDeviceNameAtRelease: capture.deviceNameAtRelease,
                 inputRestartCount: capture.restartCount,
                 inputDevices: capture.deviceNames,
-                inputAudioLost: capture.audioLost
+                inputAudioLost: capture.audioLost,
+                inputMissingMs: capture.missingMs
             )
             #endif
             throw TranscriptionError.inputInterrupted
@@ -732,7 +803,7 @@ class TranscriptionService: ObservableObject {
                 inputDeviceName: capture?.deviceName,
                 inputSampleRate: capture?.sampleRate,
                 inputDeviceNameAtRelease: capture?.deviceNameAtRelease,
-                inputRestartCount: capture?.restartCount, inputDevices: capture?.deviceNames, inputAudioLost: capture?.audioLost
+                inputRestartCount: capture?.restartCount, inputDevices: capture?.deviceNames, inputAudioLost: capture?.audioLost, inputMissingMs: capture?.missingMs
             )
             #endif
             throw TranscriptionError.tooShort  // defer resets to .idle
@@ -784,7 +855,7 @@ class TranscriptionService: ObservableObject {
                 inputDeviceName: capture?.deviceName,
                 inputSampleRate: capture?.sampleRate,
                 inputDeviceNameAtRelease: capture?.deviceNameAtRelease,
-                inputRestartCount: capture?.restartCount, inputDevices: capture?.deviceNames, inputAudioLost: capture?.audioLost
+                inputRestartCount: capture?.restartCount, inputDevices: capture?.deviceNames, inputAudioLost: capture?.audioLost, inputMissingMs: capture?.missingMs
             )
             #endif
             throw TranscriptionError.silenceOnly  // defer resets to .idle
@@ -868,7 +939,7 @@ class TranscriptionService: ObservableObject {
                 inputDeviceName: capture?.deviceName,
                 inputSampleRate: capture?.sampleRate,
                 inputDeviceNameAtRelease: capture?.deviceNameAtRelease,
-                inputRestartCount: capture?.restartCount, inputDevices: capture?.deviceNames, inputAudioLost: capture?.audioLost
+                inputRestartCount: capture?.restartCount, inputDevices: capture?.deviceNames, inputAudioLost: capture?.audioLost, inputMissingMs: capture?.missingMs
             )
             #endif
             // A clip emptied by a language drop becomes the existing "Unexpected language"
@@ -922,7 +993,7 @@ class TranscriptionService: ObservableObject {
                 inputDeviceName: capture?.deviceName,
                 inputSampleRate: capture?.sampleRate,
                 inputDeviceNameAtRelease: capture?.deviceNameAtRelease,
-                inputRestartCount: capture?.restartCount, inputDevices: capture?.deviceNames, inputAudioLost: capture?.audioLost
+                inputRestartCount: capture?.restartCount, inputDevices: capture?.deviceNames, inputAudioLost: capture?.audioLost, inputMissingMs: capture?.missingMs
             )
             #endif
             _ = discardReason
@@ -956,7 +1027,7 @@ class TranscriptionService: ObservableObject {
                 inputDeviceName: capture?.deviceName,
                 inputSampleRate: capture?.sampleRate,
                 inputDeviceNameAtRelease: capture?.deviceNameAtRelease,
-                inputRestartCount: capture?.restartCount, inputDevices: capture?.deviceNames, inputAudioLost: capture?.audioLost
+                inputRestartCount: capture?.restartCount, inputDevices: capture?.deviceNames, inputAudioLost: capture?.audioLost, inputMissingMs: capture?.missingMs
             )
             #endif
             throw TranscriptionError.silenceOnly  // defer resets to .idle
@@ -992,7 +1063,7 @@ class TranscriptionService: ObservableObject {
                 inputDeviceName: capture?.deviceName,
                 inputSampleRate: capture?.sampleRate,
                 inputDeviceNameAtRelease: capture?.deviceNameAtRelease,
-                inputRestartCount: capture?.restartCount, inputDevices: capture?.deviceNames, inputAudioLost: capture?.audioLost
+                inputRestartCount: capture?.restartCount, inputDevices: capture?.deviceNames, inputAudioLost: capture?.audioLost, inputMissingMs: capture?.missingMs
             )
             #endif
             throw TranscriptionError.silenceOnly  // defer resets to .idle
@@ -1037,7 +1108,7 @@ class TranscriptionService: ObservableObject {
             inputDeviceName: capture?.deviceName,
             inputSampleRate: capture?.sampleRate,
             inputDeviceNameAtRelease: capture?.deviceNameAtRelease,
-            inputRestartCount: capture?.restartCount, inputDevices: capture?.deviceNames, inputAudioLost: capture?.audioLost
+            inputRestartCount: capture?.restartCount, inputDevices: capture?.deviceNames, inputAudioLost: capture?.audioLost, inputMissingMs: capture?.missingMs
         )
         #endif
 
@@ -1081,7 +1152,7 @@ class TranscriptionService: ObservableObject {
                 inputDeviceName: capture?.deviceName,
                 inputSampleRate: capture?.sampleRate,
                 inputDeviceNameAtRelease: capture?.deviceNameAtRelease,
-                inputRestartCount: capture?.restartCount, inputDevices: capture?.deviceNames, inputAudioLost: capture?.audioLost
+                inputRestartCount: capture?.restartCount, inputDevices: capture?.deviceNames, inputAudioLost: capture?.audioLost, inputMissingMs: capture?.missingMs
             )
             #endif
             throw TranscriptionError.noResult  // defer resets to .idle

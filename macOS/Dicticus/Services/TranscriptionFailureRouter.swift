@@ -50,9 +50,11 @@ enum TranscriptionFailureRouter {
         route(error) == .silent ? .inputInterrupted : error
     }
 
-    /// Audio counts as lost when the engine is down at key-up, or when restarts left a silent gap longer
-    /// than `maxGapMs` in the hold (shorter gaps are a pause the recording never noticed).
-    static func audioLost(engineRunning: Bool, totalGapMs: Double, maxGapMs: Double) -> Bool {
-        !engineRunning || totalGapMs > maxGapMs
+    /// Audio counts as lost when the engine is down at key-up, when restarts left a silent gap longer than
+    /// `maxGapMs` in the hold (shorter gaps are a pause the recording never noticed), or when the recording
+    /// is shorter than the hold by more than `maxGapMs` (`missingMs`: wall time minus captured audio). The
+    /// last case catches a starved tap that no engine stop or restart announced (2026-10-19 check (b)).
+    static func audioLost(engineRunning: Bool, totalGapMs: Double, missingMs: Double, maxGapMs: Double) -> Bool {
+        !engineRunning || totalGapMs > maxGapMs || missingMs > maxGapMs
     }
 }

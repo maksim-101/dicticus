@@ -143,6 +143,12 @@
 // means a lost hold with under 0.3 s recorded. Its `detected_by` is `notification` when the hold saw at
 // least one engine stop and `release` when the engine was found stopped at key-up without one.
 //
+// Cycle 12 (quick task 261019-87x plan 03, STARVATION NET): `input_missing_ms` is the wall time of the
+// hold minus the audio it recorded, in milliseconds, on every record that carries `input_audio_lost`. A
+// value over 2000 sets `input_audio_lost` even when no engine stop was seen (a recording that went silent
+// while the engine kept running). A recording that stops receiving audio for 500 ms (1500 ms before its
+// first audio) is restarted by a watchdog; its starved time counts toward the silent gap.
+//
 // Output: ~/Library/Application Support/Dicticus/DebugRecordings/discard-YYYY-MM-DD.jsonl
 // Retention: 14 days, purged once per launch.
 
@@ -267,7 +273,8 @@ public actor DiscardProbe {
         inputDeviceNameAtRelease: String? = nil,
         inputRestartCount: Int? = nil,
         inputDevices: [String]? = nil,
-        inputAudioLost: Bool? = nil
+        inputAudioLost: Bool? = nil,
+        inputMissingMs: Double? = nil
     ) {
         ensureDirectory()
         purgeIfNeeded()
@@ -302,6 +309,7 @@ public actor DiscardProbe {
         if let inputRestartCount { line["input_restart_count"] = inputRestartCount }
         if let inputDevices { line["input_devices"] = inputDevices }
         if let inputAudioLost { line["input_audio_lost"] = inputAudioLost }
+        if let inputMissingMs { line["input_missing_ms"] = inputMissingMs }
         if let segments {
             line["segment_count"] = segments.count
             line["segments"] = segments.map { seg -> [String: Any] in
@@ -334,7 +342,8 @@ public actor DiscardProbe {
         inputDeviceNameAtRelease: String? = nil,
         inputRestartCount: Int? = nil,
         inputDevices: [String]? = nil,
-        inputAudioLost: Bool? = nil
+        inputAudioLost: Bool? = nil,
+        inputMissingMs: Double? = nil
     ) {
         ensureDirectory()
         purgeIfNeeded()
@@ -355,6 +364,7 @@ public actor DiscardProbe {
         if let inputRestartCount { line["input_restart_count"] = inputRestartCount }
         if let inputDevices { line["input_devices"] = inputDevices }
         if let inputAudioLost { line["input_audio_lost"] = inputAudioLost }
+        if let inputMissingMs { line["input_missing_ms"] = inputMissingMs }
         appendJsonl(line)
     }
 

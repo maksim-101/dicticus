@@ -112,14 +112,41 @@ final class TranscriptionFailureRouterTests: XCTestCase {
     // MARK: - Silent gap threshold (orchestrator patch W3)
 
     func testEngineDownIsLostWhateverTheGap() {
-        XCTAssertTrue(TranscriptionFailureRouter.audioLost(engineRunning: false, totalGapMs: 0, maxGapMs: 2000))
+        XCTAssertTrue(TranscriptionFailureRouter.audioLost(engineRunning: false, totalGapMs: 0, missingMs: 0, maxGapMs: 2000))
     }
 
     func testShortRestartGapKeepsAudio() {
-        XCTAssertFalse(TranscriptionFailureRouter.audioLost(engineRunning: true, totalGapMs: 2000, maxGapMs: 2000))
+        XCTAssertFalse(TranscriptionFailureRouter.audioLost(engineRunning: true, totalGapMs: 2000, missingMs: 0, maxGapMs: 2000))
     }
 
     func testLongRestartGapCountsAsLostAudio() {
-        XCTAssertTrue(TranscriptionFailureRouter.audioLost(engineRunning: true, totalGapMs: 2001, maxGapMs: 2000))
+        XCTAssertTrue(TranscriptionFailureRouter.audioLost(engineRunning: true, totalGapMs: 2001, missingMs: 0, maxGapMs: 2000))
+    }
+
+    // MARK: - Missing audio net (261019-87x plan 03)
+
+    func testMissingAudioAtThresholdKeepsAudio() {
+        XCTAssertFalse(TranscriptionFailureRouter.audioLost(engineRunning: true, totalGapMs: 0, missingMs: 2000, maxGapMs: 2000))
+    }
+
+    func testMissingAudioOverThresholdCountsAsLostAudio() {
+        XCTAssertTrue(TranscriptionFailureRouter.audioLost(engineRunning: true, totalGapMs: 0, missingMs: 2001, maxGapMs: 2000))
+    }
+
+    func testMissingAudioUnderThresholdKeepsAudio() {
+        XCTAssertFalse(TranscriptionFailureRouter.audioLost(engineRunning: true, totalGapMs: 0, missingMs: 100, maxGapMs: 2000))
+    }
+
+    func testNegativeMissingAudioKeepsAudio() {
+        XCTAssertFalse(TranscriptionFailureRouter.audioLost(engineRunning: true, totalGapMs: 0, missingMs: -50, maxGapMs: 2000))
+    }
+
+    func testMissingAudioWithEngineDownIsLost() {
+        XCTAssertTrue(TranscriptionFailureRouter.audioLost(engineRunning: false, totalGapMs: 0, missingMs: 0, maxGapMs: 2000))
+    }
+
+    func testGapAndMissingAudioEachDecideAlone() {
+        XCTAssertTrue(TranscriptionFailureRouter.audioLost(engineRunning: true, totalGapMs: 2001, missingMs: 10, maxGapMs: 2000))
+        XCTAssertTrue(TranscriptionFailureRouter.audioLost(engineRunning: true, totalGapMs: 10, missingMs: 2001, maxGapMs: 2000))
     }
 }
