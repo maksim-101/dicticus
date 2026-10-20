@@ -14,7 +14,9 @@ struct InputVoiceLevelStore {
     static let defaultsKey = "inputVoiceLevels"
     static let maxPeaksPerDevice = 20
     /// Fraction of the median peak below which a frame is never voice.
-    static let floorFactor: Float = 0.5
+    /// 0.25, not 0.5: on-device 2026-10-20 a learned Wave XLR peak of 0.0072 gave a 0.0036 floor and two spoken
+    /// "Ja" (1.2-1.3 s, loudest frames 0.0036 and 0.0061) were discarded; a short word is quieter than a sentence's loudest frame.
+    static let floorFactor: Float = 0.25
     /// Lower bound of the learned floor; the upper bound is `AdaptiveVoiceGate.defaultAbsoluteFloor`.
     static let minimumFloor: Float = 0.001
 

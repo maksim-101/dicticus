@@ -35,8 +35,8 @@ final class InputVoiceLevelStoreTests: XCTestCase {
         XCTAssertEqual(InputVoiceLevelStore.floor(fromPeaks: [0.04, 0.05]), 0.006)
     }
 
-    func testQuietMicrophoneLearnsHalfItsPeak() {
-        XCTAssertEqual(InputVoiceLevelStore.floor(fromPeaks: [0.0053]), 0.00265, accuracy: 1e-7)
+    func testQuietMicrophoneLearnsAQuarterOfItsPeak() {
+        XCTAssertEqual(InputVoiceLevelStore.floor(fromPeaks: [0.0053]), 0.001325, accuracy: 1e-7)
     }
 
     func testFloorNeverFallsBelowTheMinimum() {
@@ -44,16 +44,16 @@ final class InputVoiceLevelStoreTests: XCTestCase {
     }
 
     func testMedianOfAnOddList() {
-        XCTAssertEqual(InputVoiceLevelStore.floor(fromPeaks: [0.0090, 0.0040, 0.0050]), 0.0025, accuracy: 1e-7)
+        XCTAssertEqual(InputVoiceLevelStore.floor(fromPeaks: [0.0090, 0.0040, 0.0050]), 0.00125, accuracy: 1e-7)
     }
 
     func testMedianOfAnEvenListAveragesTheMiddlePair() {
-        XCTAssertEqual(InputVoiceLevelStore.floor(fromPeaks: [0.0060, 0.0020, 0.0040, 0.0100]), 0.0025, accuracy: 1e-7)
+        XCTAssertEqual(InputVoiceLevelStore.floor(fromPeaks: [0.0060, 0.0020, 0.0040, 0.0100]), 0.00125, accuracy: 1e-7)
     }
 
     func testOneLoudOutlierDoesNotMoveTheFloor() {
         let peaks = Array(repeating: Float(0.005), count: 19) + [0.2]
-        XCTAssertEqual(InputVoiceLevelStore.floor(fromPeaks: peaks), 0.0025, accuracy: 1e-7)
+        XCTAssertEqual(InputVoiceLevelStore.floor(fromPeaks: peaks), 0.00125, accuracy: 1e-7)
     }
 
     // MARK: - Store
@@ -69,7 +69,7 @@ final class InputVoiceLevelStoreTests: XCTestCase {
     func testDevicesAreIndependent() {
         store.record(peak: 0.0053, forDevice: "Elgato Wave XLR")
         store.record(peak: 0.05, forDevice: "MacBook Pro Microphone")
-        XCTAssertEqual(store.absoluteFloor(forDevice: "Elgato Wave XLR"), 0.00265, accuracy: 1e-7)
+        XCTAssertEqual(store.absoluteFloor(forDevice: "Elgato Wave XLR"), 0.001325, accuracy: 1e-7)
         XCTAssertEqual(store.absoluteFloor(forDevice: "MacBook Pro Microphone"), 0.006)
         XCTAssertEqual(store.absoluteFloor(forDevice: "AirPods"), 0.006)
     }
@@ -96,7 +96,7 @@ final class InputVoiceLevelStoreTests: XCTestCase {
         store.record(peak: 0.0047, forDevice: "Elgato Wave XLR")
         let reopened = InputVoiceLevelStore(defaults: try XCTUnwrap(UserDefaults(suiteName: suiteName)))
         XCTAssertEqual(reopened.peaks(forDevice: "Elgato Wave XLR"), [0.0053, 0.0047])
-        XCTAssertEqual(reopened.absoluteFloor(forDevice: "Elgato Wave XLR"), 0.0025, accuracy: 1e-7)
+        XCTAssertEqual(reopened.absoluteFloor(forDevice: "Elgato Wave XLR"), 0.00125, accuracy: 1e-7)
     }
 
     func testOnlyAHoldWithoutRestartsOrLostAudioIsLearnable() {
@@ -115,6 +115,24 @@ final class InputVoiceLevelStoreTests: XCTestCase {
         XCTAssertTrue(learned.voiceDetected)
         XCTAssertEqual(learned.threshold, 0.0009 * AdaptiveVoiceGate.defaultNoiseRatio, accuracy: 1e-6)
         XCTAssertGreaterThan(learned.framesAboveThreshold(in: Self.waveXlrFrames), AdaptiveVoiceGate.nearSilentMaxVoicedFrames)
+    }
+
+    func testMedianPeakOfTwoWaveHoldsGivesAQuarter() {
+        XCTAssertEqual(InputVoiceLevelStore.floor(fromPeaks: [0.0040, 0.0060]), 0.00125, accuracy: 1e-7)
+    }
+
+    func testMacBookPeaksStayCappedAtTheDefaultFloor() {
+        XCTAssertEqual(InputVoiceLevelStore.floor(fromPeaks: [0.035, 0.04, 0.05, 0.09, 0.04]), 0.006)
+    }
+
+    // A spoken "Ja" on the Wave XLR (1.2 s, 12 frames): loudest frame 0.0036, learned peak 0.0072.
+    func testShortJaOnWaveXlrIsVoiceWithTheLearnedFloor() {
+        let ja: [Float] = [0.0005, 0.0005, 0.0005, 0.0005, 0.0018, 0.0026, 0.0036, 0.0030, 0.0022, 0.0005, 0.0005, 0.0005]
+        store.record(peak: 0.0072, forDevice: "Elgato Wave XLR")
+        let decision = AdaptiveVoiceGate.evaluate(
+            frameEnergies: ja, absoluteFloor: store.absoluteFloor(forDevice: "Elgato Wave XLR"))
+        XCTAssertTrue(decision.voiceDetected)
+        XCTAssertGreaterThanOrEqual(decision.framesAboveThreshold(in: ja), 3)
     }
 
     func testShortWaveXlrHoldWithoutHistoryIsStillDiscarded() {

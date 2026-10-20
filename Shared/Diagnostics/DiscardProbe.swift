@@ -151,8 +151,10 @@
 //
 // Cycle 13 (quick task 261020-dvf, PER-MICROPHONE FLOOR): `gate_absolute_floor` is the absolute floor the
 // Layer 2 gate used for the clip, next to `gate_threshold` (the larger of that floor and the clip's
-// noise-floor ratio). It is 0.006 until the press microphone has history, then 0.5 x the median loudest
+// noise-floor ratio). It is 0.006 until the press microphone has history, then 0.25 x the median loudest
 // frame of that microphone's last 20 successful holds, between 0.001 and 0.006. macOS only.
+// `gate_frame_energies` (every 100 ms frame energy the gate saw, rounded to 5 decimals) is written only for
+// clips under 3.0 s, so a discarded short word can be replayed against a different floor.
 //
 // Output: ~/Library/Application Support/Dicticus/DebugRecordings/discard-YYYY-MM-DD.jsonl
 // Retention: 14 days, purged once per launch.
@@ -269,6 +271,7 @@ public actor DiscardProbe {
         gateNoiseFloor: Float? = nil,
         gateThreshold: Float? = nil,
         gateAbsoluteFloor: Float? = nil,
+        gateFrameEnergies: [Float]? = nil,
         segments: [SegmentInfo]? = nil,
         lowConfidenceShort: Bool? = nil,
         noSpeechProbSource: String? = nil,
@@ -302,6 +305,9 @@ public actor DiscardProbe {
         if let gateNoiseFloor { line["gate_noise_floor"] = gateNoiseFloor }
         if let gateThreshold { line["gate_threshold"] = gateThreshold }
         if let gateAbsoluteFloor { line["gate_absolute_floor"] = gateAbsoluteFloor }
+        if let gateFrameEnergies, durationSeconds < 3.0 {
+            line["gate_frame_energies"] = gateFrameEnergies.map { (Double($0) * 100_000).rounded() / 100_000 }
+        }
         if let lowConfidenceShort { line["low_confidence_short"] = lowConfidenceShort }
         if let noSpeechProbSource { line["no_speech_prob_source"] = noSpeechProbSource }
         if let energyMetricsSource { line["energy_metrics_source"] = energyMetricsSource }
