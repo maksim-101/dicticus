@@ -49,6 +49,38 @@ final class LivePreviewGateTests: XCTestCase {
         XCTAssertFalse(LivePreviewVoiceGate.hasNewVoice(energies: [], sinceFrame: 0))
     }
 
+    func testQuietMicrophoneSpeechIsNewVoice() {
+        // Wave XLR shape: room floor 0.0003-0.0008, speech peaking at 0.003-0.006, below the
+        // final path's fixed 0.006 floor.
+        let floor = (0..<10).map { Float(0.0003 + 0.0005 * Double($0 % 3) / 2) }
+        let speech: [Float] = [0.003, 0.0045, 0.006, 0.004, 0.0035, 0.005]
+        let energies = floor + speech
+        XCTAssertTrue(LivePreviewVoiceGate.hasNewVoice(energies: energies, sinceFrame: 10))
+        XCTAssertFalse(LivePreviewVoiceGate.hasNewVoice(energies: floor, sinceFrame: 0))
+    }
+
+    func testMainMicrophoneKeepsTheFixedFloorAfterSpeech() {
+        let energies = run(0.002, 10) + (0..<10).map { Float(0.03 + 0.015 * Double($0 % 2)) } + run(0.005, 5)
+        XCTAssertEqual(LivePreviewVoiceGate.previewAbsoluteFloor(energies: energies), 0.006)
+        XCTAssertFalse(LivePreviewVoiceGate.hasNewVoice(energies: energies, sinceFrame: 20))
+    }
+
+    func testDitherAndDigitalSilenceAreNeverVoice() {
+        XCTAssertFalse(LivePreviewVoiceGate.hasNewVoice(energies: run(0, 30), sinceFrame: 0))
+        let dither = (0..<30).map { Float(0.0002 + 0.0006 * Double($0 % 4) / 3) }
+        XCTAssertFalse(LivePreviewVoiceGate.hasNewVoice(energies: dither, sinceFrame: 0))
+        XCTAssertFalse(LivePreviewVoiceGate.hasNewVoice(energies: dither, sinceFrame: 20))
+    }
+
+    func testPreviewAbsoluteFloorBoundaries() {
+        XCTAssertEqual(LivePreviewVoiceGate.previewAbsoluteFloor(energies: [0.012]), 0.006)
+        XCTAssertEqual(LivePreviewVoiceGate.previewAbsoluteFloor(energies: [0.2, 0.001]), 0.006)
+        XCTAssertEqual(LivePreviewVoiceGate.previewAbsoluteFloor(energies: [0.008, 0.001]), 0.004)
+        XCTAssertEqual(LivePreviewVoiceGate.previewAbsoluteFloor(energies: [0.001]), 0.001)
+        XCTAssertEqual(LivePreviewVoiceGate.previewAbsoluteFloor(energies: [0]), 0.001)
+        XCTAssertEqual(LivePreviewVoiceGate.previewAbsoluteFloor(energies: []), 0.001)
+    }
+
     // MARK: - per-tick bookkeeping
 
     private let voiced = Array(repeating: Float(0.05), count: 5)

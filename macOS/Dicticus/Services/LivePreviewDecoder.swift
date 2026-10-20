@@ -209,6 +209,13 @@ final class LivePreviewDecoder {
 /// Layer 2. A fixed threshold once dropped low-gain speech (AdaptiveVoiceGate header), and
 /// a threshold over the new frames alone would read continuous speech as its own floor.
 ///
+/// The absolute floor is per hold (`previewAbsoluteFloor`): a quiet microphone such as an
+/// Elgato Wave XLR peaks at 0.0045-0.0060 on speech, below the final path's fixed 0.006, and
+/// the preview, unlike the final path, has no duration bypass, so it stayed empty. Any hold
+/// whose loudest frame reaches 0.012 keeps the 0.006 floor, so the main microphone is unchanged
+/// once speech has occurred; a quieter hold gets half its own loudest frame, never below 0.001.
+/// The noise-ratio term still rejects steady fan noise.
+///
 /// Sees energies only, never audio samples beyond framing and never any text.
 @MainActor
 struct LivePreviewVoiceGate: Sendable {
@@ -229,10 +236,22 @@ struct LivePreviewVoiceGate: Sendable {
     private let inputSampleRate: Double
     private let frameSamples: Int
 
+    /// Fraction of the loudest frame so far that the absolute floor follows on a quiet microphone.
+    nonisolated static let previewPeakFraction: Float = 0.5
+    /// Lowest absolute floor, so digital silence and dither never count as voice.
+    nonisolated static let previewMinimumFloor: Float = 0.001
+
     init(inputSampleRate: Double) {
         self.inputSampleRate = inputSampleRate
         // Same expression as TranscriptionService.frameEnergies, so frames line up exactly.
         frameSamples = max(1, Int(0.1 * Float(inputSampleRate)))
+    }
+
+    /// The hold's absolute floor: half the loudest frame, capped at the final path's 0.006
+    /// and never below `previewMinimumFloor`.
+    nonisolated static func previewAbsoluteFloor(energies: [Float]) -> Float {
+        let loudest = energies.max() ?? 0
+        return max(previewMinimumFloor, min(AdaptiveVoiceGate.defaultAbsoluteFloor, previewPeakFraction * loudest))
     }
 
     /// True when a frame at or after `sinceFrame` exceeds the threshold computed over all
@@ -240,7 +259,10 @@ struct LivePreviewVoiceGate: Sendable {
     nonisolated static func hasNewVoice(energies: [Float], sinceFrame: Int) -> Bool {
         let first = max(0, sinceFrame)
         guard first < energies.count else { return false }
-        let threshold = AdaptiveVoiceGate.evaluate(frameEnergies: energies).threshold
+        let threshold = AdaptiveVoiceGate.evaluate(
+            frameEnergies: energies,
+            absoluteFloor: previewAbsoluteFloor(energies: energies)
+        ).threshold
         return energies[first...].contains { $0 > threshold }
     }
 
