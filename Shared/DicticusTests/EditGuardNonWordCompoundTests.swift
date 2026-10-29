@@ -59,9 +59,10 @@ final class EditGuardNonWordCompoundTests: XCTestCase {
     // MARK: - Helpers
 
     private func run(
-        _ lang: String, _ baseline: String, _ llm: String, lexicon: any SpellLexicon
+        _ lang: String, _ baseline: String, _ llm: String, dictProtected: Set<String> = [], lexicon: any SpellLexicon
     ) -> EditGuard.GuardResult {
-        let r = EditGuard.apply(rulesCleaned: baseline, llmOutput: llm, language: lang, lexicon: lexicon)
+        let r = EditGuard.apply(
+            rulesCleaned: baseline, llmOutput: llm, language: lang, dictProtected: dictProtected, lexicon: lexicon)
         let v = EditGuardMergeAtomicityTests.neitherSourceViolations(output: r.text, sourceA: baseline, sourceB: llm)
         XCTAssertTrue(v.tier1.isEmpty, "tier-1 neither-source violation(s) \(v.tier1) in: \(r.text)")
         return r
@@ -77,11 +78,13 @@ final class EditGuardNonWordCompoundTests: XCTestCase {
         XCTAssertTrue(r.edits.contains { $0.kind == "substitute" && !$0.accepted }, "\(r.edits)", file: file, line: line)
     }
 
+    /// 261029-n8o: the repaired target goes through `dictProtected`, the one
+    /// target class the repair still accepts; these tests pin the compound-part rule.
     private func assertRepaired(
-        _ lang: String, _ baseline: String, _ llm: String, lexicon: any SpellLexicon,
+        _ lang: String, _ baseline: String, _ llm: String, dictProtected: Set<String>, lexicon: any SpellLexicon,
         file: StaticString = #filePath, line: UInt = #line
     ) {
-        let r = run(lang, baseline, llm, lexicon: lexicon)
+        let r = run(lang, baseline, llm, dictProtected: dictProtected, lexicon: lexicon)
         XCTAssertEqual(r.text, llm, file: file, line: line)
         XCTAssertTrue(r.edits.contains { $0.acceptClass == "nonWordRepair" }, "\(r.edits)", file: file, line: line)
     }
@@ -107,23 +110,26 @@ final class EditGuardNonWordCompoundTests: XCTestCase {
     func testNWC_smallEditInsidePartCompoundStillRepaired() {
         assertRepaired("de", "Wir verkaufen heute zwei aufpumpenbaren Schläuche an den Kunden.",
                        "Wir verkaufen heute zwei aufpumpbaren Schläuche an den Kunden.",
+                       dictProtected: ["aufpumpbaren"],
                        lexicon: PartLexicon(unknown: ["aufpumpenbaren"], parts: ["aufpumpen", "baren"]))
     }
 
     func testNWC_unknownPartStillRepaired() {
         assertRepaired("de", "Der Lehrling soll das Teil herausbrost, bevor wir weitermachen.",
                        "Der Lehrling soll das Teil herausbringst, bevor wir weitermachen.",
+                       dictProtected: ["herausbringst"],
                        lexicon: PartLexicon(unknown: ["herausbrost"], parts: ["heraus"]))
     }
 
     func testNWC_englishUtteranceStillRepaired() {
         assertRepaired("en", "The shop sells brakeslips for the old bike.",
                        "The shop sells brakeshoes for the old bike.",
+                       dictProtected: ["brakeshoes"],
                        lexicon: PartLexicon(unknown: ["brakeslips"], parts: ["brake", "slips"]))
     }
 
     func testNWC_lexiconWithoutPartOracleNeverBlocks() {
-        assertRepaired("de", headBaseline, headLlm, lexicon: NoPartOracleLexicon(unknown: ["ventilcaps"]))
+        assertRepaired("de", headBaseline, headLlm, dictProtected: ["Ventilkappe"], lexicon: NoPartOracleLexicon(unknown: ["ventilcaps"]))
     }
 
     // MARK: - Real platform checker (macOS)
@@ -159,6 +165,7 @@ final class EditGuardNonWordCompoundTests: XCTestCase {
     func testNWC_R3_realChecker_unknownPartStillRepaired() {
         assertRepaired("de", "Der Lehrling soll das Teil herausbrost, bevor wir weitermachen.",
                        "Der Lehrling soll das Teil herausbringt, bevor wir weitermachen.",
+                       dictProtected: ["herausbringt"],
                        lexicon: PlatformSpellLexicon())
     }
     #endif

@@ -318,36 +318,38 @@ final class EditGuardClassifierRuleTests: XCTestCase {
     /// substitution is a one-instance loanword-translation judgment call,
     /// not a defect `nonWordRepair` can or should distinguish. Documented
     /// residue, not a target — a future change that makes this WORSE (a
-    /// neither-source string) must fail here.
+    /// neither-source string) must fail here. 261029-n8o: the target is not
+    /// dictionary-protected, so the dictated word now ships.
     func testD10_residueResistenztrainingNonWordRepair() {
         let baseline = "Wie viel Resistancetraining braucht es wirklich"
         let llm = "Wie viel Resistenztraining braucht es wirklich"
         let lexicon = TestSpellLexicon(known: ["resistenztraining"])
         let result = guardResult(baseline, llm, lang: "de", lexicon: lexicon)
-        XCTAssertEqual(result.text, llm)
+        XCTAssertEqual(result.text, baseline)
         guard let edit = result.edits.first(where: { $0.from == "Resistancetraining" }) else {
             return XCTFail("expected a substitute edit from 'Resistancetraining'")
         }
-        XCTAssertTrue(edit.accepted)
-        XCTAssertEqual(edit.acceptClass, "nonWordRepair")
+        XCTAssertFalse(edit.accepted)
+        XCTAssertNotEqual(edit.acceptClass, "nonWordRepair")
         assertNoNeitherSourceViolation(result.text, baseline, llm)
     }
 
     /// Audit 09-03:23's residue: the true failure is the clipped brand
     /// `Polyt` (fixed by Phase 49.7's dictionary entry `Polyt -> PolitMonitor`
     /// upstream of the LLM); `Polyton` is itself a real German word by the
-    /// OS checker oracle. Documented residue, not a target.
+    /// OS checker oracle. Documented residue, not a target. 261029-n8o: the
+    /// target is not dictionary-protected, so the dictated word now ships.
     func testD10_residuePolytonNonWordRepair() {
         let baseline = "Der Polyt Monitor ist offen"
         let llm = "Der Polyton Monitor ist offen"
         let lexicon = TestSpellLexicon(known: ["polyton", "der", "monitor", "ist", "offen"])
         let result = guardResult(baseline, llm, lang: "de", lexicon: lexicon)
-        XCTAssertEqual(result.text, llm)
+        XCTAssertEqual(result.text, baseline)
         guard let edit = result.edits.first(where: { $0.from == "Polyt" }) else {
             return XCTFail("expected a substitute edit from 'Polyt'")
         }
-        XCTAssertTrue(edit.accepted)
-        XCTAssertEqual(edit.acceptClass, "nonWordRepair")
+        XCTAssertFalse(edit.accepted)
+        XCTAssertNotEqual(edit.acceptClass, "nonWordRepair")
         assertNoNeitherSourceViolation(result.text, baseline, llm)
     }
 }

@@ -211,9 +211,10 @@ final class EditGuardHarmFixesTests: XCTestCase {
     }
 
     func testNWR_unlistedNonWordStillRepaired() {
+        // 261029-n8o: pins the source arm; the target goes through dictProtected.
         let llm = "The wheel has one spoke missing from the rear today."
         let lex = ListedLexicon(unknown: ["spokke"], listed: ["spoke"])
-        let r = run("en", "The wheel has one spokke missing from the rear today.", llm, lexicon: lex)
+        let r = run("en", "The wheel has one spokke missing from the rear today.", llm, dictProtected: ["spoke"], lexicon: lex)
         XCTAssertEqual(r.text, llm)
         XCTAssertTrue(r.edits.contains { $0.acceptClass == "nonWordRepair" }, "\(r.edits)")
     }
@@ -272,5 +273,38 @@ final class EditGuardHarmFixesTests: XCTestCase {
         XCTAssertTrue(PlatformSpellLexicon.shared.isListedWord("bicycle", language: "en"))
         XCTAssertTrue(PlatformSpellLexicon.shared.isListedWord("Fahrrad", language: "de"))
         XCTAssertFalse(PlatformSpellLexicon.shared.isListedWord("zxqvbl", language: "en"))
+    }
+
+    // MARK: - NWR target arm: dictionary-protected or augmented only (261029-n8o)
+    //
+    // Records 2026-10-18T04:35:00.514Z and 2026-10-20T16:40:58.092Z: the
+    // bundled-list target was a different real word than the one dictated.
+    // Invented text.
+
+    func testNWR_listedTargetOutsideDictionaryIsNotRepaired_english_RED() {
+        let baseline = "We spent the morning dogfugiting the new brake levers."
+        let lex = ListedLexicon(unknown: ["dogfugiting"], listed: ["dogfighting"])
+        let r = run("en", baseline, "We spent the morning dogfighting the new brake levers.", lexicon: lex)
+        XCTAssertEqual(r.text, baseline)
+        XCTAssertFalse(r.edits.contains { $0.acceptClass == "nonWordRepair" }, "\(r.edits)")
+    }
+
+    func testNWR_listedTargetOutsideDictionaryIsNotRepaired_german_RED() {
+        let baseline = "Bei den Bremsen klappt das mit der Anleitline ziemlich gut."
+        let lex = ListedLexicon(unknown: ["anleitline"], listed: ["anleitung"])
+        let r = run("de", baseline, "Bei den Bremsen klappt das mit der Anleitung ziemlich gut.", lexicon: lex)
+        XCTAssertEqual(r.text, baseline)
+        XCTAssertFalse(r.edits.contains { $0.acceptClass == "nonWordRepair" }, "\(r.edits)")
+    }
+
+    func testNWR_realLexicon_listedTargetOutsideDictionaryIsNotRepaired_RED() throws {
+        let lexicon = PlatformSpellLexicon()
+        try XCTSkipUnless(!lexicon.isKnownWord("Anleitline", language: "de"), "platform checker knows the invented source")
+        try XCTSkipUnless(!lexicon.isListedWord("Anleitline", language: "de"), "source is in the bundled list")
+        try XCTSkipUnless(lexicon.isListedWord("Anleitung", language: "de"), "target is not in the bundled list")
+        try XCTSkipUnless(!lexicon.isAugmentedWord("Anleitung"), "target is in the dictionary vocabulary")
+        let baseline = "Bei den Bremsen klappt das mit der Anleitline ziemlich gut."
+        let r = run("de", baseline, "Bei den Bremsen klappt das mit der Anleitung ziemlich gut.", lexicon: lexicon)
+        XCTAssertEqual(r.text, baseline)
     }
 }

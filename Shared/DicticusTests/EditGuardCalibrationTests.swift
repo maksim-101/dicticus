@@ -75,10 +75,12 @@ final class EditGuardCalibrationTests: XCTestCase {
 
     /// Evidence: cleanup-2026-07-21.jsonl:6. R3 spot value: nlev(clawd,
     /// claude) = 0.333 (orthographic arm, <= 0.35).
+    /// 261029-n8o: the A tests below pass their target as `dictProtected`, the
+    /// one target class the repair still accepts; they pin the closeness arms.
     func testA_clawdToClaude_acceptsNonWordRepair() {
         let r = guardResult(
             "I use Clawd Max today.", "I use Claude Max today.",
-            known: ["claude", "max", "today", "i", "use"]
+            known: ["claude", "max", "today", "i", "use"], dictProtected: ["Claude"]
         )
         XCTAssertEqual(r.text, "I use Claude Max today.")
         let edit = r.edits.first { $0.from == "Clawd" }
@@ -91,7 +93,7 @@ final class EditGuardCalibrationTests: XCTestCase {
     func testA_claudcoToClaude_acceptsNonWordRepair() {
         let r = guardResult(
             "Check claudco today.", "Check Claude today.",
-            known: ["claude", "today", "check"]
+            known: ["claude", "today", "check"], dictProtected: ["Claude"]
         )
         XCTAssertEqual(r.text, "Check Claude today.")
         let edit = r.edits.first { $0.from == "claudco" }
@@ -104,7 +106,7 @@ final class EditGuardCalibrationTests: XCTestCase {
     func testA_getraegtToGetragen_de_acceptsNonWordRepair() {
         let r = guardResult(
             "Das würde geträgt werden.", "Das würde getragen werden.",
-            lang: "de", known: ["das", "würde", "werden", "getragen"]
+            lang: "de", known: ["das", "würde", "werden", "getragen"], dictProtected: ["getragen"]
         )
         XCTAssertEqual(r.text, "Das würde getragen werden.")
         let edit = r.edits.first { $0.from == "geträgt" }
@@ -120,7 +122,7 @@ final class EditGuardCalibrationTests: XCTestCase {
     func testA_eingaenglicherToEingaengiger_de_acceptsNonWordRepair() {
         let r = guardResult(
             "Der Titel sollte eingänglicher sein.", "Der Titel sollte eingängiger sein.",
-            lang: "de", known: ["der", "titel", "sollte", "sein", "eingängiger"]
+            lang: "de", known: ["der", "titel", "sollte", "sein", "eingängiger"], dictProtected: ["eingängiger"]
         )
         XCTAssertEqual(r.text, "Der Titel sollte eingängiger sein.")
         let edit = r.edits.first { $0.from == "eingänglicher" }
@@ -450,9 +452,9 @@ final class EditGuardCalibrationTests: XCTestCase {
     /// Evidence: cleanup-2026-07-11.jsonl:18. "Pitte" and "Piete" are BOTH
     /// plausible ASR mishearings of the intended "Bitte" (please) — this
     /// edit swaps one garble for a differently-wrong garble rather than a
-    /// genuine repair. Left AS-IS pending a user decision; this fixture
-    /// pins the CURRENT behavior so any future change is visible.
-    func testFollowup_assertCurrent_pitteToPiete_de_acceptsViaNonWordRepair() {
+    /// genuine repair. 261029-n8o: the target is not dictionary-protected, so
+    /// the dictated word now ships; this fixture pins that.
+    func testFollowup_assertCurrent_pitteToPiete_de_dictatedWordShips() {
         let r = guardResult(
             "So etwas wie, Pitte übergehe die erste Zeile, muss ebenfalls erfasst werden.",
             "So etwas wie, Piete übergehe die erste Zeile, muss ebenfalls erfasst werden.",
@@ -460,7 +462,7 @@ final class EditGuardCalibrationTests: XCTestCase {
             known: ["so", "etwas", "wie", "piete", "übergehe", "die", "erste", "zeile", "muss", "ebenfalls", "erfasst", "werden"]
         )
         let edit = r.edits.first { $0.from == "Pitte" }
-        XCTAssertEqual(edit?.accepted, true, "documents CURRENT (residual, not attempted) behavior — see SUMMARY Follow-up section")
-        XCTAssertEqual(edit?.acceptClass, EditGuard.AcceptClass.nonWordRepair.rawValue)
+        XCTAssertEqual(edit?.accepted, false, "261029-n8o: a target outside the dictionary is not repaired")
+        XCTAssertNotEqual(edit?.acceptClass, EditGuard.AcceptClass.nonWordRepair.rawValue)
     }
 }

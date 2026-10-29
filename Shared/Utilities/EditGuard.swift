@@ -1517,10 +1517,17 @@ public enum EditGuard {
         // target through. The target must now be dictionary-protected, listed
         // in the bundled EN+DE word list, or an exact member of the dictionary
         // vocabulary; the platform checker alone no longer qualifies it.
+        //
+        // Quick task 261029-n8o (records `2026-10-18T04:35:00.514Z` and
+        // `2026-10-20T16:40:58.092Z`): a target that is only in the bundled
+        // word list was a different real word than the one dictated. Every
+        // nonWordRepair accept since 2026-10-03 that the 261017-g3j rule still
+        // allowed was harmful. The target must now be a word the dictionary
+        // wrote into this dictation or a word of the dictionary vocabulary.
         if a.kind == .word, b.kind == .word,
            !isKnownForRepair(a, language: language, dictProtectedLower: dictProtectedLower, lexicon: lexicon),
            !lexicon.isListedWord(a.text, language: language),
-           dictProtectedLower.contains(b.normalized) || lexicon.isListedWord(b.text, language: language) || lexicon.isAugmentedWord(b.text),
+           dictProtectedLower.contains(b.normalized) || lexicon.isAugmentedWord(b.text),
            isNonWordRepairClose(a.normalized, b.normalized, language: language),
            !isCompoundPartSwap(a, b, language: language, lexicon: lexicon) {
             return (true, .nonWordRepair, nil)
