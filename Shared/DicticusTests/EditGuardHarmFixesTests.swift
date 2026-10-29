@@ -290,9 +290,9 @@ final class EditGuardHarmFixesTests: XCTestCase {
     }
 
     func testNWR_listedTargetOutsideDictionaryIsNotRepaired_german_RED() {
-        let baseline = "Bei den Bremsen klappt das mit der Anleitline ziemlich gut."
+        let baseline = "Am Schaltwerk fehlt noch die Anleitline für den Lehrling."
         let lex = ListedLexicon(unknown: ["anleitline"], listed: ["anleitung"])
-        let r = run("de", baseline, "Bei den Bremsen klappt das mit der Anleitung ziemlich gut.", lexicon: lex)
+        let r = run("de", baseline, "Am Schaltwerk fehlt noch die Anleitung für den Lehrling.", lexicon: lex)
         XCTAssertEqual(r.text, baseline)
         XCTAssertFalse(r.edits.contains { $0.acceptClass == "nonWordRepair" }, "\(r.edits)")
     }
@@ -300,11 +300,11 @@ final class EditGuardHarmFixesTests: XCTestCase {
     func testNWR_realLexicon_listedTargetOutsideDictionaryIsNotRepaired_RED() throws {
         let lexicon = PlatformSpellLexicon()
         try XCTSkipUnless(!lexicon.isKnownWord("Anleitline", language: "de"), "platform checker knows the invented source")
-        try XCTSkipUnless(!lexicon.isListedWord("Anleitline", language: "de"), "source is in the bundled list")
-        try XCTSkipUnless(lexicon.isListedWord("Anleitung", language: "de"), "target is not in the bundled list")
-        try XCTSkipUnless(!lexicon.isAugmentedWord("Anleitung"), "target is in the dictionary vocabulary")
-        let baseline = "Bei den Bremsen klappt das mit der Anleitline ziemlich gut."
-        let r = run("de", baseline, "Bei den Bremsen klappt das mit der Anleitung ziemlich gut.", lexicon: lexicon)
+        try XCTSkipUnless(!lexicon.isListedWord("Anleitline", language: "de"), "bundled list holds the source")
+        try XCTSkipUnless(lexicon.isListedWord("Anleitung", language: "de"), "bundled list lacks the target")
+        try XCTSkipUnless(!lexicon.isAugmentedWord("Anleitung"), "dictionary vocabulary holds the target")
+        let baseline = "Am Schaltwerk fehlt noch die Anleitline für den Lehrling."
+        let r = run("de", baseline, "Am Schaltwerk fehlt noch die Anleitung für den Lehrling.", lexicon: lexicon)
         XCTAssertEqual(r.text, baseline)
     }
 }
