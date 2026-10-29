@@ -59,3 +59,32 @@ final class DictionaryRealWordVetoTests: XCTestCase {
                        "the TrueNAS box rebooted")
     }
 }
+
+#if PERSONAL_LEXICON
+/// Quick task 261029-n8o — record ts 2026-10-17T15:52:24.745Z: a developer-seed
+/// entry rewrote the real product name Dockhand. This class depends on the
+/// gitignored developer seed (`PersonalLexicon`) on purpose, so it exists only
+/// in the Debug and test configurations.
+@MainActor
+final class DictionaryDevSeedProductNameTests: XCTestCase {
+
+    override func setUp() {
+        super.setUp()
+        DictionaryService.shared.removeAll()
+        DictionaryService.shared.isCaseSensitive = false
+        DictionaryService.shared.prepopulateWithDefaults()
+    }
+
+    override func tearDown() {
+        DictionaryService.shared.removeAll()
+        super.tearDown()
+    }
+
+    func testSeededDictionaryLeavesDockhandUnchanged_RED() {
+        XCTAssertFalse(DictionaryService.shared.dictionary.isEmpty)
+        let result = DictionaryService.shared.applyWithTrace(to: "Restart the stack from the Dockhand dashboard.")
+        XCTAssertTrue(result.text.contains("Dockhand"), "got: \(result.text)")
+        XCTAssertFalse(result.replacements.contains { $0.from == "Dockhand" })
+    }
+}
+#endif
