@@ -4448,14 +4448,20 @@ public enum EditGuard {
         // rejected removal of a terminal mark restores it ahead of a word
         // the LLM continued in lowercase, and the finishing capitalizer then
         // uppercased that word. A mark the LLM agreed with is never listed,
-        // so it still starts a capitalized sentence.
+        // so it still starts a capitalized sentence. Records
+        // 2026-10-18T05:37:58.844Z and 2026-10-25T09:51:56.455Z: the same
+        // happens when the LLM replaced the terminal mark by a comma and the
+        // gate rejected that substitution.
         var editByBaselineIndex: [Int: Int] = [:]
         for (i, edit) in edits.enumerated() {
             if let from = edit.from { editByBaselineIndex[from.index] = i }
         }
         var continuations: [RestoredMarkContinuation] = []
         for (i, edit) in edits.enumerated() {
-            guard edit.kind == .delete || edit.kind == .move, !verdicts[i].accepted,
+            let replacedByNonTerminalMark = edit.kind == .substitute
+                && edit.to?.kind == .punctuation
+                && !(edit.to?.text == "." || edit.to?.text == "!" || edit.to?.text == "?")
+            guard edit.kind == .delete || edit.kind == .move || replacedByNonTerminalMark, !verdicts[i].accepted,
                   let mark = edit.from, mark.kind == .punctuation,
                   mark.text == "." || mark.text == "!" || mark.text == "?",
                   mark.index >= 1, mark.index + 1 < baseline.count else { continue }

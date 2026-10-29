@@ -367,4 +367,45 @@ final class EditGuardPauseSplitMergeTests: XCTestCase {
             result.text, language: "en", keepLowercaseAfter: Set(result.restoredMarkContinuations))
         XCTAssertTrue(out.contains("oil. On"), "a period the LLM kept still starts a capitalized sentence: \(out)")
     }
+
+    // MARK: - 261029-n8o: a period the LLM changed to a comma and the gate restored
+    //
+    // Records 2026-10-18T05:37:58.844Z (en) and 2026-10-25T09:51:56.455Z (de):
+    // the LLM replaced the period by a comma, the gate rejected that
+    // substitution, and the capitalizer then uppercased the lowercase word
+    // after the restored period. Invented text.
+
+    private func restoredSubstituteEdit(_ result: EditGuard.GuardResult) -> EditGuard.ClassifiedEdit? {
+        result.edits.first { $0.kind == "substitute" && $0.from == "." && $0.to == "," && !$0.accepted }
+    }
+
+    func testRestoredMark_substituteToCommaRejected_english_followingWordStaysLowercase_RED() {
+        let baseline = "I doubt the rear wheel will stay true. with how many spokes are loose we should rebuild it."
+        let llm = "I doubt the rear wheel will stay true, given how many spokes are loose we should rebuild it."
+        let result = guardOut(baseline, llm)
+        XCTAssertNotNil(restoredSubstituteEdit(result), "fixture must reach a rejected period-to-comma substitute: \(result.edits)")
+        XCTAssertTrue(result.restoredMarkContinuations.contains(
+            EditGuard.RestoredMarkContinuation(precedingWord: "true", mark: ".", followingWord: "with")),
+            "carrier must name the restored seam: \(result.restoredMarkContinuations)")
+        let kept = TextProcessingService.applyFinalCapitalization(
+            result.text, language: "en", keepLowercaseAfter: Set(result.restoredMarkContinuations))
+        XCTAssertTrue(kept.contains("true. with"), "word after the restored mark must stay lowercase: \(kept)")
+        let today = TextProcessingService.applyFinalCapitalization(result.text, language: "en")
+        XCTAssertTrue(today.contains("true. With"), "without the carrier the default path still capitalizes: \(today)")
+    }
+
+    func testRestoredMark_substituteToCommaRejected_german_followingWordStaysLowercase_RED() {
+        let baseline = "Am Vorderrad sehe ich ein Flattern. wenn ich von der Strasse zurück auf den Feldweg fahre."
+        let llm = "Am Vorderrad bemerke ich ein Flattern, wenn ich von der Strasse auf den Feldweg fahre."
+        let result = guardOut(baseline, llm, "de")
+        XCTAssertNotNil(restoredSubstituteEdit(result), "fixture must reach a rejected period-to-comma substitute: \(result.edits)")
+        XCTAssertTrue(result.restoredMarkContinuations.contains(
+            EditGuard.RestoredMarkContinuation(precedingWord: "Flattern", mark: ".", followingWord: "wenn")),
+            "carrier must name the restored seam: \(result.restoredMarkContinuations)")
+        let kept = TextProcessingService.applyFinalCapitalization(
+            result.text, language: "de", keepLowercaseAfter: Set(result.restoredMarkContinuations))
+        XCTAssertTrue(kept.contains("Flattern. wenn"), "word after the restored mark must stay lowercase: \(kept)")
+        let today = TextProcessingService.applyFinalCapitalization(result.text, language: "de")
+        XCTAssertTrue(today.contains("Flattern. Wenn"), "without the carrier the default path still capitalizes: \(today)")
+    }
 }
