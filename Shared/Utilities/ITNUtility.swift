@@ -1151,16 +1151,20 @@ struct ITNUtility {
     ]
 
     /// Promotes single-digit number-words to digits when identifier-adjacent (DE).
-    /// Handles inflected forms (eins/ein/eine/einen/einer/einem/eines) via `germanIdentifierUnits`.
+    /// Pattern A takes the digit words only; the ein-forms stay articles there.
     static func applyGermanSingleDigitIdentifier(to text: String) -> String {
         var result = text
 
-        let digitWords = "(?i:eins|ein|eine|einen|einer|einem|eines|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf)"
+        let digitWords = "(?i:eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf)"
         func resolve(_ s: String) -> String { germanIdentifierUnits[s.lowercased()] ?? s }
 
         // Pattern A — Phase 28 CR-01 fix: 1-char ALLCAPS guarded by negative
         // lookahead (extended for German diacritics) so 2-char Title-Case prose
         // stems (Da, So, Wo, Er, Am, etc.) do NOT mangle bigrams like "Da eins".
+        // Pattern A takes no ein-form: directly after an abbreviation it is the
+        // article ("KI ein Werkzeug", "UI einen Unterschied"), logged
+        // 2026-10-27T05:22:50.413Z and 2026-10-20T17:05:24.163Z. The counting
+        // form is "eins".
         let stemPattern = "(?:[A-Z](?![a-zäöüß])|[A-Z]{2,5}|[a-zäöü][A-Z][a-zA-ZäöüÄÖÜß]{0,3})"
         let patternA = "\\b(\(stemPattern))\\s+(\(digitWords))\\b"
         result = replaceStructural(result, pattern: patternA) { g in
@@ -1177,8 +1181,13 @@ struct ITNUtility {
         // capture ("in einem zweiten Schritt eine andere Organisationseinheit")
         // showed the unrestricted alternation promoting that article to a digit,
         // corrupting the sentence. B1 keeps the original unrestricted behavior for
-        // every non-article digit word (eins, ein, eines, zwei..zwölf — no evidenced
-        // bug there). B2 scopes to just the article-ambiguous forms and adds a
+        // every non-article digit word (eins, eines, zwei..zwölf). Bare "ein" is not
+        // in B1: after a version word it is the article or the separable verb
+        // particle (logged 2026-10-18T17:36:05.861Z, "Runde ein."); the counting
+        // form is "eins". Of the 4 logged ITN promotions of an ein-form, all 4 were
+        // harmful and none correct (2026-10-18T17:36:05.861Z,
+        // 2026-10-20T17:05:24.163Z, 2026-10-27T05:22:50.413Z and the "Kapitel eine"
+        // case of 260723-qtb). "eines" stays in B1 because no logged case exists. B2 scopes to just the article-ambiguous forms and adds a
         // negative lookahead: promotion only fires when nothing follows (end of
         // string / attached punctuation) or the very next word is a closed-class
         // continuation word (mit, und, oder, für, von, bei, nach, über, unter,
@@ -1189,7 +1198,7 @@ struct ITNUtility {
         // flanked by digits on both sides.
         let versionClass = "(?i:version|modell|item|option|kapitel|schritt|phase|aufgabe|stufe|ebene|runde|rang|klasse|nummer|befund|frage|palette)"
 
-        let nonArticleDigitWords = "(?i:eins|ein|eines|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf)"
+        let nonArticleDigitWords = "(?i:eins|eines|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn|elf|zwölf)"
         let patternB1 = "\\b(\(versionClass))\\s+(\(nonArticleDigitWords))\\b"
         result = replaceStructural(result, pattern: patternB1) { g in
             "\(g[1]) \(resolve(g[2]))"

@@ -408,6 +408,37 @@ final class ITNUtilitySingleDigitTests: XCTestCase {
             "Im eins zwei drei Spiel"
         )
     }
+
+    // MARK: - 261029-n8o: German ein-forms after an abbreviation or a version word stay words
+
+    func testGermanArticle_ein_afterAcronym_notPromoted_RED() {
+        // Logged dictation 2026-10-27T05:22:50.413Z: "KI ein" became "KI1".
+        let input = "Beim Bremsen ist KI ein Werkzeug unter vielen."
+        XCTAssertEqual(ITNUtility.applyITN(to: input, language: "de"), input)
+    }
+
+    func testGermanArticle_einen_afterAcronym_notPromoted_RED() {
+        // Logged dictation 2026-10-20T17:05:24.163Z: "UI einen" became "UI1".
+        let input = "Am Lenker macht das UI einen spürbaren Unterschied."
+        XCTAssertEqual(ITNUtility.applyITN(to: input, language: "de"), input)
+    }
+
+    func testGermanParticle_ein_afterVersionWordAtSentenceEnd_notPromoted_RED() {
+        // Logged dictation 2026-10-18T17:36:05.861Z: separable verb particle "Runde ein." became "Runde 1.".
+        let input = "Den neuen Schlauch bauen wir in der zweiten Runde ein."
+        XCTAssertEqual(ITNUtility.applyITN(to: input, language: "de"), input)
+    }
+
+    func testGermanIdentifier_eins_afterAcronymAndVersionWord_stillConverts() {
+        XCTAssertEqual(
+            ITNUtility.applyITN(to: "Wir testen KI eins am Vorderrad.", language: "de"),
+            "Wir testen KI1 am Vorderrad."
+        )
+        XCTAssertEqual(
+            ITNUtility.applyITN(to: "Wir starten mit Runde eins.", language: "de"),
+            "Wir starten mit Runde 1."
+        )
+    }
 }
 
 final class ITNUtilityAcronymCollapseTests: XCTestCase {
