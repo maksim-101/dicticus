@@ -4339,82 +4339,110 @@ public enum EditGuard {
     /// verb changes the meaning of the sentence.
     private static let particleInversionLeaders: Set<String> = ["also", "ja", "doch", "und", "aber"]
 
-    /// Walks one sentence's tokens from its first token: consumes leader
-    /// words and commas, stops at anything else. Returns the consumed leader
-    /// words in order and the position (in `sentence`) of the word that
-    /// follows the run, or `nil` when the run holds no leader or no word
-    /// follows it.
-    private static func particleRun(
-        _ sentence: [(normalized: String, kind: TokenKind, text: String)]
-    ) -> (leaders: [String], postIndex: Int)? {
-        var leaders: [String] = []
-        var i = 0
-        while i < sentence.count {
-            let t = sentence[i]
-            if t.kind == .punctuation, t.text == "," {
-                i += 1
-            } else if t.kind == .word, particleInversionLeaders.contains(t.normalized) {
-                leaders.append(t.normalized)
-                i += 1
-            } else {
-                break
+    private typealias RunToken = (normalized: String, kind: TokenKind, text: String)
+
+    /// A sentence that opens with a run of leader words and commas.
+    /// `leaders` are the consumed leader words in order, `postIndex` is the
+    /// position of the first token after the run, `endIndex` the end
+    /// (exclusive) of the sentence in the same stream.
+    private struct ParticleRun {
+        let leaders: [String]
+        let postIndex: Int
+        let endIndex: Int
+    }
+
+    /// Every sentence in `toks` that opens with a leader run and has a
+    /// non-punctuation token after it. Sentence starts are found from the
+    /// terminal marks in the stream itself, not from `sentenceIndex`: a
+    /// candidate-side sentence split shifts the candidate's indices against
+    /// the baseline's, and the rebuilt stream mixes both (spike 021, item 99).
+    private static func particleRuns(_ toks: [RunToken]) -> [ParticleRun] {
+        var runs: [ParticleRun] = []
+        for start in toks.indices {
+            if start > 0 {
+                let prev = toks[start - 1]
+                guard prev.kind == .punctuation, [".", "!", "?"].contains(prev.text) else { continue }
             }
+            var leaders: [String] = []
+            var i = start
+            while i < toks.count {
+                let t = toks[i]
+                if t.kind == .punctuation, t.text == "," {
+                    i += 1
+                } else if t.kind == .word, particleInversionLeaders.contains(t.normalized) {
+                    leaders.append(t.normalized)
+                    i += 1
+                } else {
+                    break
+                }
+            }
+            guard !leaders.isEmpty, i < toks.count, toks[i].kind != .punctuation else { continue }
+            var end = i
+            while end < toks.count, !(toks[end].kind == .punctuation && [".", "!", "?"].contains(toks[end].text)) { end += 1 }
+            runs.append(ParticleRun(leaders: leaders, postIndex: i, endIndex: end))
         }
-        guard !leaders.isEmpty, i < sentence.count, sentence[i].kind == .word else { return nil }
-        return (leaders, i)
+        return runs
     }
 
     /// Quick task 261030-orz: rejects a German word-order move that puts a
     /// finite-or-modal verb directly behind a sentence-opening particle run
     /// in place of the dictated word (`Also ich habe` -> `Also habe ich`).
-    /// Fires only when the word now behind the run is a dictated word that
-    /// moved forward, so an accepted inflection repair right there
-    /// (`ein` -> `eine`) is left alone. Same two bounded attempts per
-    /// sentence as the mood lock.
+    /// A rebuilt sentence is paired with the baseline sentence that has the
+    /// same leader run and holds the word now behind it later on. It fires
+    /// only when that word is a dictated one moved forward, so an accepted
+    /// inflection repair right there (`ein` -> `eine`) is left alone, and not
+    /// when some baseline sentence with that leader run already opens with it.
+    /// Same two bounded attempts per sentence as the mood lock.
     private static func applyParticleInversionLock(
         baseline: [Token], candidate: [Token], edits: [Edit],
         verdicts: inout [ClassifiedEdit], tokens: inout [WorkToken], language: String
     ) {
         if language.prefix(2).lowercased() == "en" { return }
-        let sentenceIndices = Set(baseline.map(\.sentenceIndex)).union(candidate.map(\.sentenceIndex))
-        for sentenceIndex in sentenceIndices.sorted() {
-            let baselineSentence = baseline.filter { $0.sentenceIndex == sentenceIndex }
-            guard let baselineRun = particleRun(baselineSentence.map { ($0.normalized, $0.kind, $0.text) }) else { continue }
-            let dictatedAfterRun = Set(
-                baselineSentence[baselineRun.postIndex...].filter { $0.kind == .word }.map(\.normalized)
-            )
-            let dictatedFirst = baselineSentence[baselineRun.postIndex].normalized
+        let baselineToks: [RunToken] = baseline.map { (normalized: $0.normalized, kind: $0.kind, text: $0.text) }
+        let baselineRuns = particleRuns(baselineToks)
+        if baselineRuns.isEmpty { return }
 
-            for attempt in 0..<2 {
-                let indexed = tokens.enumerated().filter { $0.element.sentenceIndex == sentenceIndex }
-                guard let rebuiltRun = particleRun(indexed.map { ($0.element.normalized, $0.element.kind, $0.element.text) }),
-                      rebuiltRun.leaders == baselineRun.leaders else { break }
-                let rebuiltIndex = indexed[rebuiltRun.postIndex].offset
-                let verb = tokens[rebuiltIndex]
-                guard verb.normalized != dictatedFirst,
-                      dictatedAfterRun.contains(verb.normalized),
+        var attempts: [Int: Int] = [:]
+        for _ in 0..<(2 * (baselineRuns.count + 1)) {
+            let rebuiltToks: [RunToken] = tokens.map { (normalized: $0.normalized, kind: $0.kind, text: $0.text) }
+            var hit: (baselineSentence: Int, candidateSentence: Int)?
+            for run in particleRuns(rebuiltToks) {
+                let verb = tokens[run.postIndex]
+                guard verb.kind == .word else { continue }
+                let sameLeaders = baselineRuns.filter { $0.leaders == run.leaders }
+                if sameLeaders.contains(where: { baseline[$0.postIndex].normalized == verb.normalized }) { continue }
+                guard let match = sameLeaders.first(where: { m in
+                    baseline[m.postIndex..<m.endIndex].contains { $0.kind == .word && $0.normalized == verb.normalized }
+                }) else { continue }
+                let s = baseline[match.postIndex].sentenceIndex
+                guard attempts[s, default: 0] < 2,
                       FiniteVerbCues.isFiniteOrModal(verb.normalized, language: language),
-                      !verbKeptBaselineOrder(rebuiltIndex: rebuiltIndex, tokens: tokens, baseline: baseline)
-                else { break }
-
-                for i in edits.indices {
-                    let touchesSentence = edits[i].from?.sentenceIndex == sentenceIndex || edits[i].to?.sentenceIndex == sentenceIndex
-                    guard touchesSentence, verdicts[i].accepted else { continue }
-                    if attempt == 0 {
-                        guard edits[i].kind == .move else { continue }
-                    } else {
-                        guard edits[i].kind != .keep else { continue }
-                    }
-                    verdicts[i] = ClassifiedEdit(
-                        kind: verdicts[i].kind, from: verdicts[i].from, to: verdicts[i].to,
-                        accepted: false, acceptClass: nil,
-                        rejectClass: RejectionClass.particleInversion.rawValue
-                    )
-                }
-                applyAtomicGroupCoupling(edits: edits, verdicts: &verdicts, language: language)
-                applySentenceCoupledRevert(edits: edits, verdicts: &verdicts, language: language)
-                tokens = materialize(baseline: baseline, candidate: candidate, edits: edits, verdicts: verdicts)
+                      !verbKeptBaselineOrder(rebuiltIndex: run.postIndex, tokens: tokens, baseline: baseline)
+                else { continue }
+                hit = (s, verb.sentenceIndex)
+                break
             }
+            guard let hit else { return }
+            let attempt = attempts[hit.baselineSentence, default: 0]
+            attempts[hit.baselineSentence] = attempt + 1
+
+            for i in edits.indices {
+                let touchesSentence = edits[i].to?.sentenceIndex == hit.candidateSentence || edits[i].from?.sentenceIndex == hit.baselineSentence
+                guard touchesSentence, verdicts[i].accepted else { continue }
+                if attempt == 0 {
+                    guard edits[i].kind == .move else { continue }
+                } else {
+                    guard edits[i].kind != .keep else { continue }
+                }
+                verdicts[i] = ClassifiedEdit(
+                    kind: verdicts[i].kind, from: verdicts[i].from, to: verdicts[i].to,
+                    accepted: false, acceptClass: nil,
+                    rejectClass: RejectionClass.particleInversion.rawValue
+                )
+            }
+            applyAtomicGroupCoupling(edits: edits, verdicts: &verdicts, language: language)
+            applySentenceCoupledRevert(edits: edits, verdicts: &verdicts, language: language)
+            tokens = materialize(baseline: baseline, candidate: candidate, edits: edits, verdicts: verdicts)
         }
     }
 

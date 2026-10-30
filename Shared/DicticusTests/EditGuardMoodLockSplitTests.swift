@@ -204,6 +204,26 @@ final class EditGuardParticleInversionTests: XCTestCase {
             "Also sind meine Erdbeeren dieses Jahr früh dran.")
     }
 
+    /// Spike item 19 shape: a subject token holding a digit is not tokenized as
+    /// a word, and the pass must still see it as the dictated word behind the
+    /// particle.
+    func testR12_digitBearingSubject_RED() {
+        assertInversionRejected(
+            "Also Beet3 ist wieder frei für die Setzlinge.",
+            "Also ist Beet3 wieder frei für die Setzlinge.")
+    }
+
+    /// Spike item 99 shape: the LLM splits an earlier sentence, so its
+    /// sentence indices run one ahead of the dictation's from there on. The
+    /// pass pairs sentences by content, not by index.
+    func testR13_earlierSentenceSplitShiftsIndices_RED() {
+        let baseline = "Ich habe gestern die Beete gegossen und dann kam der Regen. Also ich kann heute nicht mehr jäten."
+        let r = run("de", baseline, "Ich habe gestern die Beete gegossen. Dann kam der Regen. Also kann ich heute nicht mehr jäten.")
+        XCTAssertTrue(hasReject(r, "particleInversion"), "\(r.edits)")
+        XCTAssertFalse(r.text.contains("Also kann ich"), r.text)
+        XCTAssertTrue(r.text.contains("Also ich kann heute nicht mehr jäten."), r.text)
+    }
+
     // MARK: - RED: each listed particle
 
     func testR11_also_RED() { particle("Also") }
