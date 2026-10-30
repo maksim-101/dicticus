@@ -112,6 +112,8 @@ final class EditGuardTests: XCTestCase {
         let fixture = try requireFixture("fx-mov-content-de-moodlock-falsepos")
         let result = EditGuard.apply(rulesCleaned: fixture.baseline, llmOutput: fixture.candidate, language: fixture.language, lexicon: TestSpellLexicon.allKnown)
         XCTAssertEqual(result.text, fixture.expectedText, "the sentence still starts with 'Also' — mood-lock must not fire")
+        XCTAssertTrue(result.edits.contains { $0.rejectClass == "particleInversion" }, "\(result.edits)")
+        XCTAssertFalse(result.edits.contains { $0.rejectClass == "moodLockSentenceInitialVerb" }, "\(result.edits)")
     }
 
     // MARK: - D-03: digit hard lock

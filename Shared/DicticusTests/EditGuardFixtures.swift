@@ -1547,12 +1547,15 @@ enum EditGuardFixtures {
             language: "de",
             baseline: "Also ich möchte das gerne besprechen.",
             candidate: "Also möchte ich das gerne besprechen.",
-            expectedText: "Also möchte ich das gerne besprechen.",
+            expectedText: "Also ich möchte das gerne besprechen.",
             editKind: .move, tokenClass: .contentWord, position: .interior,
-            expectedVerdict: .accept, expectedClass: "wordOrderRepair",
+            expectedVerdict: .reject, expectedClass: "particleInversion",
             note: "D-04: '\"Also ich möchte…\" -> \"Also möchte ich…\" ... the " +
                 "mood-lock must NOT fire here (the sentence still starts with " +
-                "\"Also\") — the mood-lock's false-positive guard.'"
+                "\"Also\") — the mood-lock's false-positive guard.' Owner " +
+                "decision 2026-10-30 (spike 021): the inversion changes \"also\" " +
+                "from a discourse marker to \"therefore\" and is now rejected " +
+                "as particleInversion; the mood lock still must not fire."
         ),
         Fixture(
             id: "fx-mov-content-de-fronting",

@@ -315,6 +315,26 @@ public enum EditGuard {
         /// it. Accept to reject only; `pauseSplitMerge` deletes are left
         /// alone. NOT a member of `sentenceRevertTriggerClasses`.
         case punctuationSeamCoupling
+        /// Quick task 261030-orz (spike 021): assigned by the particle-inversion
+        /// pass in `rebuild` to the accepted word moves of a German sentence
+        /// whose dictated text opens with a run of the particles also, ja,
+        /// doch, und, aber and whose rebuilt text puts a finite-or-modal verb
+        /// directly after that run in place of the dictated word. Why: the
+        /// move turns a discourse marker into a consequence adverb (`Also ich
+        /// habe` means "well, I have", `Also habe ich` means "therefore I
+        /// have"). Evidence by spike-021 item number: logged LLM outputs
+        /// 17-29 Oct (items 20, 71, 89, 99) were reverted only by other
+        /// rejections in the same sentence; in a replay with the current
+        /// prompt (arm A0) items 58 and 71 reached the cursor. `dann` and `so`
+        /// are not leaders: as sentence-initial adverbs they require
+        /// verb-second order, so blocking them would reject correct repairs.
+        /// NOT a member of `sentenceRevertTriggerClasses`: rejecting the moves
+        /// restores the dictated order exactly, and the sentence's other
+        /// accepted edits (commas, case repairs, which spike 021 counted as
+        /// good next to the inversion in items 46 and 110) do not depend on
+        /// it. Unlike the mood lock there is no paired punctuation half to
+        /// revert.
+        case particleInversion
     }
 
     /// The log-shaped record: one classified edit, ready to serialize
@@ -4314,6 +4334,90 @@ public enum EditGuard {
         return false
     }
 
+    /// Quick task 261030-orz (owner list 2026-10-30, `dann` and `so` dropped by
+    /// the orchestrator): sentence-opening words after which a fronted finite
+    /// verb changes the meaning of the sentence.
+    private static let particleInversionLeaders: Set<String> = ["also", "ja", "doch", "und", "aber"]
+
+    /// Walks one sentence's tokens from its first token: consumes leader
+    /// words and commas, stops at anything else. Returns the consumed leader
+    /// words in order and the position (in `sentence`) of the word that
+    /// follows the run, or `nil` when the run holds no leader or no word
+    /// follows it.
+    private static func particleRun(
+        _ sentence: [(normalized: String, kind: TokenKind, text: String)]
+    ) -> (leaders: [String], postIndex: Int)? {
+        var leaders: [String] = []
+        var i = 0
+        while i < sentence.count {
+            let t = sentence[i]
+            if t.kind == .punctuation, t.text == "," {
+                i += 1
+            } else if t.kind == .word, particleInversionLeaders.contains(t.normalized) {
+                leaders.append(t.normalized)
+                i += 1
+            } else {
+                break
+            }
+        }
+        guard !leaders.isEmpty, i < sentence.count, sentence[i].kind == .word else { return nil }
+        return (leaders, i)
+    }
+
+    /// Quick task 261030-orz: rejects a German word-order move that puts a
+    /// finite-or-modal verb directly behind a sentence-opening particle run
+    /// in place of the dictated word (`Also ich habe` -> `Also habe ich`).
+    /// Fires only when the word now behind the run is a dictated word that
+    /// moved forward, so an accepted inflection repair right there
+    /// (`ein` -> `eine`) is left alone. Same two bounded attempts per
+    /// sentence as the mood lock.
+    private static func applyParticleInversionLock(
+        baseline: [Token], candidate: [Token], edits: [Edit],
+        verdicts: inout [ClassifiedEdit], tokens: inout [WorkToken], language: String
+    ) {
+        if language.prefix(2).lowercased() == "en" { return }
+        let sentenceIndices = Set(baseline.map(\.sentenceIndex)).union(candidate.map(\.sentenceIndex))
+        for sentenceIndex in sentenceIndices.sorted() {
+            let baselineSentence = baseline.filter { $0.sentenceIndex == sentenceIndex }
+            guard let baselineRun = particleRun(baselineSentence.map { ($0.normalized, $0.kind, $0.text) }) else { continue }
+            let dictatedAfterRun = Set(
+                baselineSentence[baselineRun.postIndex...].filter { $0.kind == .word }.map(\.normalized)
+            )
+            let dictatedFirst = baselineSentence[baselineRun.postIndex].normalized
+
+            for attempt in 0..<2 {
+                let indexed = tokens.enumerated().filter { $0.element.sentenceIndex == sentenceIndex }
+                guard let rebuiltRun = particleRun(indexed.map { ($0.element.normalized, $0.element.kind, $0.element.text) }),
+                      rebuiltRun.leaders == baselineRun.leaders else { break }
+                let rebuiltIndex = indexed[rebuiltRun.postIndex].offset
+                let verb = tokens[rebuiltIndex]
+                guard verb.normalized != dictatedFirst,
+                      dictatedAfterRun.contains(verb.normalized),
+                      FiniteVerbCues.isFiniteOrModal(verb.normalized, language: language),
+                      !verbKeptBaselineOrder(rebuiltIndex: rebuiltIndex, tokens: tokens, baseline: baseline)
+                else { break }
+
+                for i in edits.indices {
+                    let touchesSentence = edits[i].from?.sentenceIndex == sentenceIndex || edits[i].to?.sentenceIndex == sentenceIndex
+                    guard touchesSentence, verdicts[i].accepted else { continue }
+                    if attempt == 0 {
+                        guard edits[i].kind == .move else { continue }
+                    } else {
+                        guard edits[i].kind != .keep else { continue }
+                    }
+                    verdicts[i] = ClassifiedEdit(
+                        kind: verdicts[i].kind, from: verdicts[i].from, to: verdicts[i].to,
+                        accepted: false, acceptClass: nil,
+                        rejectClass: RejectionClass.particleInversion.rawValue
+                    )
+                }
+                applyAtomicGroupCoupling(edits: edits, verdicts: &verdicts, language: language)
+                applySentenceCoupledRevert(edits: edits, verdicts: &verdicts, language: language)
+                tokens = materialize(baseline: baseline, candidate: candidate, edits: edits, verdicts: verdicts)
+            }
+        }
+    }
+
     /// Diffs already computed (`edits`) and classified (`classified`)
     /// elsewhere — `rebuild` reconstructs the final text from the baseline
     /// plus only the approved edits, and runs the mood-lock second pass
@@ -4443,6 +4547,13 @@ public enum EditGuard {
                 }
             }
         }
+
+        // Runs after the mood lock so that sentences the mood lock already
+        // handles (an interjection plus comma, F1) keep its class.
+        applyParticleInversionLock(
+            baseline: baseline, candidate: candidate, edits: edits,
+            verdicts: &verdicts, tokens: &tokens, language: language
+        )
 
         guard multisetInvariantHolds(edits: edits, verdicts: verdicts, output: tokens) else {
             return nil

@@ -98,3 +98,183 @@ final class EditGuardMoodLockSplitTests: XCTestCase {
         assertMoodLockFired(result)
     }
 }
+
+/// Quick task 261030-orz (spike 021): a German word-order move that puts the
+/// finite verb in front of the subject directly after a sentence-opening
+/// particle (`Also ich habe` -> `Also habe ich`) turns "well, I have" into
+/// "therefore I have", and `classifyMove` accepted it as `wordOrderRepair`.
+/// EditGuard now rejects those moves as `particleInversion`.
+///
+/// `_RED` in a name means the test fails at the start commit; every other test
+/// is a pin that must hold before and after the change. The mutation that
+/// turns every RED test red is an empty `particleInversionLeaders` set.
+///
+/// The leader list is the owner's 2026-10-30 list minus `dann` and `so`: as
+/// sentence-initial adverbs they require verb-second order in standard
+/// German, so blocking them would reject correct repairs.
+///
+/// Every fixture is an invented sentence about an allotment garden; spike
+/// items are cited by number only.
+@MainActor
+final class EditGuardParticleInversionTests: XCTestCase {
+
+    private func run(_ lang: String, _ baseline: String, _ llm: String) -> EditGuard.GuardResult {
+        let r = EditGuard.apply(rulesCleaned: baseline, llmOutput: llm, language: lang, lexicon: TestSpellLexicon.allKnown)
+        let v = EditGuardMergeAtomicityTests.neitherSourceViolations(output: r.text, sourceA: baseline, sourceB: llm)
+        XCTAssertTrue(v.tier1.isEmpty, "tier-1 neither-source violation(s) \(v.tier1) in: \(r.text)")
+        return r
+    }
+
+    private func hasReject(_ r: EditGuard.GuardResult, _ cls: String) -> Bool {
+        r.edits.contains { $0.rejectClass == cls }
+    }
+
+    private func assertInversionRejected(
+        _ baseline: String, _ llm: String, expected: String? = nil, message: String = "",
+        file: StaticString = #filePath, line: UInt = #line
+    ) {
+        let r = run("de", baseline, llm)
+        XCTAssertEqual(r.text, expected ?? baseline, message, file: file, line: line)
+        XCTAssertTrue(hasReject(r, "particleInversion"), "\(message) \(r.edits)", file: file, line: line)
+        XCTAssertFalse(hasReject(r, "moodLockSentenceInitialVerb"), "\(message) \(r.edits)", file: file, line: line)
+    }
+
+    // MARK: - RED: the nine spike-021 shapes
+
+    func testR1_pronounSubject_RED() {
+        assertInversionRejected(
+            "Also ich habe die Tomaten heute früh gegossen.",
+            "Also habe ich die Tomaten heute früh gegossen.")
+    }
+
+    func testR2_demonstrativeSubject_RED() {
+        assertInversionRejected(
+            "Also das ist der dritte Versuch mit den Bohnen.",
+            "Also ist das der dritte Versuch mit den Bohnen.")
+    }
+
+    func testR3_oneTokenSubject_RED() {
+        assertInversionRejected(
+            "Also Regen ist für morgen angekündigt.",
+            "Also ist Regen für morgen angekündigt.")
+    }
+
+    func testR4_fullVerbOverThreeWordSubject_RED() {
+        assertInversionRejected(
+            "Also die neue Regentonne scheint dicht zu sein, auch wenn sie gestern noch tropfte.",
+            "Also scheint die neue Regentonne dicht zu sein, auch wenn sie gestern noch tropfte.")
+    }
+
+    func testR5_chainedParticlesWithComma_RED() {
+        assertInversionRejected(
+            "Ja, also die hinteren Beete solltest du vor dem Winter umgraben.",
+            "Ja, also solltest du die hinteren Beete vor dem Winter umgraben.")
+    }
+
+    func testR6_secondSentenceKeepsFirstSentenceRepair_RED() {
+        assertInversionRejected(
+            "Der Zaun braucht ein neuen Anstrich. Also wir wollen heute nicht alles auf einmal streichen.",
+            "Der Zaun braucht einen neuen Anstrich. Also wollen wir heute nicht alles auf einmal streichen.",
+            expected: "Der Zaun braucht einen neuen Anstrich. Also wir wollen heute nicht alles auf einmal streichen.")
+    }
+
+    func testR7_doch_RED() {
+        assertInversionRejected(
+            "Der Schlauch schien geflickt. Doch ich bin noch einmal zum Wasserhahn gegangen.",
+            "Der Schlauch schien geflickt. Doch bin ich noch einmal zum Wasserhahn gegangen.")
+    }
+
+    func testR8_passiveAuxiliary_RED() {
+        assertInversionRejected(
+            "Also das Saatgut wird erst am Freitag geliefert.",
+            "Also wird das Saatgut erst am Freitag geliefert.")
+    }
+
+    func testR9_afterAnotherSentence_RED() {
+        assertInversionRejected(
+            "Die Pumpe läuft nicht mehr. Also ich kann heute kein Beet mehr wässern.",
+            "Die Pumpe läuft nicht mehr. Also kann ich heute kein Beet mehr wässern.")
+    }
+
+    /// `meine` tests finite by suspicion in `FiniteVerbCues`; the rule must not
+    /// require a non-finite subject word.
+    func testR10_determinerSubjectEndingInE_RED() {
+        assertInversionRejected(
+            "Also meine Erdbeeren sind dieses Jahr früh dran.",
+            "Also sind meine Erdbeeren dieses Jahr früh dran.")
+    }
+
+    // MARK: - RED: each listed particle
+
+    func testR11_also_RED() { particle("Also") }
+    func testR11_ja_RED() { particle("Ja") }
+    func testR11_doch_RED() { particle("Doch") }
+    func testR11_und_RED() { particle("Und") }
+    func testR11_aber_RED() { particle("Aber") }
+
+    private func particle(_ p: String, file: StaticString = #filePath, line: UInt = #line) {
+        assertInversionRejected(
+            "\(p) ich habe den Rasen gemäht.",
+            "\(p) habe ich den Rasen gemäht.",
+            message: "particle \(p):", file: file, line: line)
+    }
+
+    // MARK: - Pins
+
+    /// A comma the LLM inserts after the particle is not a word-order change.
+    func testP1_commaAfterParticleShips() {
+        let llm = "Also, das ist der dritte Versuch mit den Bohnen."
+        let r = run("de", "Also das ist der dritte Versuch mit den Bohnen.", llm)
+        XCTAssertEqual(r.text, llm)
+        XCTAssertFalse(hasReject(r, "particleInversion"), "\(r.edits)")
+    }
+
+    /// OD-3: a verb-second repair with no leading particle stays accepted.
+    func testP2_noParticleRepairShips() {
+        let llm = "Heute habe ich die Beete gegossen."
+        let r = run("de", "Heute ich habe die Beete gegossen.", llm)
+        XCTAssertEqual(r.text, llm)
+        XCTAssertFalse(hasReject(r, "particleInversion"), "\(r.edits)")
+        XCTAssertTrue(r.edits.contains { $0.acceptClass == "wordOrderRepair" }, "\(r.edits)")
+    }
+
+    /// The word after the particle stays in place, so the pass does not fire.
+    func testP3_wordAfterParticleUnchangedShips() {
+        let llm = "Aber im Herbst ernten wir die Kürbisse."
+        let r = run("de", "Aber im Herbst wir ernten die Kürbisse.", llm)
+        XCTAssertEqual(r.text, llm)
+        XCTAssertFalse(hasReject(r, "particleInversion"), "\(r.edits)")
+        XCTAssertTrue(r.edits.contains { $0.acceptClass == "wordOrderRepair" }, "\(r.edits)")
+    }
+
+    func testP4_englishIsUntouched() {
+        let r = run("en", "So I have watered the beds.", "So have I watered the beds.")
+        XCTAssertFalse(hasReject(r, "particleInversion"), "\(r.edits)")
+    }
+
+    /// An accepted inflection repair right after the particle puts a word the
+    /// dictation does not hold in that slot; the pass fires only on a dictated
+    /// word moved forward.
+    func testP5_inflectionRepairAfterParticleShips() {
+        let llm = "Also eine Frage habe ich noch zum Kompost."
+        let r = run("de", "Also ein Frage habe ich noch zum Kompost.", llm)
+        XCTAssertEqual(r.text, llm)
+        XCTAssertFalse(hasReject(r, "particleInversion"), "\(r.edits)")
+    }
+
+    /// `dann` and `so` are not leaders: after them standard German requires the
+    /// verb in second position, so this repair is correct and ships.
+    func testP6_dannIsNotALeader() {
+        let llm = "Dann gehe ich morgen zum Baumarkt."
+        let r = run("de", "Dann ich gehe morgen zum Baumarkt.", llm)
+        XCTAssertFalse(hasReject(r, "particleInversion"), "\(r.edits)")
+        XCTAssertEqual(r.text, llm)
+    }
+
+    func testP7_soIsNotALeader() {
+        let llm = "So habe ich die Beete angelegt."
+        let r = run("de", "So ich habe die Beete angelegt.", llm)
+        XCTAssertFalse(hasReject(r, "particleInversion"), "\(r.edits)")
+        XCTAssertEqual(r.text, llm)
+    }
+}

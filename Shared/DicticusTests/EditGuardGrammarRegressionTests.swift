@@ -206,6 +206,15 @@ final class EditGuardGrammarRegressionTests: XCTestCase {
     /// scratch-test precedent), deleted in this commit. No other fixture's
     /// accepted `wordOrderRepair` count changed; all 3 named German
     /// verb-order repairs (sind/ist/werden) below remain preserved.
+    ///
+    /// UPDATED 261030-orz: 16 -> 15. Lost repair:
+    /// `fx-mov-content-de-moodlock-falsepos` (-1; `Also ich möchte` ->
+    /// `Also möchte ich` is now rejected as `particleInversion`, owner
+    /// decision 2026-10-30, spike 021). Measured via a temporary per-fixture
+    /// print of the accepted `wordOrderRepair` count, run once with the
+    /// particle set emptied and once restored, deleted in this commit. No
+    /// other fixture's count changed; all 3 named German verb-order repairs
+    /// below remain preserved.
     func testRepairYieldFloor_wordOrderRepairsPreserved() {
         var acceptedWordOrderRepairs = 0
         for fixture in EditGuardFixtures.all {
@@ -219,6 +228,6 @@ final class EditGuardGrammarRegressionTests: XCTestCase {
                 $0.acceptClass == EditGuard.AcceptClass.wordOrderRepair.rawValue
             }.count
         }
-        XCTAssertEqual(acceptedWordOrderRepairs, 16, "post-fix repair-yield floor (49.6): 17->16 drop traces to fx-d01-bundled-repair-and-corruption-de alone; all 3 named German verb-order repairs preserved")
+        XCTAssertEqual(acceptedWordOrderRepairs, 15, "repair-yield floor (261030-orz): 16->15 drop traces to fx-mov-content-de-moodlock-falsepos alone; all 3 named German verb-order repairs preserved")
     }
 }
