@@ -129,4 +129,35 @@ final class CleanupPromptVariantTests: XCTestCase {
             XCTAssertTrue(rulePriority.hasSuffix("<|im_start|>assistant\n<corrected_text>"))
         }
     }
+
+    // MARK: - Quick task 261030-orz: filler examples are gate fillers
+
+    /// The prompt tells the model which words are "pure filler". EditGuard
+    /// rejects the deletion of any word `FillerWordRemover` keeps, so naming
+    /// such a word only produces a rejected edit (104 rejected deletions in a
+    /// replay of 119 German dictations, spike 021).
+    func testPromptFillerExamplesAreGateFillers() {
+        let lists: [(language: String, marker: String, allowed: Set<String>)] = [
+            ("de", "Füllwörter (", FillerWordRemover.germanFillers),
+            ("en", "filler (", FillerWordRemover.englishFillers),
+        ]
+        for (language, marker, allowed) in lists {
+            for variant in CleanupPrompt.Variant.allCases {
+                for context in DictationContext.allCases {
+                    for swiss in [true, false] {
+                        let prompt = CleanupPrompt.build(text: "x", language: language, useSwissGerman: swiss, variant: variant, context: context)
+                        let parts = prompt.components(separatedBy: marker)
+                        XCTAssertGreaterThan(parts.count, 1, "no filler example list found: \(language) \(variant) \(context) swiss=\(swiss)")
+                        for part in parts.dropFirst() {
+                            let list = part.prefix { $0 != ")" }
+                            for word in list.components(separatedBy: ", ") {
+                                XCTAssertTrue(allowed.contains(word),
+                                              "prompt names '\(word)' as filler but the gate keeps it: \(language) \(variant) \(context) swiss=\(swiss)")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
