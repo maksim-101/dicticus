@@ -149,8 +149,8 @@ final class EditGuardParticleInversionTests: XCTestCase {
 
     func testR2_demonstrativeSubject_RED() {
         assertInversionRejected(
-            "Also das ist der dritte Versuch mit den Bohnen.",
-            "Also ist das der dritte Versuch mit den Bohnen.")
+            "Also das war die zweite Ernte von den Bohnen.",
+            "Also war das die zweite Ernte von den Bohnen.")
     }
 
     func testR3_oneTokenSubject_RED() {
@@ -167,8 +167,8 @@ final class EditGuardParticleInversionTests: XCTestCase {
 
     func testR5_chainedParticlesWithComma_RED() {
         assertInversionRejected(
-            "Ja, also die hinteren Beete solltest du vor dem Winter umgraben.",
-            "Ja, also solltest du die hinteren Beete vor dem Winter umgraben.")
+            "Ja, also die vorderen Beete sollst du vor dem Frost abdecken.",
+            "Ja, also sollst du die vorderen Beete vor dem Frost abdecken.")
     }
 
     func testR6_secondSentenceKeepsFirstSentenceRepair_RED() {
@@ -243,8 +243,8 @@ final class EditGuardParticleInversionTests: XCTestCase {
 
     /// A comma the LLM inserts after the particle is not a word-order change.
     func testP1_commaAfterParticleShips() {
-        let llm = "Also, das ist der dritte Versuch mit den Bohnen."
-        let r = run("de", "Also das ist der dritte Versuch mit den Bohnen.", llm)
+        let llm = "Also, das war die zweite Ernte von den Bohnen."
+        let r = run("de", "Also das war die zweite Ernte von den Bohnen.", llm)
         XCTAssertEqual(r.text, llm)
         XCTAssertFalse(hasReject(r, "particleInversion"), "\(r.edits)")
     }
