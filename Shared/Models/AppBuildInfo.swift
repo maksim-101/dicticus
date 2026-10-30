@@ -26,6 +26,8 @@ enum AppBuildInfo {
     }
 
     static let recentChanges: [String] = platformChanges + [
+        "Fixed: German AI cleanup no longer moves the verb in front of the subject after a sentence-opening also, ja, doch, und or aber",
+        "Changed: AI cleanup instructions name only the filler words EditGuard actually removes",
         "Fixed: German \"ein\" and \"einen\" are no longer turned into the digit 1 after an abbreviation such as KI or a word such as Runde",
         "Fixed: AI cleanup no longer capitalizes the word after a period it tried to turn into a comma",
         "Changed: AI cleanup keeps a word the spell checker does not know as dictated unless the replacement is a dictionary term",
