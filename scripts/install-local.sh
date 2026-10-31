@@ -33,6 +33,7 @@ CANONICAL_APP="/Applications/Dicticus.app"
 BUILD_APP="$PROJECT_DIR/build/Build/Products/Release/Dicticus.app"
 RECORDER_APP="$PROJECT_DIR/build/Build/Products/Debug-Recorder/Dicticus.app"
 DEBUG_APP="$PROJECT_DIR/build/Build/Products/Debug/Dicticus.app"
+RECORDER_TEST_APP="$PROJECT_DIR/build/Build/Products/Debug-Recorder-Test/Dicticus.app"
 SIGNING_ID="${DEVID_SIGNING_HASH:?DEVID_SIGNING_HASH is not set (see env.build.example)}"
 ENTITLEMENTS="$PROJECT_DIR/Dicticus/Dicticus.entitlements"
 TRASH_DIR="$HOME/.Trash"
@@ -206,7 +207,7 @@ echo "=== Step 5c: Remove build artifacts to prevent LaunchServices identity con
 # unsigned build artifact. If both that copy and the signed /Applications copy
 # exist simultaneously, macOS TCC sees conflicting signing identities for the
 # same bundle ID and invalidates permissions on every restart.
-for artifact in "$BUILD_APP" "$RECORDER_APP" "$DEBUG_APP"; do
+for artifact in "$BUILD_APP" "$RECORDER_APP" "$DEBUG_APP" "$RECORDER_TEST_APP"; do
     if [ -d "$artifact" ]; then
         echo "  Unregistering: $artifact"
         "$LSREGISTER" -u "$artifact" 2>/dev/null || true

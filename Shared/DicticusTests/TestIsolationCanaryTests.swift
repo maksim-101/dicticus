@@ -84,6 +84,10 @@ final class TestIsolationCanaryTests: XCTestCase {
         let redirected = DebugRecorder.shared.directoryURL.standardizedFileURL
         XCTAssertEqual(redirected, DicticusTestBootstrap.recorderDirectory.standardizedFileURL)
         XCTAssertNotEqual(redirected, real?.standardizedFileURL)
+        XCTAssertEqual(
+            FilenameMangleProbe.shared.directoryURL.standardizedFileURL,
+            DicticusTestBootstrap.recorderDirectory.standardizedFileURL
+        )
     }
 #endif
 

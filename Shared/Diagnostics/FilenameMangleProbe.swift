@@ -37,11 +37,15 @@ public actor FilenameMangleProbe {
 
     public static let shared = FilenameMangleProbe()
 
-    private let directoryURL: URL
+    nonisolated let directoryURL: URL
     private let retentionDays: Int = 14
     private var hasPurgedThisLaunch = false
 
     private init() {
+        if let override = DebugRecorder.directoryOverrideForTesting {
+            self.directoryURL = override
+            return
+        }
         let fm = FileManager.default
         let appSupport = (try? fm.url(
             for: .applicationSupportDirectory,
