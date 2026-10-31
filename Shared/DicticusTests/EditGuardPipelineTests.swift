@@ -382,7 +382,10 @@ final class EditGuardPipelineTests: XCTestCase {
             .deletingLastPathComponent() // DicticusTests
             .deletingLastPathComponent() // Shared
             .deletingLastPathComponent() // repo root
-            .appendingPathComponent(".planning/phases/44-cleanup-fidelity-guard/corpus-snapshot/cleanup-2026-07-11.jsonl")
+            .appendingPathComponent(".planning/milestones/v2.5-phases/44-cleanup-fidelity-guard/corpus-snapshot/cleanup-2026-07-11.jsonl")
+        // .planning/ is untracked, so a fresh clone has no snapshot to decode.
+        try XCTSkipUnless(FileManager.default.fileExists(atPath: corpusURL.path),
+                          "corpus snapshot not present at \(corpusURL.path)")
 
         let contents = try String(contentsOf: corpusURL, encoding: .utf8)
         let lines = contents.split(separator: "\n").map(String.init).filter { !$0.isEmpty }
