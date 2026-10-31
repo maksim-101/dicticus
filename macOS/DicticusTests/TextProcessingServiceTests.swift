@@ -233,12 +233,12 @@ final class TextProcessingServiceTests: XCTestCase {
     /// with non-nil LLM fields — the no-regression invariant for the
     /// existing AI write path.
     ///
-    /// NOTE: this test appends to the user's REAL DebugRecordings file at
-    /// ~/Library/Application Support/Dicticus/DebugRecordings/ — it is
-    /// only compiled when the `DEBUG_RECORDER` flag is set (the Debug-
-    /// Recorder scheme), never in the public release. Each run uses a
-    /// unique probe substring so reruns do not produce false positives
-    /// from prior runs' lines.
+    /// NOTE: this test appends to the per-run temp DebugRecordings directory
+    /// (`DicticusTestBootstrap.recorderDirectory`, quick 261031-nil), never the
+    /// user's real corpus. It is only compiled when the `DEBUG_RECORDER` flag
+    /// is set (the Debug-Recorder scheme), never in the public release. Each
+    /// run uses a unique probe substring so reruns do not produce false
+    /// positives from prior runs' lines.
     func testPlainModeWritesDebugRecord() async throws {
         let svc = TextProcessingService(cleanupService: nil, historyService: testHistory)
         let probe = "phase25-02-plain-probe-\(UUID().uuidString.prefix(8))"
@@ -248,9 +248,7 @@ final class TextProcessingServiceTests: XCTestCase {
         // Allow the DebugRecorder actor a tick to flush its append.
         try await Task.sleep(nanoseconds: 100_000_000)
 
-        let dir = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Dicticus/DebugRecordings", isDirectory: true)
+        let dir = DicticusTestBootstrap.recorderDirectory
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
         f.timeZone = TimeZone(secondsFromGMT: 0)
@@ -290,9 +288,7 @@ final class TextProcessingServiceTests: XCTestCase {
 
         try await Task.sleep(nanoseconds: 100_000_000)
 
-        let dir = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Dicticus/DebugRecordings", isDirectory: true)
+        let dir = DicticusTestBootstrap.recorderDirectory
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
         f.timeZone = TimeZone(secondsFromGMT: 0)
@@ -324,9 +320,7 @@ final class TextProcessingServiceTests: XCTestCase {
 
         try await Task.sleep(nanoseconds: 100_000_000)
 
-        let dir = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Dicticus/DebugRecordings", isDirectory: true)
+        let dir = DicticusTestBootstrap.recorderDirectory
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
         f.timeZone = TimeZone(secondsFromGMT: 0)
@@ -358,9 +352,7 @@ final class TextProcessingServiceTests: XCTestCase {
 
         try await Task.sleep(nanoseconds: 100_000_000)
 
-        let dir = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Dicticus/DebugRecordings", isDirectory: true)
+        let dir = DicticusTestBootstrap.recorderDirectory
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
         f.timeZone = TimeZone(secondsFromGMT: 0)
@@ -399,9 +391,7 @@ final class TextProcessingServiceTests: XCTestCase {
 
         try await Task.sleep(nanoseconds: 150_000_000)  // 150ms — DebugRecorder actor flush
 
-        let dir = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Dicticus/DebugRecordings", isDirectory: true)
+        let dir = DicticusTestBootstrap.recorderDirectory
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
         f.timeZone = TimeZone(secondsFromGMT: 0)
@@ -434,9 +424,7 @@ final class TextProcessingServiceTests: XCTestCase {
 
         try await Task.sleep(nanoseconds: 200_000_000)  // 200ms — both actor flushes
 
-        let dir = FileManager.default
-            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Dicticus/DebugRecordings", isDirectory: true)
+        let dir = DicticusTestBootstrap.recorderDirectory
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
         f.timeZone = TimeZone(secondsFromGMT: 0)
