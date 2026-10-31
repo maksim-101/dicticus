@@ -367,6 +367,14 @@ class CleanupService: ObservableObject, CleanupProvider {
     /// Harmless for the currently-shipping Qwen2.5: these two strings are
     /// ordinary text there and never appear in its output, so the stop check
     /// never fires — zero behaviour change for the shipping model.
+    ///
+    /// Quick 261031-d7g: "</corrected_text>" added as an early stop. Spike 022
+    /// (LFM3-1.7B) kept generating after the envelope close; stripPreamble
+    /// already drops everything after the tag, so pasted text is unchanged and
+    /// the stop only saves decode budget and timeout headroom. runInference's
+    /// final strip removes the tag itself, so the llmRaw debug trace ends
+    /// before it. Only the exact compact form stops generation; mangled forms
+    /// are still cut by extractEnvelopeOrFallback.
     // nonisolated: read from inside the detached inference Task (Pitfall 7 —
     // same reasoning as the unsafeModel/unsafeContext/unsafeSampler captures
     // above). A `let` array of Sendable Strings is safe to read from any
@@ -374,7 +382,7 @@ class CleanupService: ObservableObject, CleanupProvider {
     nonisolated static let stopSequences: [String] = [
         "<|im_end|>", "<|im_start|>",
         "Please provide", "Based on", "Glossary:", "Examples:",
-        "<think>", "</think>"
+        "<think>", "</think>", "</corrected_text>"
     ]
 
     /// Phase 44 Plan 09 (T-44-25): model-gated decision for
@@ -1086,7 +1094,10 @@ class CleanupService: ObservableObject, CleanupProvider {
     /// (closing tag passed through verbatim, deferred to Plan 06's NLD/Jaccard
     /// safety net). Plan 25.1-04 (V18C, 2026-05-18) and Plan 25.1-05 (V19C) made
     /// pre-fill the *normal* output shape, so this is now the dominant path —
-    /// stripping the closing tag is required, not optional.
+    /// stripping the closing tag is required, not optional. Since quick
+    /// 261031-d7g, runInference already cuts the live output at the exact
+    /// closing tag, so the live path reaches Case 4; Case 3 remains for
+    /// whitespace-mangled closing tags and direct stripPreamble callers.
     private static func extractEnvelopeOrFallback(_ text: String) -> String {
         // Whitespace-tolerant tag patterns (D-06). Spaces are permitted inside angle
         // brackets so that BPE-mangled forms like "< corrected_text >" are recognised.
