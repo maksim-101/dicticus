@@ -16,6 +16,10 @@ configs:
   Debug: debug
   Release: release
   Debug-Recorder: debug
+  # Test-action-only config (quick 261031-nil): Debug-Recorder flags with the
+  # test-host bundle id, so the Dicticus-Debug-Recorder Test action never
+  # launches a host under the production id or writes its .standard domain.
+  Debug-Recorder-Test: debug
 
 packages:
   WhisperKit:
@@ -109,6 +113,9 @@ targets:
           PRODUCT_BUNDLE_IDENTIFIER: com.dicticus.app.xctest
         Debug-Recorder:
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG DEBUG_RECORDER PERSONAL_LEXICON"
+        Debug-Recorder-Test:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG DEBUG_RECORDER PERSONAL_LEXICON"
+          PRODUCT_BUNDLE_IDENTIFIER: com.dicticus.app.xctest
     dependencies:
       - package: WhisperKit
         product: WhisperKit
@@ -158,6 +165,8 @@ targets:
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG PERSONAL_LEXICON"
         Debug-Recorder:
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG DEBUG_RECORDER PERSONAL_LEXICON"
+        Debug-Recorder-Test:
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG DEBUG_RECORDER PERSONAL_LEXICON"
     dependencies:
       - target: Dicticus
       - package: KeyboardShortcuts
@@ -180,7 +189,7 @@ schemes:
     run:
       config: Debug-Recorder
     test:
-      config: Debug-Recorder
+      config: Debug-Recorder-Test
       targets:
         - DicticusTests
     profile:

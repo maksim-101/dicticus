@@ -1,8 +1,10 @@
 import XCTest
 @testable import Dicticus
 
-/// Guards the 2026-07-24 test-isolation fix (quick task 260724-9v8). These four
-/// tests must ALL pass on every `xcodebuild test` invocation, including a plain
+/// Guards the 2026-07-24 test-isolation fix (quick task 260724-9v8) and the
+/// 2026-10-31 Debug-Recorder extension (quick task 261031-nil: the
+/// `Dicticus-Debug-Recorder` scheme now runs these on a `.xctest` host and
+/// redirects the DebugRecordings output). These tests must ALL pass on every `xcodebuild test` invocation, including a plain
 /// invocation with NO custom CLI settings — the isolation must be a property of
 /// the build configuration and the test bundle's runtime, not of a CLI flag that
 /// can silently stop applying (as happened on 2026-07-24).
@@ -66,6 +68,24 @@ final class TestIsolationCanaryTests: XCTestCase {
             "Sentinel leaked into the REAL dictionary domain — test isolation is broken."
         )
     }
+
+#if DEBUG_RECORDER
+    /// Recorder output under test goes to the bootstrap's temp directory, never
+    /// the real Application Support corpus. Reads the URL only; never records.
+    func testDebugRecordingsRedirectedToTestDirectory() {
+        let real = (try? FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: false
+        ))?
+            .appendingPathComponent("Dicticus", isDirectory: true)
+            .appendingPathComponent("DebugRecordings", isDirectory: true)
+        let redirected = DebugRecorder.shared.directoryURL.standardizedFileURL
+        XCTAssertEqual(redirected, DicticusTestBootstrap.recorderDirectory.standardizedFileURL)
+        XCTAssertNotEqual(redirected, real?.standardizedFileURL)
+    }
+#endif
 
 #if os(macOS)
     /// The unsigned test host must never claim the production bundle id — that

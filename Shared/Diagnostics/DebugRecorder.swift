@@ -448,7 +448,13 @@ public actor DebugRecorder {
 
     public static let shared = DebugRecorder()
 
-    private let directoryURL: URL
+    /// Nil in production. `DicticusTestBootstrap` sets it before any test touches
+    /// `.shared` (mirrors `DicticusDefaults.overrideForTesting`); exists because
+    /// DEBUG_RECORDER test runs wrote fixture JSONL into the real corpus
+    /// (todo 2026-09-01, quick 261031-nil).
+    public nonisolated(unsafe) static var directoryOverrideForTesting: URL?
+
+    nonisolated let directoryURL: URL
     private let retentionDays: Int = 14
     private var hasPurgedThisLaunch = false
     private var emissionCounter: Int = 0
@@ -457,6 +463,10 @@ public actor DebugRecorder {
     public private(set) var lastRecordForTests: DebugCleanupRecord?
 
     private init() {
+        if let override = Self.directoryOverrideForTesting {
+            self.directoryURL = override
+            return
+        }
         let fm = FileManager.default
         let appSupport = (try? fm.url(
             for: .applicationSupportDirectory,
