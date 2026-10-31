@@ -55,6 +55,13 @@ final class ReasoningLeakTests: XCTestCase {
         XCTAssertTrue(CleanupService.stopSequences.contains("</think>"))
     }
 
+    // MARK: - Envelope early stop (quick 261031-d7g)
+
+    func testStopSequencesContainCorrectedTextClose() {
+        XCTAssertTrue(CleanupService.stopSequences.contains("</corrected_text>"),
+                      "spike 022: a model that runs on after the envelope close must be stopped at the closing tag")
+    }
+
     // MARK: - Layer (a): the model-gated preclose
 
     func testPreCloseIsModelGated() {
