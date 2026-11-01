@@ -26,6 +26,7 @@ enum AppBuildInfo {
     }
 
     static let recentChanges: [String] = platformChanges + [
+        "Changed: plain dictation ends with a period when the text ends in a word or number",
         "Removed: settings that had no effect, such as Voice edit commands",
         "Fixed: German AI cleanup no longer moves the verb in front of the subject after a sentence-opening also, ja, doch, und or aber",
         "Changed: AI cleanup instructions name only the filler words EditGuard actually removes",
