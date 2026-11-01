@@ -15,15 +15,7 @@ struct SettingsView: View {
                         Label("Spoken Punctuation", systemImage: "character.textbox")
                     }
 
-                    Toggle(isOn: appGroupBinding("useCustomDictionary", default: true)) {
-                        Label("Apply Replacements", systemImage: "character.cursor.ibeam")
-                    }
-
-                    Toggle(isOn: appGroupBinding("useITN", default: true)) {
-                        Label("Numbers to Digits", systemImage: "number")
-                    }
-
-                    Toggle(isOn: appGroupBinding("useAutoStop", default: true)) {
+                    Toggle(isOn: appGroupBinding("useAutoStop", default: false)) {
                         Label("Auto-Stop Recording", systemImage: "stop.circle")
                     }
                 }

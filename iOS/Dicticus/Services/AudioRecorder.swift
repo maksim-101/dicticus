@@ -129,7 +129,7 @@ final class AudioRecorder: AudioRecording {
     private(set) var isRecording = false
 
     @AppStorage("useAutoStop", store: DicticusIPCBridge.defaults)
-    var useAutoStop = true
+    var useAutoStop = false
 
     let autoStopSilenceSeconds: Double = 2.5
     let autoStopGracePeriod: Double = 3.0

@@ -25,13 +25,8 @@ final class DeepLinkRouterTests: XCTestCase {
             "Recognizing the Live Activity link must bump dictateTabRequestCount so ContentView force-selects the Dictate tab")
     }
 
-    /// Critical boundary: the navigation-only link must never be confused
-    /// with `dicticus://dictate`, which starts a NEW recording via
-    /// pendingDictation (WR-03). Conflating the two would either (a) fail to
-    /// navigate on a genuine Live Activity tap, or worse (b) make a Live
-    /// Activity tap spontaneously start a recording — exactly the class of
-    /// bug the pendingDictationSetAt staleness guard (0a18fb2) exists to
-    /// prevent.
+    /// The `dicticus://dictate` record-start route was removed (261101-f91) and
+    /// must stay inert: the router ignores it and no recording starts from a URL.
     func testHandleLiveActivityTap_DoesNotRecognizeStartDictationURL() {
         let router = DeepLinkRouter.shared
         let before = router.dictateTabRequestCount
@@ -41,7 +36,7 @@ final class DeepLinkRouterTests: XCTestCase {
 
         XCTAssertFalse(recognized, "dicticus://dictate must NOT be treated as the Live Activity navigation link")
         XCTAssertEqual(router.dictateTabRequestCount, before,
-            "dicticus://dictate must not bump dictateTabRequestCount — that path never touches DeepLinkRouter")
+            "dicticus://dictate must not bump dictateTabRequestCount")
     }
 
     func testHandleLiveActivityTap_IgnoresUnrelatedScheme() {

@@ -87,12 +87,6 @@ final class IOSTranscriptionServiceTests: XCTestCase {
         XCTAssertEqual(service.silenceThreshold, IOSTranscriptionService.vadProbabilityThreshold, accuracy: 0.001)
     }
 
-    func testPostProcessingTogglesDefaultToTrue() async throws {
-        let service = try await makeServiceOrSkip()
-        XCTAssertTrue(service.useCustomDictionary)
-        XCTAssertTrue(service.useITN)
-    }
-
     private func makeServiceOrSkip() async throws -> IOSTranscriptionService {
         try XCTSkipUnless(
             IOSTranscriptionService.isModelAvailable(),

@@ -49,11 +49,6 @@ struct AiCleanupSection: View {
 
     @AppStorage("aiCleanupEnabled", store: appGroupDefaults) private var aiCleanupEnabled: Bool = false
     @AppStorage("useSwissGerman", store: appGroupDefaults) private var useSwissGerman: Bool = true
-    // Phase 39/D-07: user-facing escape hatch for the scratch-command
-    // voice-edit feature — same `enableVoiceCommands` key TextProcessingService
-    // reads via DicticusDefaults.suite. NOT the safety mechanism; the
-    // compile-time gate flags in SelfCorrectionResolver govern shipping.
-    @AppStorage("enableVoiceCommands", store: appGroupDefaults) private var enableVoiceCommands: Bool = true
 
     // MARK: - Body
 
@@ -82,12 +77,6 @@ struct AiCleanupSection: View {
             // Swiss toggle is ALWAYS visible (D-15) — orthogonal to AI Cleanup
             // and operates on plain dictation (\u{00DF} \u{2192} ss).
             swissGermanToggle
-
-            // Phase 39/D-07: voice-commands toggle is ALWAYS visible, like the
-            // Swiss toggle above — a user whose text is being unexpectedly
-            // edited must be able to find the escape hatch even in a
-            // degraded state (e.g. AI Cleanup unsupported/unavailable).
-            voiceCommandsToggle
         } header: {
             Text("AI Cleanup")
         } footer: {
@@ -125,12 +114,6 @@ struct AiCleanupSection: View {
     private var swissGermanToggle: some View {
         Toggle(isOn: $useSwissGerman) {
             Label("Swiss German Spelling", systemImage: "character.bubble")
-        }
-    }
-
-    private var voiceCommandsToggle: some View {
-        Toggle(isOn: $enableVoiceCommands) {
-            Label("Voice Edit Commands", systemImage: "scissors")
         }
     }
 

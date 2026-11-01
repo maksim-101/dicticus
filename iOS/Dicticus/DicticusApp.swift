@@ -68,28 +68,9 @@ struct DicticusApp: App {
                     .environmentObject(viewModel)
                     .environmentObject(PendingRecordingStore.shared)
                     .onOpenURL { url in
-                        if url.scheme == "dicticus" && url.host == "dictate" {
-                            // WR-03: only set the App Group flag — do NOT also post .startDictation.
-                            // Posting both causes a double-start race: the notification fires
-                            // startDictation() at T=0, then scenePhase .active fires at T=~0
-                            // which calls handleForeground(pendingDictation:true) →
-                            // checkPendingIntent() → a second startDictation() at T=500ms.
-                            // Relying solely on the flag means the single scenePhase path owns
-                            // the start, with the 500ms sleep giving the audio session time to settle.
-                            DicticusIPCBridge.defaults?.set(true, forKey: "pendingDictation")
-                            // 46-03: staleness stamp so a process death before
-                            // checkPendingIntent() consumes this flag cannot
-                            // spontaneously start a recording on a later,
-                            // unrelated relaunch — see
-                            // DictationViewModel.pendingDictationStalenessSeconds.
-                            DicticusIPCBridge.defaults?.set(Date().timeIntervalSince1970, forKey: "pendingDictationSetAt")
-                        } else {
-                            // Live Activity body tap (dicticus://liveactivity). Navigation
-                            // only — must NOT set pendingDictation or start a recording.
-                            // See DeepLinkRouter's doc comment. handleLiveActivityTap
-                            // no-ops for any other/unknown URL.
-                            DeepLinkRouter.shared.handleLiveActivityTap(url)
-                        }
+                        // Only the Live Activity link is handled; recordings start
+                        // through DictateIntent (Action Button / Shortcuts).
+                        DeepLinkRouter.shared.handleLiveActivityTap(url)
                     }
                     .sheet(isPresented: $showingOnboardingTour, onDismiss: {
                         hasSeenOnboardingTour = true

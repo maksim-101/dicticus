@@ -51,11 +51,6 @@ protocol TranscriptionProviding: AnyObject {
 @MainActor
 final class IOSTranscriptionService: TranscriptionProviding {
 
-    @AppStorage("useCustomDictionary", store: DicticusIPCBridge.defaults)
-    var useCustomDictionary = true
-    @AppStorage("useITN", store: DicticusIPCBridge.defaults)
-    var useITN = true
-
     // MARK: - Configuration
 
     static let vadProbabilityThreshold: Float = 0.75
@@ -172,15 +167,12 @@ final class IOSTranscriptionService: TranscriptionProviding {
 
         let detectedLanguage = detectLanguage(processedText)
 
-        // Post-processing: Custom Dictionary
-        if useCustomDictionary {
-            processedText = DictionaryService.shared.apply(to: processedText)
-        }
-
-        // Post-processing: ITN (Inverse Text Normalization)
-        if useITN {
-            processedText = ITNUtility.applyITN(to: processedText, language: detectedLanguage)
-        }
+        // Post-processing: Custom Dictionary, then ITN (Inverse Text Normalization).
+        // Stays unconditional: TextProcessingService builds EditGuard's dictProtected
+        // set from its own dictionary trace, so dropping this pre-pass would change
+        // which edits the guard protects on the AI-cleanup path.
+        processedText = DictionaryService.shared.apply(to: processedText)
+        processedText = ITNUtility.applyITN(to: processedText, language: detectedLanguage)
 
         // Post-processing: conservative filler-strip (D-04, Phase 47.1). Parakeet emits
         // raw standalone disfluencies ("um"/"uh"/"äh") that WhisperKit's seq2seq LM

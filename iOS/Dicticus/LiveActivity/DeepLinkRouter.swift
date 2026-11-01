@@ -1,9 +1,8 @@
 import Foundation
 
 /// Routes the Live Activity's tap-through deep link (`dicticus://liveactivity`)
-/// to a force-select of the Dictate tab, entirely separate from the existing
-/// `dicticus://dictate` mechanism that starts a new recording (see
-/// DicticusApp.onOpenURL, WR-03).
+/// to a force-select of the Dictate tab. Recordings start through
+/// `DictateIntent` (Action Button / Shortcuts), not through any URL.
 ///
 /// This type owns ONLY navigation. It deliberately never touches
 /// `pendingDictation` / `DicticusIPCBridge` — a stale `pendingDictation` flag
@@ -28,8 +27,7 @@ final class DeepLinkRouter: ObservableObject {
 
     /// Returns `true` and bumps `dictateTabRequestCount` if `url` is the
     /// Live Activity's navigation-only deep link. Returns `false` (no side
-    /// effect) for any other URL, including `dicticus://dictate` — that case
-    /// is handled entirely by the caller's existing pendingDictation logic.
+    /// effect) for any other URL, including the removed record-start link.
     @discardableResult
     func handleLiveActivityTap(_ url: URL) -> Bool {
         guard url.scheme == "dicticus", url.host == "liveactivity" else { return false }
@@ -37,8 +35,8 @@ final class DeepLinkRouter: ObservableObject {
         return true
     }
 
-    /// Forces the Dictate tab for a genuine record-first launch (the `dicticus://dictate`
-    /// deep link or `DictateIntent`/Action Button start) — 260815-ait Fix 2. Shares
+    /// Forces the Dictate tab for a genuine record-first launch (the
+    /// `DictateIntent`/Action Button start) — 260815-ait Fix 2. Shares
     /// `dictateTabRequestCount` with `handleLiveActivityTap` so ContentView's existing
     /// onAppear/onChange hook handles both triggers with one mechanism. Callers must only
     /// invoke this once a pending record-first intent is confirmed genuine (not stale,
