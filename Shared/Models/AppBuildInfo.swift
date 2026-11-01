@@ -26,6 +26,7 @@ enum AppBuildInfo {
     }
 
     static let recentChanges: [String] = platformChanges + [
+        "Removed: settings that had no effect, such as Voice edit commands",
         "Fixed: German AI cleanup no longer moves the verb in front of the subject after a sentence-opening also, ja, doch, und or aber",
         "Changed: AI cleanup instructions name only the filler words EditGuard actually removes",
         "Fixed: German \"ein\" and \"einen\" are no longer turned into the digit 1 after an abbreviation such as KI or a word such as Runde",
@@ -52,6 +53,7 @@ enum AppBuildInfo {
     ]
     #else
     private static let platformChanges = [
+        "Changed: Auto-Stop Recording is off by default, so a pause no longer ends a dictation (Settings → Transcriptions)",
         "Changed: dictation uses the more accurate Parakeet Ultra speech model (one-time download, about 630 MB)",
     ]
     #endif
