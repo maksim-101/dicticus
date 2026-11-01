@@ -14,8 +14,8 @@ import Foundation
 ///   2. `macOS/Dicticus/DicticusApp.swift` — first line of the `.task`
 ///      modifier on `MenuBarExtra`, before `permissionManager.checkAll()`
 ///      and `warmupService.warmup()`.
-///   3. `macOS/Dicticus/Views/SwissGermanToggleRow.swift` — first line of
-///      `currentValue()` static helper (B4 self-heal — view-construction
+///   3. `macOS/Dicticus/Views/AiCleanupPane.swift` — first line of
+///      `SwissGermanFormRow.currentValue()` (B4 self-heal — view-construction
 ///      may race ahead of `MenuBarExtra.task` on first render).
 ///
 /// Must run BEFORE any service that reads `useSwissGerman`

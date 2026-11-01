@@ -3,13 +3,11 @@ import AppKit
 
 /// Settings → AI Cleanup pane.
 ///
-/// Group "Model": model name row + LLM status + Configure Prompt button.
+/// Group "Model": model name, LLM status, idle unload.
 /// Group "Language": Swiss German toggle (app-local UserDefaults on macOS).
-///
-/// Relocates content from AiCleanupInfoView + SwissGermanToggleRow per UIORG-04.
+/// Group "Context-Aware Formatting": on/off toggle and per-app overrides.
 struct AiCleanupPane: View {
     @EnvironmentObject var warmupService: ModelWarmupService
-    @State private var showPromptEditor = false
 
     var body: some View {
         Form {
@@ -20,24 +18,11 @@ struct AiCleanupPane: View {
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel(warmupService.llmStatus == .ready ? "Model ready" : warmupService.llmStatus.label)
 
-                LabeledContent("Cleanup prompt") {
-                    Button("Configure…") {
-                        showPromptEditor.toggle()
-                    }
-                    .popover(isPresented: $showPromptEditor, arrowEdge: .trailing) {
-                        PromptEditorView(isPresented: $showPromptEditor)
-                    }
-                }
-
                 IdleUnloadFormRow()
             }
 
             Section("Language") {
                 SwissGermanFormRow()
-            }
-
-            Section("Voice Commands") {
-                VoiceCommandsFormRow()
             }
 
             Section("Context-Aware Formatting") {
@@ -127,34 +112,6 @@ private struct IdleUnloadFormRow: View {
         .onChange(of: minutes) { _, newValue in
             DicticusDefaults.suite.set(newValue, forKey: ModelWarmupService.idleUnloadDefaultsKey)
         }
-    }
-}
-
-/// Voice edit commands toggle row (Phase 39/D-07) — a UX escape hatch for
-/// users who dictate ABOUT editing, not the safety mechanism. Always
-/// visible, unconditionally, like `SwissGermanFormRow`, so a user whose
-/// text is being unexpectedly edited can find the escape hatch even in a
-/// degraded state.
-///
-/// Backs the `enableVoiceCommands` key in app-local UserDefaults on macOS
-/// — the same key `TextProcessingService` reads via `DicticusDefaults.suite`.
-private struct VoiceCommandsFormRow: View {
-    private static let appGroupDefaults = UserDefaults.standard
-
-    @State private var isOn: Bool = VoiceCommandsFormRow.currentValue()
-
-    private static func currentValue() -> Bool {
-        let defaults = appGroupDefaults
-        return defaults.object(forKey: "enableVoiceCommands") == nil
-            ? true
-            : defaults.bool(forKey: "enableVoiceCommands")
-    }
-
-    var body: some View {
-        Toggle("Voice edit commands (e.g. \u{201C}scratch that\u{201D})", isOn: $isOn)
-            .onChange(of: isOn) { _, newValue in
-                Self.appGroupDefaults.set(newValue, forKey: "enableVoiceCommands")
-            }
     }
 }
 

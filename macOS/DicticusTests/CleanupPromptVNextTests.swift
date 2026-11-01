@@ -12,11 +12,6 @@ import XCTest
 @MainActor
 final class CleanupPromptVNextTests: XCTestCase {
 
-    override func tearDown() {
-        UserDefaults.standard.removeObject(forKey: CleanupPrompt.customInstructionKey)
-        super.tearDown()
-    }
-
     // MARK: - Task 1: EN branch + ChatML frame + few-shot-free skeleton
 
     func testEnPromptIsFewShotFree() {

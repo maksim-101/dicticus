@@ -25,12 +25,6 @@ struct DicticusApp: App {
     // TextProcessingService orchestrates Dictionary, ITN, and CleanupService.
     @State private var textProcessingService: TextProcessingService?
 
-    // Phase 20.08 D-02: openWindow accessor for the DEBUG-only Cleanup Spike
-    // command. Declared at the App level so the .commands menu entry below can
-    // imperatively open the spike window. Always available; only the menu
-    // entry that uses it is gated by #if DEBUG.
-    @Environment(\.openWindow) private var openWindow
-
     // Stage Manager fix (Finding 5): track how many auxiliary windows (Dictionary,
     // History, Settings) are currently open. When the count goes 0→1 we promote to
     // .regular so Stage Manager groups these windows under a real app identity (with a
@@ -184,29 +178,6 @@ struct DicticusApp: App {
                 .environmentObject(modifierListener)
                 .environmentObject(updater)
         }
-
-#if DEBUG
-        // Phase 20.08 D-02: prompt-spike harness for AI-cleanup A/B comparison.
-        // DEBUG-only — kept behind #if DEBUG for future LLM-prompt iterations
-        // rather than removed after Phase 20.08 ships (D-Discretion).
-        WindowGroup("Cleanup Spike", id: "cleanup-spike") {
-            if let cleanup = cleanupService {
-                CleanupSpikeView()
-                    .environmentObject(cleanup)
-            } else {
-                Text("CleanupService not loaded yet — wait for warmup.")
-                    .padding()
-            }
-        }
-        .commands {
-            CommandGroup(after: .windowList) {
-                Button("Cleanup Spike (Debug)…") {
-                    openWindow(id: "cleanup-spike")
-                }
-                .keyboardShortcut("k", modifiers: [.command, .shift, .option])
-            }
-        }
-#endif
     }
 
     /// Menu bar icon view — uses a colored NSImage for recording (isTemplate=false bypasses

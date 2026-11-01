@@ -82,7 +82,6 @@ import NaturalLanguage
 /// output tags).
 struct CleanupPrompt {
 
-    static let customInstructionKey = "cleanupInstruction"
     static let defaultInstruction = "Conservative Transcriptionist cleanup of dictated speech (v-transcriptionist: few-shot-free, no brave meaning-repair mandate — Whisper owns mishearing repair; one unambiguous self-correction rule; Qwen ChatML framing; safety enforced by the deterministic divergence gate, not the prompt alone)."
 
     /// Phase 28 WR-02: single source of truth for the prompt-variant tag

@@ -17,11 +17,6 @@ import XCTest
 /// lives in Shared/, not per-platform, so there is only one copy).
 final class CleanupPromptVariantTests: XCTestCase {
 
-    override func tearDown() {
-        UserDefaults.standard.removeObject(forKey: CleanupPrompt.customInstructionKey)
-        super.tearDown()
-    }
-
     // MARK: - D-09 attribution lock
 
     func testDefaultBuildIsUnchanged() {

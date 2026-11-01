@@ -33,12 +33,6 @@ import XCTest
 /// cross-platform parity convention (Shared/ changes ship macOS + iOS together).
 final class CleanupPromptTests: XCTestCase {
 
-    override func tearDown() {
-        // Clear any custom instruction between tests
-        UserDefaults.standard.removeObject(forKey: CleanupPrompt.customInstructionKey)
-        super.tearDown()
-    }
-
     // MARK: - R-03: Known-terms dictionary injection removed at source
 
     func testKnownTermsBlockNotEmitted() {
