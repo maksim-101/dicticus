@@ -1308,7 +1308,7 @@ final class DictationViewModelTests: XCTestCase {
         // TextProcessingService.process() applies deterministic sentence-initial
         // capitalization, so the persisted text is "Fake transcript", not the raw
         // "fake transcript" the fake transcriber returned.
-        XCTAssertEqual(testHistory.entries.first?.text, "Fake transcript")
+        XCTAssertEqual(testHistory.entries.first?.text, "Fake transcript.")
         XCTAssertEqual(testStore.pendingRecordings.count, 0, "The pending row must be gone after a successful drain")
         XCTAssertFalse(FileManager.default.fileExists(atPath: wavURL.path),
                        "The WAV must be deleted once its transcript is saved (D-02)")
@@ -1344,7 +1344,7 @@ final class DictationViewModelTests: XCTestCase {
         XCTAssertEqual(fakeTranscriber.callCount, 1, "Inline transcription must run exactly once")
         XCTAssertEqual(testHistory.entries.count, 1, "Exactly one TranscriptionEntry — not two")
         // Sentence-initial capitalization is applied by TextProcessingService.process().
-        XCTAssertEqual(clipboardValue, "Fake transcript", "Foreground inline delivery must write the clipboard")
+        XCTAssertEqual(clipboardValue, "Fake transcript.", "Foreground inline delivery must write the clipboard")
         XCTAssertEqual(testStore.pendingRecordings.count, 0,
                        "The pending row must be resolved (deleted) once delivered inline, not left queued")
 
@@ -1539,7 +1539,7 @@ final class DictationViewModelTests: XCTestCase {
 
         XCTAssertEqual(fakeTranscriber.callCount, 2, "Both queued rows must be transcribed")
         let orderedTexts = testHistory.entries.sorted(by: { $0.createdAt < $1.createdAt }).map(\.text)
-        XCTAssertEqual(orderedTexts, ["First spoken", "Second spoken"],
+        XCTAssertEqual(orderedTexts, ["First spoken.", "Second spoken."],
                        "History entries must match the two fakes in ARRIVAL order, compared as an ordered array")
         XCTAssertEqual(testStore.pendingRecordings.count, 0, "Both rows must be resolved")
 
@@ -1630,7 +1630,7 @@ final class DictationViewModelTests: XCTestCase {
         await vm.retryPendingRecording(failedRow)
 
         XCTAssertEqual(testHistory.entries.count, 1)
-        XCTAssertEqual(testHistory.entries.first?.text, "Recovered on retry")
+        XCTAssertEqual(testHistory.entries.first?.text, "Recovered on retry.")
         XCTAssertEqual(testStore.pendingRecordings.count, 0, "Store must be empty after a successful retry")
         XCTAssertFalse(FileManager.default.fileExists(atPath: fileURL.path), "WAV must be gone after a successful retry")
 
@@ -1694,7 +1694,7 @@ final class DictationViewModelTests: XCTestCase {
         await vm.retryPendingRecording(row)
 
         XCTAssertEqual(testHistory.entries.count, 1)
-        XCTAssertEqual(testHistory.entries.first?.text, "Recovered after timeout")
+        XCTAssertEqual(testHistory.entries.first?.text, "Recovered after timeout.")
         XCTAssertEqual(testStore.pendingRecordings.count, 0)
 
         // Cleanup

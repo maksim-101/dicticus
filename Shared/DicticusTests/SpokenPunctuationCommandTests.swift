@@ -203,19 +203,19 @@ final class SpokenPunctuationCommandTests: XCTestCase {
     func testPipelinePlainLineBreak_RED() async {
         let mock = MockProvider()
         let out = await service(mock).process(text: "Dear team new line the garden plan is ready", language: "en", mode: .plain)
-        XCTAssertEqual(out, "Dear team\nthe garden plan is ready")
+        XCTAssertEqual(out, "Dear team\nthe garden plan is ready.")
     }
 
     func testPipelinePlainQuestionMark_RED() async {
         let mock = MockProvider()
         let out = await service(mock).process(text: "Are you coming question mark. yes we are", language: "en", mode: .plain)
-        XCTAssertEqual(out, "Are you coming? Yes we are")
+        XCTAssertEqual(out, "Are you coming? Yes we are.")
     }
 
     func testPipelinePlainSemicolon_RED() async {
         let mock = MockProvider()
         let out = await service(mock).process(text: "first part semicolon second part", language: "en", mode: .plain)
-        XCTAssertEqual(out, "First part; second part")
+        XCTAssertEqual(out, "First part; second part.")
     }
 
     func testPipelineAiEchoKeepsOneLineBreak_RED() async {

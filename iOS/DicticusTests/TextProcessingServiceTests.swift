@@ -78,7 +78,7 @@ final class TextProcessingServiceTests: XCTestCase {
         // Expected: "I have a bird" -> "I have a one hundred" (Dictionary) -> "I have a 100" (ITN)
         let output = await service.process(text: input, language: "en", mode: .plain)
 
-        XCTAssertEqual(output, "I have a 100")
+        XCTAssertEqual(output, "I have a 100.")
     }
 
     func testGermanPipeline() async {
@@ -88,7 +88,7 @@ final class TextProcessingServiceTests: XCTestCase {
         // Expected: "Ich habe einen Apfel" -> "Ich habe einen einhundert" -> "Ich habe einen 100"
         let output = await service.process(text: input, language: "de", mode: .plain)
 
-        XCTAssertEqual(output, "Ich habe einen 100")
+        XCTAssertEqual(output, "Ich habe einen 100.")
     }
 
     // MARK: - D-23 / CLEAN-01: Cleanup path is wired
