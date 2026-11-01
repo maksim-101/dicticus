@@ -61,20 +61,11 @@ public final class RulesCleanupService {
     ///     self-correction is a genuine repair or part of the user's
     ///     intended phrasing — the resolver's deterministic comma-prefixed
     ///     drop conflicts with V3's "preserve self-corrections" rule.
-    ///   - enableVoiceCommands: Phase 39/D-07 — the user-facing Settings
-    ///     toggle (default ON). Threaded straight through to
-    ///     `SelfCorrectionResolver.resolve(...)`, which gates only the new
-    ///     scratch-command delete evidence source on it. This is a UX
-    ///     escape hatch for users who dictate ABOUT editing — it is NOT
-    ///     the safety mechanism; the compile-time gate flags in
-    ///     `SelfCorrectionResolver` (`enableScratchCommand`,
-    ///     `enableScratchMidUtterance`) are the actual safety mechanism
-    ///     and govern shipping independently of this toggle.
     /// - Returns: cleaned text.
-    public func clean(_ text: String, language: String, skipSelfCorrection: Bool = false, enableVoiceCommands: Bool = true) -> String {
+    public func clean(_ text: String, language: String, skipSelfCorrection: Bool = false) -> String {
         var result = FillerWordRemover.strip(text, language: language)
         if !skipSelfCorrection {
-            result = SelfCorrectionResolver.resolve(result, language: language, enableVoiceCommands: enableVoiceCommands)
+            result = SelfCorrectionResolver.resolve(result, language: language)
         }
         // Currency-fold is gated on `de` (Swiss/German speakers say
         // "Franken Rappen" / "Euro Cent"). The en-mode contract is that

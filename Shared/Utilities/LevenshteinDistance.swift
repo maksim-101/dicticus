@@ -2,11 +2,6 @@ import Foundation
 
 /// Edit distance between two strings, in O(m·n) time and O(min(m,n)) space.
 ///
-/// Phase 20 D-01: this is the signal source for `CleanupService.gateLLMOutput`,
-/// which compares the rules-cleaned text against the LLM output and rejects
-/// the LLM result when the normalized distance exceeds the
-/// `CleanupService.levenshteinGateThreshold` (0.30 of `max(len)`).
-///
 /// Operates on `Character` (extended grapheme clusters) so composed and
 /// decomposed Unicode forms compare correctly when the strings use the same
 /// normalization form. Naive UTF-8 / UTF-16 walking would count multi-byte
@@ -68,9 +63,9 @@ public enum LevenshteinDistance {
     /// as the denominator. Returns `0.0` when both inputs are empty (the 0/0
     /// case must resolve to 0.0, not NaN — implementation contract).
     ///
-    /// The `CleanupService.levenshteinGateThreshold` (0.30) is calibrated
+    /// Callers (BrandMatcher, DictionaryService, EditGuard) are tuned
     /// against this specific normalization. Do not change the denominator
-    /// without re-tuning the gate.
+    /// without re-tuning them.
     public static func normalizedDistance(_ s1: String, _ s2: String) -> Double {
         let d = distance(s1, s2)
         let denom = max(s1.count, s2.count)

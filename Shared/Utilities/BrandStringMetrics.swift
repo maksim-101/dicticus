@@ -13,9 +13,8 @@ import Foundation
 /// matcher in 36.5-04 owns it. Operating on `Character` means a precomposed
 /// `é` (U+00E9) or an umlaut counts as one grapheme, never multiple code units.
 ///
-/// `LevenshteinDistance` is intentionally untouched: it is the calibrated signal
-/// source for `CleanupService.gateLLMOutput`. These metrics live alongside it
-/// rather than modifying it.
+/// `LevenshteinDistance` is intentionally untouched: it keeps its calibrated
+/// normalization. These metrics live alongside it rather than modifying it.
 public enum BrandStringMetrics {
 
     /// Restricted Damerau-Levenshtein distance (Optimal String Alignment / OSA):

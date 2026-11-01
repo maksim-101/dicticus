@@ -132,7 +132,7 @@ class TextProcessingService: ObservableObject {
 
         // Step 1: Dictionary replacements.
         // applyWithTrace is unconditional so dictTrace.replacements can be threaded
-        // into gateContentWords as dictProtected (Step 3a). apply(to:) is a thin
+        // into EditGuard and the post-gate dictionary pass as dictProtected (Step 3a). apply(to:) is a thin
         // wrapper anyway — no overhead difference (DictionaryService D-08).
         let dictTrace = dictionaryService.applyWithTrace(to: text)
         var processedText = dictTrace.text
@@ -234,29 +234,16 @@ class TextProcessingService: ObservableObject {
         // resolver is much narrower — comma-anchored connector + 3-token
         // backward window cap + abort-on-pronoun).
         if mode == .aiCleanup {
-            // Phase 39/D-07: user-facing runtime toggle for the scratch-command
-            // voice-edit feature. Default-ON-when-unset idiom (nil-check
-            // `object(forKey:)` before `bool(forKey:)`) — a bare `bool(forKey:)`
-            // returns `false` for an unset key, which would ship the feature
-            // OFF for every existing user. This is a UX escape hatch, NOT the
-            // safety mechanism — the compile-time gate flags in
-            // SelfCorrectionResolver govern shipping independently of it.
-            let enableVoiceCommands = DicticusDefaults.suite.object(forKey: "enableVoiceCommands") == nil
-                ? true
-                : DicticusDefaults.suite.bool(forKey: "enableVoiceCommands")
             processedText = rulesCleanupService.clean(
                 processedText,
                 language: language,
-                skipSelfCorrection: false,
-                enableVoiceCommands: enableVoiceCommands
+                skipSelfCorrection: false
             )
         }
 
-        // Snapshot for the Step 3a Levenshtein gate. Capturing here means
-        // the gate's reference baseline is the rules-cleaned text (in AI mode)
-        // or the ITN-processed text (in Plain mode). A deliberate scratch-
-        // command deletion above (Phase 39/D-08) is already inside this
-        // baseline — the gate cannot revert it as content-loss.
+        // Snapshot for the Step 3a EditGuard. Capturing here means the
+        // guard's reference baseline is the rules-cleaned text (in AI mode)
+        // or the ITN-processed text (in Plain mode).
         let rulesCleanedText = processedText
         // Seams where the gate restored a mark ahead of a lowercase word the LLM continued (EditGuard.rebuild);
         // stays empty in plain mode, so plain output is unchanged (D-01).

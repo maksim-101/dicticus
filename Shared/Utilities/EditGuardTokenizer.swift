@@ -14,8 +14,8 @@ import Foundation
 /// value change is REJECTED here so `NumberRevert` never sees it.
 ///
 /// `rebuild(tokenize(s)) == s` for all `s` — lossless reconstruction, the
-/// same guarantee `SentenceAligner.splitSentences` already makes at the
-/// sentence level. Whitespace and punctuation ride on `Token.trailing`, not
+/// same guarantee `SelfCorrectionResolver.boundarySentenceSpans` makes at
+/// the sentence level. Whitespace and punctuation ride on `Token.trailing`, not
 /// inline in `Token.text`, so the guard can diff token identity without
 /// noise from surrounding formatting. Merging a punctuation run (below)
 /// preserves this: it only concatenates `Token.text`, leaving every

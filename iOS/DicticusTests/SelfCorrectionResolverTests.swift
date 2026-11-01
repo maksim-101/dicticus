@@ -771,157 +771,81 @@ final class SelfCorrectionResolverTests: XCTestCase {
         )
     }
 
-    // MARK: - Phase 39: scratch-command delete operation (RED until 39-02)
+    // MARK: - Scratch phrases are dictated content
     //
-    // These fixtures pin the exact expected output of
-    // `SelfCorrectionResolver.resolveScratchCommandPath`, the new sibling
-    // pass that does not exist yet (lands in plan 39-02). They are the
-    // SPECIFICATION of correctness for that plan, authored here as
-    // source-of-truth rather than as a description of already-written code
-    // — mirroring this file's own "Wave 0 RED" convention (see the header
-    // comment at the top of this file). Every assertion is a full
-    // `XCTAssertEqual` against an exact expected string — Phase 43 found
-    // that `contains`/`!contains` assertions missed all 17 real
-    // corruptions, and this phase's characteristic failure (a delete
-    // truncated by the comma path's 6-token `actualDrop` cap) is invisible
-    // to a substring check.
+    // There is no scratch-command delete operation: "scratch that" and its
+    // German siblings pass through byte-identical, in every span shape.
+    // ("scratch that" stays a comma-path self-correction connector, see
+    // testEnglishScratchThat.) Every assertion is a full `XCTAssertEqual`
+    // against the exact expected string.
 
-    // MARK: - 39-05 SECOND mitigation, 2026-07-11 (CR-02): enableScratchCommand
-    // ships FULLY DISABLED — every scratch command phrase, in every span
-    // shape, is now pasted literally. This is a whole-feature abstain, not
-    // a narrowing to tail-only: the evidence source has failed its ship
-    // gate TWICE in two successive review passes (CR-01 in `39-REVIEW.md`,
-    // CR-02 in `39-VERIFICATION.md`), and per this project's non-negotiable
-    // rule an evidence source that fails its gate ships DISABLED, not
-    // shipped-and-monitored. Every fixture below that used to assert a
-    // firing delete now asserts byte-identical passthrough. None are
-    // deleted — each doc comment PRESERVES the original enabled-expectation
-    // verbatim so gap closure is a mechanical fixture revert, not a
-    // re-derivation of what each fixture ever meant.
-
-    /// D-04 case 3 (bare command, no continuation, no named span): delete
-    /// the preceding sentence. Period-prefixed, unpunctuated-command tail.
-    ///
-    /// DISABLED 2026-07-11 (enableScratchCommand = false; see CR-01/CR-02
-    /// in the flag's doc comment in SelfCorrectionResolver.swift).
-    /// Asserts passthrough because the gate is off.
-    /// WHEN RE-ENABLED after gap closure, this MUST assert:
-    ///   "The report is done."
-    /// Do not re-enable the flag and leave this asserting passthrough.
-    func testScratchBareCommandDeletesPrecedingSentenceEN() {
+    /// Bare command at the tail after a period.
+    func testScratchBareCommandPassesThroughEN() {
         let input = "The report is done. We ship on Friday. Scratch that."
         XCTAssertEqual(
             SelfCorrectionResolver.resolve(input, language: "en"),
             input,
-            "enableScratchCommand ships false (CR-01/CR-02) — must ABSTAIN, byte-identical"
+            "scratch phrases are dictated content — must pass through byte-identical"
         )
     }
 
-    /// D-04 case 3, German. "Bitte" is the user's own canonical German
-    /// exemplar's polite prefix.
-    ///
-    /// DISABLED 2026-07-11 (enableScratchCommand = false; see CR-01/CR-02).
-    /// Asserts passthrough because the gate is off.
-    /// WHEN RE-ENABLED after gap closure, this MUST assert:
-    ///   "Wir treffen uns um zehn."
-    /// Do not re-enable the flag and leave this asserting passthrough.
-    func testScratchBareCommandDeletesPrecedingSentenceDE() {
+    /// Bare German command with a polite prefix.
+    func testScratchBareCommandPassesThroughDE() {
         let input = "Wir treffen uns um zehn. Das Meeting ist am Montag. Bitte ignoriere den letzten Satz."
         XCTAssertEqual(
             SelfCorrectionResolver.resolve(input, language: "de"),
             input,
-            "enableScratchCommand ships false (CR-01/CR-02) — must ABSTAIN, byte-identical"
+            "scratch phrases are dictated content — must pass through byte-identical"
         )
     }
 
-    /// D-04 case 3, comma-prefixed sub-case: bare command in the same
-    /// sentence as the span it deletes, joined by a comma rather than a
-    /// period.
-    ///
-    /// DISABLED 2026-07-11 (enableScratchCommand = false; see CR-01/CR-02).
-    /// Asserts passthrough because the gate is off.
-    /// WHEN RE-ENABLED after gap closure, this MUST assert:
-    ///   "The report is done."
-    /// Do not re-enable the flag and leave this asserting passthrough.
-    func testScratchCommaPrefixedBareCommandDeletesPrecedingSentenceEN() {
+    /// Comma-prefixed bare command in the same sentence.
+    func testScratchCommaPrefixedBareCommandPassesThroughEN() {
         let input = "The report is done. We ship on Friday, scratch that."
         XCTAssertEqual(
             SelfCorrectionResolver.resolve(input, language: "en"),
             input,
-            "enableScratchCommand ships false (CR-01/CR-02) — must ABSTAIN, byte-identical"
+            "scratch phrases are dictated content — must pass through byte-identical"
         )
     }
 
-    /// D-11 (amends D-04): command followed by a non-backward-aligning
-    /// continuation. Originally asserted a firing delete (the command
-    /// fires anywhere it sits, deleting the preceding sentence and
-    /// keeping everything after).
-    ///
-    /// DISABLED 2026-07-11 (enableScratchCommand = false; see CR-01/CR-02
-    /// — this fixture was already passthrough under the first,
-    /// mid-utterance-only mitigation; it now stays passthrough for the
-    /// stronger reason that the whole evidence source abstains).
-    /// WHEN RE-ENABLED after both CR-01 and CR-02 are fixed and
-    /// `enableScratchMidUtterance` is also restored, this MUST assert:
-    ///   "Let's meet Friday at the office. Let's do a video call instead."
-    /// Do not re-enable the flag and leave this asserting passthrough.
-    func testScratchMidUtteranceKeepsContinuationEN() {
+    /// Command followed by a continuation.
+    func testScratchMidUtterancePassesThroughEN() {
         let input = "Let's meet Friday at the office. Scratch that. Let's do a video call instead."
         XCTAssertEqual(
             SelfCorrectionResolver.resolve(input, language: "en"),
             input,
-            "enableScratchCommand ships false (CR-01/CR-02) — must ABSTAIN, byte-identical"
+            "scratch phrases are dictated content — must pass through byte-identical"
         )
     }
 
-    /// D-11, German. See English sibling above for the corrected-verdict
-    /// rationale.
-    ///
-    /// DISABLED 2026-07-11 (enableScratchCommand = false; see CR-01/CR-02).
-    /// WHEN RE-ENABLED after both CR-01 and CR-02 are fixed and
-    /// `enableScratchMidUtterance` is also restored, this MUST assert:
-    ///   "Wir liefern am Freitag. Wir liefern am Montag."
-    /// Do not re-enable the flag and leave this asserting passthrough.
-    func testScratchMidUtteranceKeepsContinuationDE() {
+    /// German mirror of the mid-utterance case.
+    func testScratchMidUtterancePassesThroughDE() {
         let input = "Wir liefern am Freitag. Streich das. Wir liefern am Montag."
         XCTAssertEqual(
             SelfCorrectionResolver.resolve(input, language: "de"),
             input,
-            "enableScratchCommand ships false (CR-01/CR-02) — must ABSTAIN, byte-identical"
+            "scratch phrases are dictated content — must pass through byte-identical"
         )
     }
 
-    /// D-04 case 2 (command names its span explicitly): named span = last
-    /// sentence.
-    ///
-    /// DISABLED 2026-07-11 (enableScratchCommand = false; see CR-01/CR-02).
-    /// WHEN RE-ENABLED after gap closure, this MUST assert:
-    ///   "We meet at noon."
-    /// Do not re-enable the flag and leave this asserting passthrough.
-    func testScratchNamedSpanLastSentenceEN() {
+    /// Command naming its span explicitly.
+    func testScratchNamedSpanPassesThroughEN() {
         let input = "We meet at noon. The vendor is Acme Corp. Ignore the last sentence."
         XCTAssertEqual(
             SelfCorrectionResolver.resolve(input, language: "en"),
             input,
-            "enableScratchCommand ships false (CR-01/CR-02) — must ABSTAIN, byte-identical"
+            "scratch phrases are dictated content — must pass through byte-identical"
         )
     }
 
-    /// Boundary: one sentence, command at the tail, nothing preceding
-    /// survives the delete — the honest result is the empty string. Pinned
-    /// so a later "helpfully restore the text" patch cannot slip in
-    /// unnoticed.
-    ///
-    /// DISABLED 2026-07-11 (enableScratchCommand = false; see CR-01/CR-02).
-    /// WHEN RE-ENABLED after gap closure, this MUST assert:
-    ///   ""
-    /// Do not re-enable the flag and leave this asserting passthrough.
-    func testScratchWholeUtteranceScratchedYieldsEmptyString() {
+    /// One sentence with the command at the tail.
+    func testScratchWholeUtterancePassesThrough() {
         let input = "We ship on Friday, scratch that."
         XCTAssertEqual(
             SelfCorrectionResolver.resolve(input, language: "en"),
             input,
-            "enableScratchCommand ships false (CR-01/CR-02) — must ABSTAIN, byte-identical"
+            "scratch phrases are dictated content — must pass through byte-identical"
         )
     }
 
@@ -939,9 +863,8 @@ final class SelfCorrectionResolverTests: XCTestCase {
 
     // MARK: - Phase 39: command-vs-literal discrimination (D-05 / VEDIT-02) — must stay byte-identical
     //
-    // These fixtures pass TODAY (the resolver has no scratch-delete
-    // operation yet) and must STILL pass after 39-02 — they are the
-    // tripwire, and per memory feedback_spike_corpus_adversarial_breadth a
+    // These fixtures are the tripwire against a future scratch-delete
+    // operation, and per memory feedback_spike_corpus_adversarial_breadth a
     // narrow corpus once produced a false "zero-corruption" pass that
     // shipped corrupting code. Every assertion is byte-identical passthrough.
 

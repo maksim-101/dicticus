@@ -37,20 +37,17 @@ import NaturalLanguage
 /// benchmark is not a better oracle. `InflectionRules` (44-04) owns
 /// word-identity ownership across inflected forms.
 ///
-/// `@MainActor`: matches `SentenceAligner`'s precedent — `NaturalLanguage`
-/// usage in this codebase is isolated to `@MainActor` call sites.
+/// `@MainActor`: `NaturalLanguage` usage in this codebase is isolated to
+/// `@MainActor` call sites.
 @MainActor
 public enum PosTagger {
 
     // MARK: - Compile-time ship gate
 
     /// Whether `isFunctionWord`'s verdict may WIDEN the closed
-    /// `FunctionWords.isInsertable` allowlist (D-06) in `EditGuard`. Copies
-    /// the `SelfCorrectionResolver.enableScratchCommand` pattern
-    /// (`SelfCorrectionResolver.swift:1450`): a `private(set)` — actually
-    /// `public` here since 44-10 reads it from `EditGuard` — compile-time
-    /// flag gates a call site that stays fully in place,
-    /// reachable-but-disabled.
+    /// `FunctionWords.isInsertable` allowlist (D-06) in `EditGuard`. The
+    /// `EditGuard` call site was removed (261101-f91); the flag and
+    /// `measureAgreement` stay for the local probe tests.
     ///
     /// DEFAULT / SHIPPED VALUE: `false`.
     ///

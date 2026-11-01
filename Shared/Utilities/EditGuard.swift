@@ -15,9 +15,8 @@ import NaturalLanguage
 /// through 44-11) compiles against these exact types, so the surface is
 /// frozen first.
 ///
-/// `@MainActor`: matches `SentenceAligner`'s precedent (it reuses
-/// `CleanupService.tokenizeForDialectGate`, which is `@MainActor`-isolated)
-/// and the `@MainActor` call sites (`TextProcessingService`, the spike-004
+/// `@MainActor`: matches `CleanupService.tokenizeForDialectGate`, which is
+/// `@MainActor`-isolated, and the `@MainActor` call sites (`TextProcessingService`, the spike-004
 /// harness) that will invoke `EditGuard.apply(...)` — avoids Swift 6
 /// strict-concurrency churn later.
 ///
@@ -33,8 +32,7 @@ public enum EditGuard {
     ///
     /// `trailing` is the whitespace/punctuation that followed this token in
     /// the source string, so a token array rebuilds losslessly (mirrors the
-    /// lossless-reconstruction contract `SentenceAligner.splitSentences`
-    /// already guarantees at the sentence level).
+    /// lossless-reconstruction contract of `rebuild(tokenize(s)) == s`).
     public struct Token: Equatable, Sendable {
         /// Surface form, original casing.
         public let text: String
@@ -615,8 +613,8 @@ public enum EditGuard {
     /// Splits BOTH `rulesCleaned` and `llmOutput` into sentence segments
     /// using `SelfCorrectionResolver`'s own regex-based sentence-boundary
     /// splitter (`boundarySentenceSpans`, bumped from `private` to
-    /// package-internal for this reuse) rather than `SentenceAligner`'s
-    /// NLTokenizer-based one: this pipeline's post-ASR text carries
+    /// package-internal for this reuse) rather than an NLTokenizer-based one:
+    /// this pipeline's post-ASR text carries
     /// "a.m."/decimal-point shapes `boundarySentenceSpans` is already built
     /// to protect against splitting on (see its own doc comment).
     ///
@@ -640,15 +638,12 @@ public enum EditGuard {
     /// `nil` (caller falls through to the existing whole-text fail-closed
     /// revert) whenever the two sides split into a DIFFERENT number of
     /// sentences, or into one or fewer — it does not attempt any
-    /// merge/split reconciliation. `SentenceAligner`'s existing
-    /// greedy-monotonic aligner already solves that harder problem for the
-    /// (retired) per-sentence phonetic gate; reusing it here would mean
-    /// running TWO different sentence-boundary definitions against the same
-    /// text for a benefit this task's scope did not ask for, and this
-    /// project's own gate-policy history warns against reaching for without
-    /// measurement (`feedback_spike_corpus_adversarial_breadth`,
-    /// `project_cleanup_fidelity_crisis`). The equal-count case is exactly
-    /// the "SIMPLE CASE" `SentenceAligner` itself documents as its most
+    /// merge/split reconciliation. Running a second sentence-boundary
+    /// definition against the same text would buy a benefit this task's
+    /// scope did not ask for, and this project's own gate-policy history
+    /// warns against reaching for it without measurement
+    /// (`feedback_spike_corpus_adversarial_breadth`,
+    /// `project_cleanup_fidelity_crisis`). The equal-count case is the
     /// common, highest-confidence case.
     private static func applySegmented(
         rulesCleaned: String,
@@ -1649,16 +1644,6 @@ public enum EditGuard {
         }
         if FunctionWords.isInsertable(b.normalized, language: language) {
             return (true, .functionWordInsertion, nil)
-        }
-        // PosTagger widener — dead code while `enableNLTaggerFunctionWidening`
-        // ships `false` (44-07). A `nil` verdict is NEVER coerced to accept.
-        if PosTagger.enableNLTaggerFunctionWidening {
-            let sentenceText = EditGuardTokenizer.rebuild(
-                candidateSentenceWindow(candidate, sentenceIndex: b.sentenceIndex)
-            )
-            if PosTagger.isFunctionWord(b.text, in: sentenceText, language: language) == true {
-                return (true, .functionWordInsertion, nil)
-            }
         }
         return (false, nil, .contentWordInsertion)
     }

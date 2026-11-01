@@ -39,8 +39,7 @@ import Foundation
 /// > modal particle, a wh-adverb, or a noun. If ANY such reading is
 /// > productive in the language, the token is **DUAL-ROLE**: inserting it can
 /// > ASSERT content, and this string-only lookup (no POS awareness —
-/// > `PosTagger.enableNLTaggerFunctionWidening` ships `false`, dead code, see
-/// > `EditGuard.classifyInsert`) cannot tell the two roles apart.
+/// > `PosTagger` is not consulted by `EditGuard.classifyInsert`) cannot tell the two roles apart.
 ///
 /// **Fail closed.** Where the judgment is genuinely close, the token is
 /// treated as dual-role and removed. A missed repair costs a

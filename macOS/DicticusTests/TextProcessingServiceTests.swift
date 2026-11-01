@@ -133,9 +133,8 @@ final class TextProcessingServiceTests: XCTestCase {
     func testBlocksUntilCleaned() async {
         let mock = MockCleanupProvider()
         mock.artificialDelayMs = 250
-        // "Hello world." is gate-compatible with input "hello world":
-        // all content words ≥4 chars ("hello", "world") survive lowercased in
-        // the output tokens, so gateContentWords returns llmOutput unchanged.
+        // "Hello world." differs from input "hello world" only in casing and
+        // punctuation, which EditGuard accepts.
         mock.returnValue = "Hello world."
         let service = TextProcessingService(cleanupService: mock, historyService: testHistory)
 
