@@ -488,6 +488,12 @@ class TextProcessingService: ObservableObject {
             keepLowercaseAfter: keepLowercaseAfter
         )
 
+        // Step 3a.11 (quick 261101-sao): plain-only trailing period. Must stay
+        // before Step 3b so the Swiss formatter sees "2,5." and not "2.5".
+        if mode != .aiCleanup {
+            processedText = TextProcessingService.appendTrailingPeriod(processedText)
+        }
+
         #if DEBUG_RECORDER
         let dbgSwissNumStart = Date()
         #endif
@@ -762,6 +768,35 @@ class TextProcessingService: ObservableObject {
             result.append(c)
         }
         return result
+    }
+
+    /// Quick 261101-sao (owner decision 2026-11-01, spike 023 rule T): the plain
+    /// hotkey ends a dictation with a period when its last character is a
+    /// letter or digit and its last token is not a technical identifier. The
+    /// period goes right after the last non-whitespace character; trailing
+    /// spaces stay after it. Text whose trailing whitespace holds a newline
+    /// (a dictated line break), empty text and text ending in any mark come
+    /// back unchanged.
+    nonisolated static func appendTrailingPeriod(_ text: String) -> String {
+        var coreEnd = text.endIndex
+        while coreEnd > text.startIndex {
+            let prev = text.index(before: coreEnd)
+            if !text[prev].isWhitespace { break }
+            coreEnd = prev
+        }
+        let core = text[..<coreEnd]
+        let trailing = text[coreEnd...]
+        guard let last = core.last else { return text }
+        if trailing.contains(where: { $0.isNewline }) { return text }
+        guard last.isLetter || last.isNumber else { return text }
+        var tokenStart = core.endIndex
+        while tokenStart > core.startIndex {
+            let prev = core.index(before: tokenStart)
+            if core[prev].isWhitespace { break }
+            tokenStart = prev
+        }
+        if looksLikeTechnicalIdentifier(String(core[tokenStart...])) { return text }
+        return String(core) + "." + String(trailing)
     }
 
     /// Phase 38 Plan 01 (D-03, CTXFMT-01): true when `token` looks like a
