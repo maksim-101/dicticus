@@ -617,6 +617,7 @@ class CleanupService: ObservableObject, CleanupProvider {
             let (reasoningStripped, reasoningLeaked) = Self.stripReasoningBlock(result)
             if reasoningLeaked {
                 log.warning("cleanup: <think> reasoning block survived stripReasoningBlock — discarding LLM output, returning rules-cleaned baseline (T-44-25 fail-closed)")
+                Self.lastCleanupOutcome = .failed
                 return text
             }
 
@@ -670,8 +671,13 @@ class CleanupService: ObservableObject, CleanupProvider {
             // satisfied D-14 acceptance criteria. The harness runner remains in-tree
             // (.planning/debug/harness/run_contraction_matrix.py) for future re-runs.
 
+            if cleaned.isEmpty {
+                log.warning("cleanup: LLM output was empty after post-processing (\(result.count, privacy: .public) raw chars) — returning the input")
+                Self.lastCleanupOutcome = .failed
+                return text
+            }
             Self.lastCleanupOutcome = .applied
-            return cleaned.isEmpty ? text : cleaned
+            return cleaned
 
         } catch CleanupError.timeout {
             log.error("cleanup timed out after \(timeout, privacy: .public)s — returning raw text")
@@ -719,7 +725,7 @@ class CleanupService: ObservableObject, CleanupProvider {
         case timedOut         // inference exceeded inferenceTimeoutSeconds
         case notLoaded        // model not loaded / still warming
         case alreadyRunning   // a concurrent cleanup was in progress
-        case failed           // any other inference error
+        case failed           // reasoning leak, empty LLM output, or any other inference error
     }
 
     /// Single-threaded by construction: `cleanup()` rejects concurrent calls (`isInferring`),
@@ -789,8 +795,9 @@ class CleanupService: ObservableObject, CleanupProvider {
         // Reserve room for generation too: the KV cache must hold prompt + generated tokens, or
         // llama_decode starts failing mid-loop and returns a truncated rewrite of the user's text.
         //
-        // Returning "" routes into the existing D-19 fallback (`cleaned.isEmpty ? text : cleaned`),
-        // so an over-long utterance degrades to rules-only text instead of killing the app.
+        // Returning "" routes into cleanup()'s empty-output branch (D-19), which records .failed
+        // and returns the input, so an over-long utterance degrades to rules-only text instead of
+        // killing the app.
         let capacity = Int(Self.contextTokens) - Int(maxTokens)
         guard promptTokens.count <= capacity else {
             let log = Logger(subsystem: "com.dicticus", category: "cleanup")
