@@ -543,6 +543,9 @@ class CleanupService: ObservableObject, CleanupProvider {
             return text
         }
 
+        // Cleared so the empty-output branch below never reads a previous call's exceededContext.
+        Self.lastInferenceStats = InferenceStats()
+
         // Run inference in a detached task with timeout (D-04 iOS / D-18 macOS)
         // nonisolated(unsafe) for C pointer access in detached context (Pitfall 7)
         nonisolated(unsafe) let unsafeModel = model
@@ -673,7 +676,9 @@ class CleanupService: ObservableObject, CleanupProvider {
 
             if cleaned.isEmpty {
                 log.warning("cleanup: LLM output was empty after post-processing (\(result.count, privacy: .public) raw chars) — returning the input")
-                Self.lastCleanupOutcome = .failed
+                // runInference's crash guard returns "" for a prompt over the usable context;
+                // that is a too-long skip, which the AI-cleanup hotkey reports to the user.
+                Self.lastCleanupOutcome = Self.lastInferenceStats.exceededContext ? .skippedTooLong : .failed
                 return text
             }
             Self.lastCleanupOutcome = .applied
@@ -721,7 +726,7 @@ class CleanupService: ObservableObject, CleanupProvider {
     /// the AI-cleanup hotkey deliberately and must know it didn't run).
     enum CleanupOutcome: Sendable {
         case applied          // the LLM cleaned the text
-        case skippedTooLong   // output-budget guard: utterance longer than the model can reproduce
+        case skippedTooLong   // output-budget or context guard: utterance longer than the model can handle
         case timedOut         // inference exceeded inferenceTimeoutSeconds
         case notLoaded        // model not loaded / still warming
         case alreadyRunning   // a concurrent cleanup was in progress
@@ -795,9 +800,9 @@ class CleanupService: ObservableObject, CleanupProvider {
         // Reserve room for generation too: the KV cache must hold prompt + generated tokens, or
         // llama_decode starts failing mid-loop and returns a truncated rewrite of the user's text.
         //
-        // Returning "" routes into cleanup()'s empty-output branch (D-19), which records .failed
-        // and returns the input, so an over-long utterance degrades to rules-only text instead of
-        // killing the app.
+        // Returning "" routes into cleanup()'s empty-output branch (D-19), which records
+        // .skippedTooLong (exceededContext below) and returns the input, so an over-long utterance
+        // degrades to rules-only text instead of killing the app.
         let capacity = Int(Self.contextTokens) - Int(maxTokens)
         guard promptTokens.count <= capacity else {
             let log = Logger(subsystem: "com.dicticus", category: "cleanup")

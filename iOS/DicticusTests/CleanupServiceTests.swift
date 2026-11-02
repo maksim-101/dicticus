@@ -266,6 +266,32 @@ final class CleanupServiceTests: XCTestCase {
         XCTAssertEqual(result, "", diagnostics)
     }
 
+    /// maxOutputTokens == n_ctx leaves no room for the prompt, so runInference's crash guard
+    /// fires; the outcome must be the too-long skip the AI-cleanup hotkey reports, not .failed.
+    func testPromptOverContextRecordsSkippedTooLong() async throws {
+        try XCTSkipUnless(
+            IOSModelDownloadService.isModelCached(),
+            "Cleanup LLM GGUF model not cached — skipping integration test"
+        )
+
+        CleanupService.initializeBackend()
+        let service = CleanupService(inferenceTimeoutSeconds: 30, maxOutputTokens: Int32(CleanupService.contextTokens))
+        try service.loadModel(from: IOSModelDownloadService.modelPath().path)
+
+        CleanupService.lastCleanupOutcome = .applied
+        let input = "we cleaned the chain before the ride"
+        let result = await service.cleanup(text: input, language: "en")
+        let outcome = CleanupService.lastCleanupOutcome
+        let stats = CleanupService.lastInferenceStats
+        let diagnostics = "outcome=\(outcome) generatedTokens=\(stats.generatedTokens) promptTokens=\(stats.promptTokens) exceededContext=\(stats.exceededContext) result=\"\(result)\""
+
+        XCTAssertTrue(stats.exceededContext, diagnostics)
+        if case .skippedTooLong = outcome {} else {
+            XCTFail("a prompt over the usable context must record .skippedTooLong; " + diagnostics)
+        }
+        XCTAssertEqual(result, input, diagnostics)
+    }
+
     // MARK: - Phase 25.1-02: XML envelope extraction (paper §6.2, Class D mitigation)
     //
     // Locks defect class D from 25-03-SUMMARY (2026-05-17 05:36:19 <unk>updating
