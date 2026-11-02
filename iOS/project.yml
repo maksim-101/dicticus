@@ -25,7 +25,8 @@ packages:
     from: 0.17.7
   llama:
     url: https://github.com/mattt/llama.swift.git
-    from: 2.8832.0
+    # Exact: iOS has no tracked Package.resolved, and 2.10549.0 ships no iOS Simulator slice.
+    exactVersion: 2.8914.0
 
 targets:
   Dicticus:
