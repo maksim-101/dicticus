@@ -377,7 +377,7 @@ final class EditGuardCalibrationTests: XCTestCase {
         let lexicon = PlatformSpellLexicon(extraAugmentation: ["MüraX"])
         XCTAssertTrue(lexicon.isKnownWord("MüraX-Verhalten", language: "de"))
         XCTAssertTrue(lexicon.isKnownWord("mürax-verhalten", language: "de"), "constituent match is case-insensitive")
-        XCTAssertFalse(lexicon.isKnownWord("Vaspird-Verhalten", language: "de"), "a compound with NO augmented constituent must not be spuriously protected")
+        XCTAssertFalse(lexicon.isKnownWord("Vaspird-Verhalten", language: "de"), "a compound with NO augmented constituent must not be spuriously protected; checker says Vaspird known: \(lexicon.isKnownWord("Vaspird", language: "de")), Verhalten known: \(lexicon.isKnownWord("Verhalten", language: "de"))")
     }
 
     /// Confirmed corruption from the live-corpus replay

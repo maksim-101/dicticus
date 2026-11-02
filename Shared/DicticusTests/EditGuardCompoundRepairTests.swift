@@ -209,16 +209,17 @@ final class EditGuardCompoundRepairTests: XCTestCase {
             checker.guesses(forWordRange: NSRange(location: 0, length: (w as NSString).length), in: w, language: "de", inSpellDocumentWithTag: 0) ?? []
         }
         func selfListed(_ w: String) -> Bool { completions(w).contains { $0.lowercased() == w.lowercased() } }
+        func probes(_ w: String) -> String { "known=\(known(w)) completions=\(completions(w)) guesses=\(guesses(w))" }
 
-        XCTAssertTrue(known("Schreiweise"))
-        XCTAssertFalse(selfListed("Schreiweise"))
-        XCTAssertTrue(guesses("Schreiweise").contains { $0.lowercased() == "schreibweise" })
-        XCTAssertTrue(known("Schreibweise"))
-        XCTAssertTrue(selfListed("Schreibweise"))
-        XCTAssertTrue(known("Koma"))
-        XCTAssertTrue(selfListed("Koma"))
-        XCTAssertTrue(known("Komma"))
-        XCTAssertTrue(selfListed("Komma"))
+        XCTAssertTrue(known("Schreiweise"), "Schreiweise: \(probes("Schreiweise"))")
+        XCTAssertFalse(selfListed("Schreiweise"), "Schreiweise: \(probes("Schreiweise"))")
+        XCTAssertTrue(guesses("Schreiweise").contains { $0.lowercased() == "schreibweise" }, "Schreiweise: \(probes("Schreiweise"))")
+        XCTAssertTrue(known("Schreibweise"), "Schreibweise: \(probes("Schreibweise"))")
+        XCTAssertTrue(selfListed("Schreibweise"), "Schreibweise: \(probes("Schreibweise"))")
+        XCTAssertTrue(known("Koma"), "Koma: \(probes("Koma"))")
+        XCTAssertTrue(selfListed("Koma"), "Koma: \(probes("Koma"))")
+        XCTAssertTrue(known("Komma"), "Komma: \(probes("Komma"))")
+        XCTAssertTrue(selfListed("Komma"), "Komma: \(probes("Komma"))")
     }
 
     /// Real checker end to end. Residual, measured and not asserted: obscure
