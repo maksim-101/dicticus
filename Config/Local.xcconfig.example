@@ -1,0 +1,2 @@
+// Copy to Config/Local.xcconfig only when the gitignored Shared/Services/PersonalLexicon.swift exists on this machine.
+PERSONAL_LEXICON_FLAG = PERSONAL_LEXICON

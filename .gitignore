@@ -57,6 +57,8 @@ DebugRecordings/
 # so it compiles to zero bytes in Release even when physically present on disk.
 # Must be gitignored BEFORE the file is created (see RESEARCH Pitfall 5).
 Shared/Services/PersonalLexicon.swift
+# Local build settings that switch the personal lexicon on (see Config/Local.xcconfig.example).
+Config/Local.xcconfig
 
 # Agent/executor hermetic scratch (swiftc drivers, etc.)
 scratchpad/

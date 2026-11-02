@@ -21,6 +21,13 @@ configs:
   # launches a host under the production id or writes its .standard domain.
   Debug-Recorder-Test: debug
 
+# The optional local xcconfig supplies PERSONAL_LEXICON_FLAG (see Config/Local.xcconfig.example).
+# Release deliberately has no entry, so the public binary never includes the local hook.
+configFiles:
+  Debug: ../Config/Local.optional.xcconfig
+  Debug-Recorder: ../Config/Local.optional.xcconfig
+  Debug-Recorder-Test: ../Config/Local.optional.xcconfig
+
 packages:
   WhisperKit:
     url: https://github.com/argmaxinc/argmax-oss-swift.git
@@ -99,7 +106,7 @@ targets:
         OTHER_LDFLAGS: "-framework llama"
       configs:
         Debug:
-          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG PERSONAL_LEXICON"
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG $(PERSONAL_LEXICON_FLAG)"
           # 2026-07-24 (quick task 260724-9v8): TCC identity separation. The
           # default "Dicticus" scheme's Test action builds this config (see
           # scheme verification note in DicticusTests target below), and
@@ -112,9 +119,9 @@ targets:
           # grants.
           PRODUCT_BUNDLE_IDENTIFIER: com.dicticus.app.xctest
         Debug-Recorder:
-          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG DEBUG_RECORDER PERSONAL_LEXICON"
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG DEBUG_RECORDER $(PERSONAL_LEXICON_FLAG)"
         Debug-Recorder-Test:
-          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG DEBUG_RECORDER PERSONAL_LEXICON"
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG DEBUG_RECORDER $(PERSONAL_LEXICON_FLAG)"
           PRODUCT_BUNDLE_IDENTIFIER: com.dicticus.app.xctest
     dependencies:
       - package: WhisperKit
@@ -162,11 +169,11 @@ targets:
         INFOPLIST_FILE: DicticusTests/Info.plist
       configs:
         Debug:
-          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG PERSONAL_LEXICON"
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG $(PERSONAL_LEXICON_FLAG)"
         Debug-Recorder:
-          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG DEBUG_RECORDER PERSONAL_LEXICON"
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG DEBUG_RECORDER $(PERSONAL_LEXICON_FLAG)"
         Debug-Recorder-Test:
-          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG DEBUG_RECORDER PERSONAL_LEXICON"
+          SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG DEBUG_RECORDER $(PERSONAL_LEXICON_FLAG)"
     dependencies:
       - target: Dicticus
       - package: KeyboardShortcuts
