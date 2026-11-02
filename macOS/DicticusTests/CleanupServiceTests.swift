@@ -191,38 +191,40 @@ final class CleanupServiceTests: XCTestCase {
 
     // MARK: - Integration tests (require model)
 
-    /// Test actual LLM cleanup with cached model.
-    /// Skipped in CI or on machines without the GGUF model cached.
+    /// Checks that inference ran and its output was applied, not which words the model changed.
+    /// The 30 s timeout keeps machine load from deciding the result.
     func testCleanupProducesOutputWithModel() async throws {
         try XCTSkipUnless(
             ModelDownloadService.isModelCached(),
-            "Gemma 3 1B GGUF model not cached — skipping integration test"
+            "Cleanup LLM GGUF model not cached — skipping integration test"
         )
 
         CleanupService.initializeBackend()
-        let service = CleanupService()
+        let service = CleanupService(inferenceTimeoutSeconds: 30)
         try service.loadModel(from: ModelDownloadService.modelPath().path)
         XCTAssertTrue(service.isLoaded)
 
+        CleanupService.lastCleanupOutcome = .failed
+        CleanupService.lastInferenceStats = CleanupService.InferenceStats()
         let result = await service.cleanup(
             text: "um so i went to the uh store and i buyed some milk",
             language: "en"
         )
+        let outcome = CleanupService.lastCleanupOutcome
+        let stats = CleanupService.lastInferenceStats
+        let diagnostics = "outcome=\(outcome) generatedTokens=\(stats.generatedTokens) cancelled=\(stats.cancelled) result=\"\(result)\""
 
-        // The cleaned text should not be empty
-        XCTAssertFalse(result.isEmpty, "Cleanup must produce non-empty output")
-        // The cleaned text should differ from input (filler words removed at minimum)
-        XCTAssertNotEqual(
-            result,
-            "um so i went to the uh store and i buyed some milk",
-            "Cleanup should modify the text"
-        )
+        if case .applied = outcome {} else {
+            XCTFail("cleanup must run the LLM and apply its output; " + diagnostics)
+        }
+        XCTAssertGreaterThan(stats.generatedTokens, 0, diagnostics)
+        XCTAssertFalse(result.isEmpty, diagnostics)
     }
 
     func testCleanupStateTransitionsDuringInference() async throws {
         try XCTSkipUnless(
             ModelDownloadService.isModelCached(),
-            "Gemma 3 1B GGUF model not cached — skipping integration test"
+            "Cleanup LLM GGUF model not cached — skipping integration test"
         )
 
         CleanupService.initializeBackend()
@@ -233,6 +235,35 @@ final class CleanupServiceTests: XCTestCase {
         // After cleanup completes, state returns to idle
         _ = await service.cleanup(text: "hello world", language: "en")
         XCTAssertEqual(service.state, .idle, "State must return to idle after cleanup")
+    }
+
+    /// Empty input with maxOutputTokens 0 passes the output-budget guard (zero projected tokens)
+    /// and stops the decode loop before its first token, so runInference returns "" without a
+    /// production seam; this is the only deterministic route to the empty-output branch.
+    func testEmptyGenerationRecordsFailedOutcome() async throws {
+        try XCTSkipUnless(
+            ModelDownloadService.isModelCached(),
+            "Cleanup LLM GGUF model not cached — skipping integration test"
+        )
+
+        CleanupService.initializeBackend()
+        let service = CleanupService(inferenceTimeoutSeconds: 30, maxOutputTokens: 0)
+        try service.loadModel(from: ModelDownloadService.modelPath().path)
+
+        CleanupService.lastCleanupOutcome = .applied
+        CleanupService.lastInferenceStats = CleanupService.InferenceStats(generatedTokens: -1)
+        let result = await service.cleanup(text: "", language: "en")
+        let outcome = CleanupService.lastCleanupOutcome
+        let stats = CleanupService.lastInferenceStats
+        let diagnostics = "outcome=\(outcome) generatedTokens=\(stats.generatedTokens) promptTokens=\(stats.promptTokens) exceededContext=\(stats.exceededContext) cancelled=\(stats.cancelled) result=\"\(result)\""
+
+        XCTAssertEqual(stats.generatedTokens, 0, diagnostics)
+        XCTAssertGreaterThan(stats.promptTokens, 0, diagnostics)
+        XCTAssertFalse(stats.exceededContext, diagnostics)
+        if case .failed = outcome {} else {
+            XCTFail("an empty LLM output must record .failed; " + diagnostics)
+        }
+        XCTAssertEqual(result, "", diagnostics)
     }
 
     // MARK: - Phase 25.1-02: XML envelope extraction (paper §6.2, Class D mitigation)
@@ -454,7 +485,7 @@ final class CleanupServiceTests: XCTestCase {
     func testUnloadThenReload_roundTrip() async throws {
         try XCTSkipUnless(
             ModelDownloadService.isModelCached(),
-            "Gemma 3 1B GGUF model not cached — skipping integration test"
+            "Cleanup LLM GGUF model not cached — skipping integration test"
         )
 
         CleanupService.initializeBackend()
