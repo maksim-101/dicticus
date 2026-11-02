@@ -218,3 +218,59 @@ final class IOSTranscriptionServiceTests: XCTestCase {
         )
     }
 }
+
+/// Dictionary replacements and ITN belong to TextProcessingService on iOS as on macOS, so
+/// its dictionary trace drives EditGuard's dictProtected set. These tests fail if the
+/// post-ASR step applies either.
+@MainActor
+final class IOSTranscriptPostProcessingTests: XCTestCase {
+    private var testHistory: HistoryService!
+
+    override func setUp() {
+        super.setUp()
+        UserDefaults.standard.removeObject(forKey: DictionaryService.dictionaryKey)
+        DictionaryService.shared.removeAll()
+        DictionaryService.shared.setReplacement(for: "zorbecks", with: "zorbex")
+        let historyContainer = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("IOSPostProcTests-\(UUID().uuidString)", isDirectory: true)
+        testHistory = HistoryService.makeForTesting(containerURLProvider: { historyContainer })
+    }
+
+    override func tearDown() {
+        DictionaryService.shared.removeAll()
+        testHistory = nil
+        super.tearDown()
+    }
+
+    func testPostProcessingLeavesDictionaryKeyAndNumberWordsEN() throws {
+        let post = try IOSTranscriptionService.postProcessASRText(
+            "we um cleaned the chain with zorbecks and twenty five spokes"
+        )
+        XCTAssertEqual(post.text, "we cleaned the chain with zorbecks and twenty five spokes")
+    }
+
+    func testPostProcessingLeavesDictionaryKeyAndNumberWordsDE() throws {
+        let post = try IOSTranscriptionService.postProcessASRText(
+            "wir haben äh die Kette mit zorbecks und fünfundzwanzig Speichen geputzt"
+        )
+        XCTAssertEqual(post.language, "de")
+        XCTAssertEqual(post.text, "wir haben die Kette mit zorbecks und fünfundzwanzig Speichen geputzt")
+    }
+
+    func testDictionaryWordKeepsItsSpellingThroughAICleanup() async throws {
+        let post = try IOSTranscriptionService.postProcessASRText(
+            "we cleaned the chain with zorbecks before the ride today"
+        )
+        let mock = TextProcessingServiceTests.MockCleanupProvider()
+        mock.returnValue = "We cleaned the chain with ZORBEX before the ride today."
+        let service = TextProcessingService(
+            dictionaryService: .shared, cleanupService: mock, historyService: testHistory
+        )
+
+        let output = await service.process(text: post.text, language: "en", mode: .aiCleanup)
+
+        XCTAssertEqual(mock.callCount, 1, "The LLM step must run, else this test proves nothing")
+        XCTAssertTrue(output.contains("zorbex"), "Dictionary spelling lost: \(output)")
+        XCTAssertFalse(output.contains("ZORBEX"), "LLM casing change shipped: \(output)")
+    }
+}

@@ -150,51 +150,45 @@ final class IOSTranscriptionService: TranscriptionProviding {
             resampledSamples + asrTailPad, decoderState: &decoderState, language: nil
         )
 
-        // KNOWN pre-existing quirk (not introduced by this phase, RESEARCH Pitfall 3 /
-        // STATE.md parked review item): the Dictionary/ITN post-processing below runs
-        // again inside TextProcessingService.process() when DictationViewModel feeds this
-        // result's text through it — a pre-existing double-run, D-01 boundary, out of
-        // scope to fix here.
-        var processedText = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !processedText.isEmpty else {
-            throw TranscriptionError.noResult
-        }
-
-        // Script validation
-        guard !Self.containsNonLatinScript(processedText) else {
-            throw TranscriptionError.unexpectedLanguage
-        }
-
-        let detectedLanguage = detectLanguage(processedText)
-
-        // Post-processing: Custom Dictionary, then ITN (Inverse Text Normalization).
-        // Stays unconditional: TextProcessingService builds EditGuard's dictProtected
-        // set from its own dictionary trace, so dropping this pre-pass would change
-        // which edits the guard protects on the AI-cleanup path.
-        processedText = DictionaryService.shared.apply(to: processedText)
-        processedText = ITNUtility.applyITN(to: processedText, language: detectedLanguage)
-
-        // Post-processing: conservative filler-strip (D-04, Phase 47.1). Parakeet emits
-        // raw standalone disfluencies ("um"/"uh"/"äh") that WhisperKit's seq2seq LM
-        // suppressed for free — this restores that on the plain path. iOS-local direct
-        // call (mirrors the Dictionary/ITN calls immediately above) so
-        // Shared/Services/TextProcessingService's plain path — and therefore macOS,
-        // which never runs this file — stays byte-identical (RESEARCH Pitfall 2/Open
-        // Question 2). Runs exactly once here, before this result is handed to
-        // TextProcessingService.process(). In aiCleanup mode, TextProcessingService's
-        // RulesCleanupService.clean() also calls FillerWordRemover.strip — idempotent on
-        // already-filler-free text, the same pre-existing double-run class as the
-        // Dictionary/ITN calls above (RESEARCH Pitfall 3), not introduced or fixed here.
-        processedText = FillerWordRemover.strip(processedText, language: detectedLanguage)
+        let post = try Self.postProcessASRText(result.text)
 
         // Confidence sourced directly from FluidAudio's ASRResult.confidence (D-02) — a
         // real Float field, no derivation needed (supersedes the old WhisperKit
         // avgLogprob-derived stand-in).
         return DicticusTranscriptionResult(
-            text: processedText,
-            language: detectedLanguage,
+            text: post.text,
+            language: post.language,
             confidence: result.confidence
         )
+    }
+
+    /// The post-ASR text step: trim, empty and script guards, language detection, filler strip.
+    /// Dictionary replacements and ITN run once, in TextProcessingService.process(), as on
+    /// macOS, so its dictionary trace lists every replacement and EditGuard protects those
+    /// words (dictProtected).
+    static func postProcessASRText(_ asrText: String) throws -> (text: String, language: String) {
+        let trimmed = asrText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            throw TranscriptionError.noResult
+        }
+
+        // Script validation
+        guard !Self.containsNonLatinScript(trimmed) else {
+            throw TranscriptionError.unexpectedLanguage
+        }
+
+        let detectedLanguage = Self.detectLanguage(trimmed)
+
+        // Post-processing: conservative filler-strip (D-04, Phase 47.1). Parakeet emits
+        // raw standalone disfluencies ("um"/"uh"/"äh") that WhisperKit's seq2seq LM
+        // suppressed for free — this restores that on the plain path. iOS-local direct
+        // call so Shared/Services/TextProcessingService's plain path — and therefore
+        // macOS, which never runs this file — stays byte-identical (RESEARCH Pitfall
+        // 2/Open Question 2). Runs once here, before this result is handed to
+        // TextProcessingService.process(). In aiCleanup mode, TextProcessingService's
+        // RulesCleanupService.clean() strips again — idempotent on already-filler-free
+        // text.
+        return (FillerWordRemover.strip(trimmed, language: detectedLanguage), detectedLanguage)
     }
 
     // MARK: - Adaptive voice gate support
@@ -352,7 +346,7 @@ final class IOSTranscriptionService: TranscriptionProviding {
     /// any other confident classification on longer text returns "other" (D-08/MLANG-03,
     /// Phase 42-02) so non-de/en dictation can be routed to deterministic rules-only cleanup
     /// instead of the LLM. Empty/undetectable/very-short text still falls back to "en".
-    func detectLanguage(_ text: String) -> String {
+    static func detectLanguage(_ text: String) -> String {
         let recognizer = NLLanguageRecognizer()
         let wordCount = text.split(whereSeparator: { $0.isWhitespace }).count
         if wordCount < Self.shortTextWordCountThreshold {
