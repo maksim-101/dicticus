@@ -287,16 +287,16 @@ final class LiveOverlayPanelTests: XCTestCase {
         XCTAssertTrue(stage.controller.modelForTesting.reduceMotion)
     }
 
-    // With an external display as the main screen (2026-11-02, Dell U4025QW) the panel animations never advanced:
-    // the pane stayed at its start offset and the fade never ended. The owner runs the suite on the built-in display.
-    private func requireBuiltInMainDisplay() throws {
-        if CGDisplayIsBuiltin(CGMainDisplayID()) == 0 {
-            throw XCTSkip("waits for a panel animation to finish; runs only with the built-in display as main screen")
+    // While the main display sleeps, AppKit animations get no frames: on 2026-11-02 the pane stayed at its start
+    // offset and the fade never ended in every run made with the screen off, and passed in every run with it on.
+    private func requireAwakeMainDisplay() throws {
+        if CGDisplayIsAsleep(CGMainDisplayID()) != 0 {
+            throw XCTSkip("waits for a panel animation to finish; the main display is asleep")
         }
     }
 
     func testEntryRisesFromBelowTheFinalPositionUnlessMotionIsReduced() async throws {
-        try requireBuiltInMainDisplay()
+        try requireAwakeMainDisplay()
         let (stage, candidates) = try makeStage(flags: OverlayAccessibilityFlags(reduceMotion: false),
                                                 caretAppKit: midScreenCaret)
         defer { stage.controller.hide(reason: .demo) }
@@ -476,7 +476,7 @@ final class LiveOverlayPanelTests: XCTestCase {
     }
 
     func testTheTranscriptIsGoneFromTheModelAndTheStabilizerOnceTheFadeEnded() async throws {
-        try requireBuiltInMainDisplay()
+        try requireAwakeMainDisplay()
         let controller = LiveOverlayController(targetAlpha: 0)
         controller.show()
         controller.update("one two three four five")
