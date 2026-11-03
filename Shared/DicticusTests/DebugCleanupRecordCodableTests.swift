@@ -1,12 +1,6 @@
 import XCTest
 @testable import Dicticus
 
-final class DicticusTests: XCTestCase {
-    func testPlaceholder() throws {
-        XCTAssertTrue(true)
-    }
-}
-
 #if DEBUG_RECORDER
 /// Phase 27-02: Codable round-trip contract for DebugCleanupRecord with the
 /// new dictionary_replacements + dictionary_blocked fields (D-06, D-07).
