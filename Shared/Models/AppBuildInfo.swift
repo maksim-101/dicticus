@@ -45,6 +45,7 @@ enum AppBuildInfo {
 
     #if os(macOS)
     private static let platformChanges = [
+        "Changed: the AI cleanup model downloads only after you agree, the first time you use AI cleanup (or from Settings → AI Cleanup)",
         "Fixed: a dictation too long for AI cleanup now tells you it went in without cleanup",
         "Fixed: short dictations on a quiet microphone such as an Elgato Wave XLR are no longer discarded as silence",
         "Fixed: the live preview shows text for quiet microphones such as an Elgato Wave XLR",

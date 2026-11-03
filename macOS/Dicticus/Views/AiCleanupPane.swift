@@ -3,7 +3,7 @@ import AppKit
 
 /// Settings → AI Cleanup pane.
 ///
-/// Group "Model": model name, LLM status, idle unload.
+/// Group "Model": model name, LLM status, download controls, idle unload.
 /// Group "Language": Swiss German toggle (app-local UserDefaults on macOS).
 /// Group "Context-Aware Formatting": on/off toggle and per-app overrides.
 struct AiCleanupPane: View {
@@ -17,6 +17,12 @@ struct AiCleanupPane: View {
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityLabel(warmupService.llmStatus == .ready ? "Model ready" : warmupService.llmStatus.label)
+
+                if warmupService.offersLlmDownload {
+                    Button("Download (2.7 GB)") { warmupService.downloadLlmOnDemand() }
+                }
+
+                AutoDownloadFormRow()
 
                 IdleUnloadFormRow()
             }
@@ -73,6 +79,21 @@ private struct SwissGermanFormRow: View {
         Toggle("Swiss German spelling (ß→ss)", isOn: $isOn)
             .onChange(of: isOn) { _, newValue in
                 DicticusDefaults.suite.set(newValue, forKey: SwissDefaultMigration.toggleKey)
+            }
+    }
+}
+
+/// 261103-r9g: the auto-download switch. Backs `ModelWarmupService.autoDownloadDefaultsKey`
+/// on `DicticusDefaults.suite`; a missing key reads as off. Read once per launch, so switching it
+/// on starts nothing in the running session — the Download button does that.
+private struct AutoDownloadFormRow: View {
+    @State private var isOn: Bool = ModelWarmupService.autoDownloadEnabled(from: DicticusDefaults.suite)
+
+    var body: some View {
+        Toggle("Download the model automatically", isOn: $isOn)
+            .help("Downloads the 2.7 GB model at launch when it is missing. When off, Dicticus asks the first time you use AI cleanup.")
+            .onChange(of: isOn) { _, newValue in
+                DicticusDefaults.suite.set(newValue, forKey: ModelWarmupService.autoDownloadDefaultsKey)
             }
     }
 }
