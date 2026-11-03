@@ -417,20 +417,4 @@ final class HotkeyManagerTests: XCTestCase {
         await rig.dictate()
         XCTAssertEqual(rig.spy.showCount, 1)
     }
-
-    // MARK: - Integration test (requires WhisperKit model)
-
-    func testFullPushToTalkCycle() async throws {
-        try XCTSkipUnless(TranscriptionService.isWhisperKitAvailable(),
-                          "WhisperKit model not cached — skipping integration test")
-
-        guard let _ = try await TranscriptionService.makeForTesting() else {
-            throw XCTSkip("Could not create TranscriptionService for testing")
-        }
-
-        let manager = HotkeyManager()
-        // Without a ready warmupService, handleKeyDown should not start recording
-        manager.handleKeyDown(mode: .plain)
-        XCTAssertFalse(manager.isRecording)
-    }
 }

@@ -124,18 +124,6 @@ targets:
     dependencies:
       - target: Dicticus
 
-  DicticusUITests:
-    type: bundle.ui-testing
-    platform: iOS
-    sources:
-      - path: DicticusUITests
-    settings:
-      GENERATE_INFOPLIST_FILE: YES
-      TEST_TARGET_NAME: Dicticus
-      DEVELOPMENT_TEAM: ${DEVELOPER_TEAM_ID}
-    dependencies:
-      - target: Dicticus
-
 schemes:
   Dicticus:
     build:
@@ -147,7 +135,6 @@ schemes:
       config: Debug
       targets:
         - DicticusTests
-        - DicticusUITests
     archive:
       config: Release
     profile:

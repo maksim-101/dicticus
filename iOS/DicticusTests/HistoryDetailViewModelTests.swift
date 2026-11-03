@@ -3,9 +3,7 @@ import XCTest
 
 /// Phase 20.05 ACT-3-VISIBILITY — HistoryDetailView variant-switching logic.
 ///
-/// XCUITest-style behaviour assertions are deferred to the dedicated UI test
-/// target (`DicticusUITests/HistoryDetailViewTests.swift`). These unit tests
-/// cover the deterministic computation that drives `HistoryDetailView` — the
+/// These unit tests cover the deterministic computation that drives `HistoryDetailView` — the
 /// `displayedText(for:in:)` helper that swaps between raw/polished and falls
 /// back to polished for legacy entries (pre-D-38) where `rawText` is empty.
 ///
