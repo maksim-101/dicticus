@@ -195,7 +195,7 @@ final class EditGuardTokenizerTests: XCTestCase {
 
     /// Corpus-snapshot losslessness loop (44-05-PLAN.md <verification>): runs
     /// the round-trip over every `raw`/`post_rules` text in the real
-    /// `.planning/phases/44-cleanup-fidelity-guard/corpus-snapshot/` JSONL
+    /// `.planning/milestones/v2.5-phases/44-cleanup-fidelity-guard/corpus-snapshot/` JSONL
     /// files. `.planning/` is gitignored (local-only asset) — the test
     /// resolves the path relative to its own source file via `#filePath` and
     /// skips gracefully (does not fail) when the snapshot isn't present on
@@ -208,13 +208,15 @@ final class EditGuardTokenizerTests: XCTestCase {
             .deletingLastPathComponent() // .../Shared
             .deletingLastPathComponent() // .../dicticus (project root)
         let corpusDir = projectRoot
-            .appendingPathComponent(".planning/phases/44-cleanup-fidelity-guard/corpus-snapshot")
+            .appendingPathComponent(".planning/milestones/v2.5-phases/44-cleanup-fidelity-guard/corpus-snapshot")
 
-        guard let allFiles = try? FileManager.default.contentsOfDirectory(
+        try XCTSkipUnless(
+            FileManager.default.fileExists(atPath: corpusDir.path),
+            "Corpus snapshot not present at \(corpusDir.path) — gitignored local-only asset, skipping."
+        )
+        let allFiles = try FileManager.default.contentsOfDirectory(
             at: corpusDir, includingPropertiesForKeys: nil
-        ) else {
-            throw XCTSkip("Corpus snapshot not present at \(corpusDir.path) — gitignored local-only asset, skipping.")
-        }
+        )
         let jsonlFiles = allFiles.filter { $0.pathExtension == "jsonl" }
         guard !jsonlFiles.isEmpty else {
             throw XCTSkip("Corpus snapshot directory present but contains no .jsonl files — skipping.")
