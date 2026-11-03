@@ -860,96 +860,41 @@ final class DictationViewModelTests: XCTestCase {
     /// recentlyDelivered shows cleaned text, clipboard = cleaned most-recent,
     /// pending list cleared.
     func testBatchDeliveryWithCleanupPersistsToHistory() async {
-        final class MockCleanupService: CleanupProvider {
-            var isLoaded: Bool = true
-            func cleanup(text: String, language: String, dictionaryContext: [String: String]?, context: DictationContext = .default) async -> String {
-                return "CLEANED:" + text
-            }
-        }
+        // The mock returns its input unchanged: the shared pipeline's output is then
+        // derived by the pipeline (dictionary, rules, capitalization, EditGuard), so the
+        // assertions compare against what was stored instead of a literal.
+        let f = DeliveryFixture()
+        defer { f.tearDown() }
+        let uuid1 = f.seedPending(text: "first plain")
+        let uuid2 = f.seedPending(text: "second plain")
+        f.vm.cleanupService = PassThroughCleanup()
 
-        let vm = DictationViewModel()
-        // SC5: inject isolated HistoryService — vm.historyService added in Plan 03.
-        let tempContainer = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        vm.historyService = HistoryService.makeForTesting(containerURLProvider: { tempContainer })
-        vm.cleanupService = MockCleanupService()
-        var clipboardValue: String? = nil
-        vm.clipboardWriter = { text in clipboardValue = text }
+        await f.vm.deliverPendingTranscriptsIfNeeded()
 
-        let defaults = DicticusIPCBridge.defaults
-        defaults?.removeObject(forKey: DicticusIPCBridge.Key.pendingTranscriptUUIDs)
-        defaults?.removeObject(forKey: DicticusIPCBridge.Key.pendingTranscriptUUID)
+        let stored1 = f.stored(uuid1)
+        let stored2 = f.stored(uuid2)
+        XCTAssertNotNil(stored2, "uuid2 must still exist in History (no duplicate, no delete)")
 
-        // Set toggle ON in App Group defaults.
-        let testDefaults = UserDefaults(suiteName: "group.com.dicticus") ?? .standard
-        testDefaults.set(true, forKey: "aiCleanupEnabled")
+        // Clipboard and lastResult must be the stored cleaned most-recent text.
+        XCTAssertEqual(f.writes.count, 1)
+        XCTAssertEqual(f.writes.first, stored2?.text, "Clipboard must contain the stored most-recent transcript")
+        XCTAssertEqual(f.vm.lastResult, stored2?.text)
 
-        // Seed two plain History entries (oldest first).
-        let uuid1 = UUID()
-        let uuid2 = UUID()
-        let entry1 = TranscriptionEntry(uuid: uuid1, text: "first plain",
-                                        rawText: "first plain", language: "en",
-                                        mode: "plain",
-                                        createdAt: Date(timeIntervalSinceNow: -60),
-                                        confidence: 0.9)
-        let entry2 = TranscriptionEntry(uuid: uuid2, text: "second plain",
-                                        rawText: "second plain", language: "en",
-                                        mode: "plain", confidence: 0.9)
-        vm.historyService.save(entry1)
-        vm.historyService.save(entry2)
+        // recentlyDelivered: both entries, newest first, mode "cleanup".
+        XCTAssertEqual(f.vm.recentlyDelivered.map(\.uuid), [uuid2, uuid1])
+        XCTAssertEqual(f.vm.recentlyDelivered.first?.mode, "cleanup")
+        XCTAssertEqual(f.vm.recentlyDelivered.first?.text, stored2?.text)
+        XCTAssertEqual(f.vm.recentlyDelivered.last?.text, stored1?.text)
 
-        // Tag both as pending (oldest first).
-        defaults?.set([uuid1.uuidString, uuid2.uuidString],
-                      forKey: DicticusIPCBridge.Key.pendingTranscriptUUIDs)
-
-        await vm.deliverPendingTranscriptsIfNeeded()
-
-        // Clipboard and lastResult must be the CLEANED most-recent.
-        XCTAssertEqual(clipboardValue, "CLEANED:second plain",
-                       "Clipboard must contain the AI-cleaned most-recent transcript")
-        XCTAssertEqual(vm.lastResult, "CLEANED:second plain",
-                       "lastResult must be the AI-cleaned most-recent transcript")
-
-        // recentlyDelivered must contain both entries with cleaned text, newest first.
-        XCTAssertEqual(vm.recentlyDelivered.count, 2,
-                       "recentlyDelivered must contain both cleaned entries")
-        XCTAssertEqual(vm.recentlyDelivered.first?.uuid, uuid2,
-                       "recentlyDelivered[0] must be newest entry (uuid2)")
-        XCTAssertEqual(vm.recentlyDelivered.first?.text, "CLEANED:second plain",
-                       "recentlyDelivered[0].text must be cleaned text")
-        XCTAssertEqual(vm.recentlyDelivered.first?.mode, "cleanup",
-                       "recentlyDelivered[0].mode must be 'cleanup'")
-        XCTAssertEqual(vm.recentlyDelivered.last?.text, "CLEANED:first plain",
-                       "recentlyDelivered[1].text must be cleaned text")
-
-        // History entries must be updated in place (same uuid, mode="cleanup").
-        let storedEntry2 = vm.historyService.entries.first(where: { $0.uuid == uuid2 })
-        XCTAssertNotNil(storedEntry2, "uuid2 must still exist in History (no duplicate, no delete)")
-        XCTAssertEqual(storedEntry2?.mode, "cleanup",
-                       "History entry for uuid2 must have mode='cleanup' after delivery")
-        XCTAssertEqual(storedEntry2?.text, "CLEANED:second plain",
-                       "History entry for uuid2 must have cleaned text after delivery")
-        // rawText must be preserved unchanged.
-        XCTAssertEqual(storedEntry2?.rawText, "second plain",
-                       "rawText must be unchanged — only text and mode are updated")
-
-        let storedEntry1 = vm.historyService.entries.first(where: { $0.uuid == uuid1 })
-        XCTAssertEqual(storedEntry1?.mode, "cleanup", "uuid1 must also be updated to mode='cleanup'")
+        // History rows updated in place: mode "cleanup", rawText unchanged, no new rows.
+        XCTAssertEqual(stored2?.mode, "cleanup")
+        XCTAssertEqual(stored1?.mode, "cleanup")
+        XCTAssertEqual(stored2?.rawText, "second plain", "rawText must be unchanged, only text and mode are updated")
+        XCTAssertEqual(f.vm.historyService.entries.count, 2)
 
         // Pending list must be cleared.
-        let remaining = defaults?.stringArray(forKey: DicticusIPCBridge.Key.pendingTranscriptUUIDs)
-        XCTAssertNil(remaining, "Pending list key must be cleared after batch cleanup delivery")
-
-        // Cleanup
-        testDefaults.removeObject(forKey: "aiCleanupEnabled")
-        defaults?.removeObject(forKey: DicticusIPCBridge.Key.pendingTranscriptUUIDs)
-        defaults?.removeObject(forKey: DicticusIPCBridge.Key.pendingTranscriptUUID)
-        for uuid in [uuid1, uuid2] {
-            if let id = vm.historyService.entries.first(where: { $0.uuid == uuid })?.id {
-                vm.historyService.delete(id: id)
-            }
-        }
-        try? FileManager.default.removeItem(at: tempContainer)
+        XCTAssertNil(DicticusIPCBridge.defaults?.stringArray(forKey: DicticusIPCBridge.Key.pendingTranscriptUUIDs),
+                     "Pending list key must be cleared after batch cleanup delivery")
     }
 
     /// Toggle OFF: entries stay plain (mode="plain"), list cleared.
@@ -1052,6 +997,186 @@ final class DictationViewModelTests: XCTestCase {
         defaults?.removeObject(forKey: DicticusIPCBridge.Key.pendingTranscriptUUIDs)
         if let id = storedEntry?.id { vm.historyService.delete(id: id) }
         try? FileManager.default.removeItem(at: tempContainer)
+    }
+
+    // MARK: - 261103-9c7: pending delivery (clipboard once, shared pipeline, changeCount guard)
+
+    /// A delivery fixture: isolated History, App-Group toggle ON, a spy clipboard whose fake
+    /// change counter advances on every write, and a pending list holding one entry.
+    @MainActor
+    private final class DeliveryFixture {
+        let vm = DictationViewModel()
+        let tempContainer = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        var writes: [String] = []
+        var changeCount = 100
+        let appGroup = UserDefaults(suiteName: "group.com.dicticus") ?? .standard
+
+        init() {
+            vm.historyService = HistoryService.makeForTesting(containerURLProvider: { [tempContainer] in tempContainer })
+            vm.clipboardWriter = { [unowned self] text in
+                self.writes.append(text)
+                self.changeCount += 1
+            }
+            vm.pasteboardChangeCount = { [unowned self] in self.changeCount }
+            Self.clearDefaults()
+            appGroup.set(true, forKey: "aiCleanupEnabled")
+        }
+
+        static func clearDefaults() {
+            let defaults = DicticusIPCBridge.defaults
+            for key in [DicticusIPCBridge.Key.pendingTranscriptUUIDs, DicticusIPCBridge.Key.pendingTranscriptUUID,
+                        DicticusIPCBridge.Key.deliveredPlainTranscriptUUIDs,
+                        DicticusIPCBridge.Key.deliveredPlainClipboardChangeCount] {
+                defaults?.removeObject(forKey: key)
+            }
+        }
+
+        /// Saves a plain entry and appends it to the pending list.
+        @discardableResult
+        func seedPending(text: String, rawText: String? = nil, language: String = "en") -> UUID {
+            let uuid = UUID()
+            vm.historyService.save(TranscriptionEntry(uuid: uuid, text: text, rawText: rawText ?? text,
+                                                      language: language, mode: "plain", confidence: 0.9))
+            var list = DicticusIPCBridge.defaults?.stringArray(forKey: DicticusIPCBridge.Key.pendingTranscriptUUIDs) ?? []
+            list.append(uuid.uuidString)
+            DicticusIPCBridge.defaults?.set(list, forKey: DicticusIPCBridge.Key.pendingTranscriptUUIDs)
+            return uuid
+        }
+
+        func stored(_ uuid: UUID) -> TranscriptionEntry? {
+            vm.historyService.entries.first(where: { $0.uuid == uuid })
+        }
+
+        func tearDown() {
+            appGroup.removeObject(forKey: "aiCleanupEnabled")
+            Self.clearDefaults()
+            try? FileManager.default.removeItem(at: tempContainer)
+        }
+    }
+
+    private final class PassThroughCleanup: CleanupProvider {
+        var isLoaded = true
+        var reply: ((String) -> String)? = nil
+        func cleanup(text: String, language: String, dictionaryContext: [String: String]?, context: DictationContext = .default) async -> String {
+            reply?(text) ?? text
+        }
+    }
+
+    /// RED-4: toggle ON, LLM not loaded: repeated foregrounds copy the plain transcript once.
+    func testRepeatedForegroundWithoutLlmWritesClipboardOnce() async {
+        let f = DeliveryFixture()
+        defer { f.tearDown() }
+        f.seedPending(text: "plain pending")
+
+        await f.vm.deliverPendingTranscriptsIfNeeded()
+        await f.vm.deliverPendingTranscriptsIfNeeded()
+        await f.vm.deliverPendingTranscriptsIfNeeded()
+
+        XCTAssertEqual(f.writes, ["plain pending"], "the plain transcript must be written to the clipboard exactly once")
+        XCTAssertEqual(f.vm.lastResult, "plain pending")
+        XCTAssertEqual(DicticusIPCBridge.defaults?.stringArray(forKey: DicticusIPCBridge.Key.pendingTranscriptUUIDs)?.count, 1,
+                       "the pending list stays for the LLM-ready retry")
+    }
+
+    /// RED-5: deferred cleanup goes through the shared pipeline; an assistant-voice reply never ships.
+    func testDeferredCleanupRejectsAssistantVoiceReplyAndCreatesNoRow() async {
+        let f = DeliveryFixture()
+        defer { f.tearDown() }
+        let prompt = "Gib mir noch ein paar Hashtags."
+        let uuid = f.seedPending(text: prompt, rawText: prompt, language: "de")
+        let rowsBefore = f.vm.historyService.entries.count
+        let cleanup = PassThroughCleanup()
+        cleanup.reply = { _ in "Ich verstehe, dass du weitere Hashtags brauchst. Bitte gib mir mehr Kontext dazu." }
+        f.vm.cleanupService = cleanup
+
+        await f.vm.deliverPendingTranscriptsIfNeeded()
+
+        let stored = f.stored(uuid)
+        XCTAssertFalse(f.writes.joined().contains("Ich verstehe"), "clipboard got the reply: \(f.writes)")
+        XCTAssertFalse(f.vm.lastResult?.contains("Ich verstehe") ?? false, "lastResult is the reply: \(f.vm.lastResult ?? "nil")")
+        XCTAssertFalse(stored?.text.contains("Ich verstehe") ?? true, "History holds the reply: \(stored?.text ?? "nil")")
+        XCTAssertEqual(stored?.mode, "cleanup")
+        XCTAssertEqual(stored?.rawText, prompt)
+        XCTAssertEqual(f.vm.historyService.entries.count, rowsBefore, "deferred cleanup must not add a History row")
+    }
+
+    /// RED-6: the user copied something after the plain write; the cleaned text must not replace it.
+    func testCleanedTextDoesNotReplaceClipboardTheUserChanged() async {
+        let f = DeliveryFixture()
+        defer { f.tearDown() }
+        let uuid = f.seedPending(text: "hello world")
+
+        await f.vm.deliverPendingTranscriptsIfNeeded()           // plain, LLM not ready
+        XCTAssertEqual(f.writes, ["hello world"])
+        f.changeCount += 1                                        // the user copied something else
+        let lastResultBefore = f.vm.lastResult
+
+        let cleanup = PassThroughCleanup()
+        cleanup.reply = { $0 + "!" }
+        f.vm.cleanupService = cleanup
+        await f.vm.deliverPendingTranscriptsIfNeeded()
+
+        XCTAssertEqual(f.writes, ["hello world"], "the user's clipboard must not be overwritten")
+        XCTAssertEqual(f.vm.lastResult, lastResultBefore)
+        XCTAssertEqual(f.stored(uuid)?.mode, "cleanup", "History is still updated")
+        XCTAssertNil(DicticusIPCBridge.defaults?.stringArray(forKey: DicticusIPCBridge.Key.pendingTranscriptUUIDs))
+        XCTAssertNil(DicticusIPCBridge.defaults?.stringArray(forKey: DicticusIPCBridge.Key.deliveredPlainTranscriptUUIDs))
+    }
+
+    /// Clipboard untouched since the plain write: the cleaned text is the second write.
+    func testCleanedTextReplacesOwnPlainClipboardWriteWhenUnchanged() async {
+        let f = DeliveryFixture()
+        defer { f.tearDown() }
+        let uuid = f.seedPending(text: "Hello world")
+
+        await f.vm.deliverPendingTranscriptsIfNeeded()
+        let cleanup = PassThroughCleanup()
+        cleanup.reply = { _ in "Hello, world." }
+        f.vm.cleanupService = cleanup
+        await f.vm.deliverPendingTranscriptsIfNeeded()
+
+        XCTAssertEqual(f.writes.count, 2)
+        XCTAssertEqual(f.writes.last, f.stored(uuid)?.text, "clipboard must equal the stored cleaned text")
+        XCTAssertEqual(f.vm.lastResult, f.writes.last)
+        XCTAssertEqual(f.stored(uuid)?.mode, "cleanup")
+        XCTAssertNil(DicticusIPCBridge.defaults?.stringArray(forKey: DicticusIPCBridge.Key.pendingTranscriptUUIDs))
+        XCTAssertNil(DicticusIPCBridge.defaults?.stringArray(forKey: DicticusIPCBridge.Key.deliveredPlainTranscriptUUIDs))
+        XCTAssertNil(DicticusIPCBridge.defaults?.object(forKey: DicticusIPCBridge.Key.deliveredPlainClipboardChangeCount))
+    }
+
+    /// LLM ready on the first foreground: never plain-delivered, so the cleaned text is written unconditionally.
+    func testLlmReadyOnFirstForegroundWritesCleanedTextUnconditionally() async {
+        let f = DeliveryFixture()
+        defer { f.tearDown() }
+        let uuid = f.seedPending(text: "Hello world")
+        f.changeCount += 5                                        // irrelevant: no plain write happened
+        let cleanup = PassThroughCleanup()
+        cleanup.reply = { _ in "Hello, world." }
+        f.vm.cleanupService = cleanup
+
+        await f.vm.deliverPendingTranscriptsIfNeeded()
+
+        XCTAssertEqual(f.writes.count, 1)
+        XCTAssertEqual(f.writes.first, f.stored(uuid)?.text)
+        XCTAssertEqual(f.stored(uuid)?.mode, "cleanup")
+    }
+
+    /// Toggle switched OFF after a plain delivery: list and keys are cleared, the clipboard is not rewritten.
+    func testToggleOffAfterPlainDeliveryClearsEverythingWithoutRewriting() async {
+        let f = DeliveryFixture()
+        defer { f.tearDown() }
+        f.seedPending(text: "plain pending")
+        await f.vm.deliverPendingTranscriptsIfNeeded()
+        XCTAssertEqual(f.writes.count, 1)
+
+        f.appGroup.set(false, forKey: "aiCleanupEnabled")
+        await f.vm.deliverPendingTranscriptsIfNeeded()
+
+        XCTAssertEqual(f.writes.count, 1, "the clipboard must not be written again")
+        XCTAssertNil(DicticusIPCBridge.defaults?.stringArray(forKey: DicticusIPCBridge.Key.pendingTranscriptUUIDs))
+        XCTAssertNil(DicticusIPCBridge.defaults?.stringArray(forKey: DicticusIPCBridge.Key.deliveredPlainTranscriptUUIDs))
+        XCTAssertNil(DicticusIPCBridge.defaults?.object(forKey: DicticusIPCBridge.Key.deliveredPlainClipboardChangeCount))
     }
 
     // MARK: - Phase 36-04 code review regressions (CR-03 / WR-01)

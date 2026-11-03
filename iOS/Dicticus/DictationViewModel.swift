@@ -109,6 +109,9 @@ class DictationViewModel: ObservableObject {
         UIPasteboard.general.string = text
     }
 
+    /// Test seam for the pasteboard change counter. Reading it does not show the paste-permission banner.
+    var pasteboardChangeCount: () -> Int = { UIPasteboard.general.changeCount }
+
     /// Test seam for notification posting. Defaults to the real UNUserNotificationCenter.
     /// Injected in unit tests to capture title/body without OS notification infrastructure.
     var notificationPoster: (_ title: String, _ body: String) async -> Void = { title, body in
@@ -805,17 +808,20 @@ class DictationViewModel: ObservableObject {
     ///
     /// Batch semantics: reads the full `pendingTranscriptUUIDs` list (appended by each background stop).
     ///
-    /// Toggle ON + LLM ready: each pending entry is cleaned via the LLM, the History row is
-    /// updated in place (same uuid/id, mode="cleanup"), and then the cleaned most-recent text
-    /// goes to clipboard + lastResult. The pending list is cleared.
+    /// Toggle ON + LLM ready: each pending entry's rawText runs through the shared
+    /// TextProcessingService pipeline (saveToHistory: false), the History row is updated in
+    /// place (same uuid/id, mode="cleanup"), and then the cleaned most-recent text goes to
+    /// clipboard + lastResult. If that entry's plain text was already copied while the LLM was
+    /// not ready, the cleaned text replaces it only while the pasteboard change count still
+    /// equals the count stored after that write. The pending list is cleared.
     ///
     /// Toggle OFF: all entries remain plain. Clipboard/lastResult/recentlyDelivered set to plain
-    /// most-recent. Pending list cleared.
+    /// most-recent (unless it was already copied). Pending list cleared.
     ///
-    /// Toggle ON + LLM not ready: deliver plain to clipboard/lastResult/recentlyDelivered for
-    /// immediate UX, but do NOT clear the pending list — so the isLlmReady retry can clean and
-    /// persist once the LLM finishes warming up. Once an entry has mode="cleanup" it is skipped
-    /// by the retry (idempotent).
+    /// Toggle ON + LLM not ready: deliver plain to clipboard/lastResult/recentlyDelivered once
+    /// per entry for immediate UX (later foregrounds do nothing visible), but do NOT clear the
+    /// pending list — so the isLlmReady retry can clean and persist once the LLM finishes
+    /// warming up. Once an entry has mode="cleanup" it is skipped by the retry (idempotent).
     ///
     /// Legacy migration: if only the old single `pendingTranscriptUUID` key is present (no list
     /// key), treat it as a one-element list so pending transcripts from older builds are not lost.
@@ -851,8 +857,7 @@ class DictationViewModel: ObservableObject {
 
         guard !pendingEntries.isEmpty else {
             // No entries found — clear stale tags and return.
-            defaults?.removeObject(forKey: DicticusIPCBridge.Key.pendingTranscriptUUIDs)
-            defaults?.removeObject(forKey: DicticusIPCBridge.Key.pendingTranscriptUUID)
+            clearPendingDeliveryState()
             return
         }
 
@@ -862,9 +867,17 @@ class DictationViewModel: ObservableObject {
         let wantsAiCleanup = (UserDefaults(suiteName: "group.com.dicticus") ?? .standard).bool(forKey: "aiCleanupEnabled")
         let llmReady = cleanupService?.isLoaded ?? false
 
+        // 261103-9c7: UUIDs whose plain text already reached the clipboard while the LLM was
+        // not ready, and the pasteboard change count read right after that write.
+        let deliveredPlain = Set(defaults?.stringArray(forKey: DicticusIPCBridge.Key.deliveredPlainTranscriptUUIDs) ?? [])
+        let storedChangeCount = defaults?.object(forKey: DicticusIPCBridge.Key.deliveredPlainClipboardChangeCount) as? Int
+        let mostRecentPending = pendingEntries[pendingEntries.count - 1]
+        let mostRecentAlreadyDelivered = deliveredPlain.contains(mostRecentPending.uuid.uuidString)
+
         if wantsAiCleanup && llmReady, let cs = cleanupService {
-            // Toggle ON + LLM ready: clean EACH pending entry and persist to History.
-            // Entries already cleaned (mode == "cleanup") are skipped — idempotent retry.
+            // Toggle ON + LLM ready: clean EACH pending entry through the shared pipeline and
+            // update its History row in place. Entries already cleaned (mode == "cleanup")
+            // are skipped — idempotent retry.
             var cleanedEntries: [TranscriptionEntry] = []
             var anyPersistFailed = false
             for entry in pendingEntries {
@@ -873,10 +886,16 @@ class DictationViewModel: ObservableObject {
                     cleanedEntries.append(entry)
                     continue
                 }
-                let cleanedText = await cs.cleanup(
-                    text: entry.text,
+                // The same dictionary, BrandMatcher, rules, EditGuard, Swiss formatting and
+                // capitalization steps as any other dictation, on the recognizer's own text.
+                // saveToHistory: false because the row already exists and is updated below.
+                let processor = TextProcessingService(cleanupService: cs, historyService: historyService)
+                let cleanedText = await processor.process(
+                    text: entry.rawText,
                     language: entry.language,
-                    dictionaryContext: nil
+                    mode: .aiCleanup,
+                    confidence: entry.confidence,
+                    saveToHistory: false
                 )
                 var updated = entry
                 updated.text = cleanedText
@@ -902,45 +921,59 @@ class DictationViewModel: ObservableObject {
                 // Defensive: loop produced no output (Task cancelled mid-cleanup?).
                 state = .idle; return
             }
-            clipboardWriter(mostRecentCleaned.text)
-            lastResult = mostRecentCleaned.text
-            recentlyDelivered = cleanedEntries.reversed()
-            error = nil
+            // The cleaned text replaces Dicticus's own earlier plain write only while nothing
+            // else has been copied since; a changed count also means any newer foreground
+            // dictation already replaced the clipboard and lastResult. History is updated either way.
+            let clipboardUntouched = !mostRecentAlreadyDelivered || (storedChangeCount != nil && pasteboardChangeCount() == storedChangeCount)
+            if clipboardUntouched {
+                clipboardWriter(mostRecentCleaned.text)
+                lastResult = mostRecentCleaned.text
+                recentlyDelivered = cleanedEntries.reversed()
+                error = nil
+            }
 
             // Only clear the pending list when every persist succeeded.
             // If any persist failed, leave the list so the next foreground can retry.
             if !anyPersistFailed {
-                defaults?.removeObject(forKey: DicticusIPCBridge.Key.pendingTranscriptUUIDs)
-                defaults?.removeObject(forKey: DicticusIPCBridge.Key.pendingTranscriptUUID)
+                clearPendingDeliveryState()
             }
 
         } else if !wantsAiCleanup {
-            // Toggle OFF: plain is the final output. Deliver and clear the list.
-            guard let mostRecent = pendingEntries.last else {
-                state = .idle; return
+            // Toggle OFF: plain is the final output. Deliver (unless it already was) and clear the list.
+            if !mostRecentAlreadyDelivered {
+                clipboardWriter(mostRecentPending.text)
+                lastResult = mostRecentPending.text
+                recentlyDelivered = pendingEntries.reversed()
+                error = nil
             }
-            clipboardWriter(mostRecent.text)
-            lastResult = mostRecent.text
-            recentlyDelivered = pendingEntries.reversed()
-            error = nil
-
-            defaults?.removeObject(forKey: DicticusIPCBridge.Key.pendingTranscriptUUIDs)
-            defaults?.removeObject(forKey: DicticusIPCBridge.Key.pendingTranscriptUUID)
+            clearPendingDeliveryState()
 
         } else {
-            // Toggle ON + LLM not yet ready: deliver plain now for immediate UX,
-            // but leave the pending list intact so the isLlmReady retry can clean + persist.
-            guard let mostRecent = pendingEntries.last else {
-                state = .idle; return
+            // Toggle ON + LLM not yet ready: deliver plain once for immediate UX, but leave the
+            // pending list intact so the isLlmReady retry can clean + persist. Repeated foregrounds
+            // must not rewrite a clipboard the user may have changed since.
+            if !mostRecentAlreadyDelivered {
+                clipboardWriter(mostRecentPending.text)
+                defaults?.set(pasteboardChangeCount(), forKey: DicticusIPCBridge.Key.deliveredPlainClipboardChangeCount)
+                defaults?.set(pendingEntries.map { $0.uuid.uuidString },
+                              forKey: DicticusIPCBridge.Key.deliveredPlainTranscriptUUIDs)
+                lastResult = mostRecentPending.text
+                recentlyDelivered = pendingEntries.reversed()
+                error = nil
             }
-            clipboardWriter(mostRecent.text)
-            lastResult = mostRecent.text
-            recentlyDelivered = pendingEntries.reversed()
-            error = nil
             // DO NOT clear pendingTranscriptUUIDs — the LLM-ready retry needs it.
         }
 
         state = .idle
+    }
+
+    /// Clears the pending list, the legacy single key and the plain-delivery bookkeeping together.
+    private func clearPendingDeliveryState() {
+        let defaults = DicticusIPCBridge.defaults
+        defaults?.removeObject(forKey: DicticusIPCBridge.Key.pendingTranscriptUUIDs)
+        defaults?.removeObject(forKey: DicticusIPCBridge.Key.pendingTranscriptUUID)
+        defaults?.removeObject(forKey: DicticusIPCBridge.Key.deliveredPlainTranscriptUUIDs)
+        defaults?.removeObject(forKey: DicticusIPCBridge.Key.deliveredPlainClipboardChangeCount)
     }
 
     // MARK: - Notification (D-02a)

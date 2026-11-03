@@ -23,6 +23,14 @@ enum DicticusIPCBridge {
         /// Older entries toward index 0; newest toward the end (append order = session order).
         /// Legacy single-key `pendingTranscriptUUID` is migrated to a one-element list on first read.
         static let pendingTranscriptUUIDs = "pendingTranscriptUUIDs"
+        /// [String] (UUID list): pending transcripts whose PLAIN text already went to the clipboard
+        /// while AI cleanup was on and the LLM not yet loaded. Keeps repeated foregrounds from
+        /// rewriting the clipboard; cleared wherever the pending list is cleared. App Group
+        /// defaults, because the LLM-ready retry can run in a later process.
+        static let deliveredPlainTranscriptUUIDs = "deliveredPlainTranscriptUUIDs"
+        /// Int: `UIPasteboard.general.changeCount` read immediately after that plain write. The
+        /// cleaned text may replace Dicticus's own plain write only while the count is unchanged.
+        static let deliveredPlainClipboardChangeCount = "deliveredPlainClipboardChangeCount"
         /// Bool: true while a recording session is active. Written by DictationViewModel.state didSet.
         /// Read by DictateIntent.perform() to implement Action-Button toggle-to-stop (D-01a).
         static let isRecording = "isRecording"

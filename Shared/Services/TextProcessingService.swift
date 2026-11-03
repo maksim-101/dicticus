@@ -98,6 +98,9 @@ class TextProcessingService: ObservableObject {
 
     /// Process the transcribed text based on the mode and language.
     ///
+    /// 261103-9c7: `saveToHistory: false` runs the whole pipeline but leaves History alone and
+    /// `lastSavedEntry` nil, for callers that update an existing row in place.
+    ///
     /// Phase 38 Plan 01 (CTXFMT-01/CTXFMT-02): `context` is the
     /// `DictationContext` resolved at hotkey press-time from the frontmost
     /// app's bundle ID (`HotkeyManager` + `ContextResolver`); `detectedBundleID`
@@ -113,7 +116,8 @@ class TextProcessingService: ObservableObject {
         mode: DictationMode,
         confidence: Double = 1.0,
         context: DictationContext = .default,
-        detectedBundleID: String? = nil
+        detectedBundleID: String? = nil,
+        saveToHistory: Bool = true
     ) async -> String {
         lastSavedEntry = nil
 
@@ -525,7 +529,9 @@ class TextProcessingService: ObservableObject {
             mode: mode.rawValue,
             confidence: confidence
         )
-        lastSavedEntry = historyService.save(entry)
+        if saveToHistory {
+            lastSavedEntry = historyService.save(entry)
+        }
 
         #if DEBUG_RECORDER
         // Phase 25-02: this record-assembly block runs for BOTH `mode == .plain`

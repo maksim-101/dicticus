@@ -55,6 +55,7 @@ enum AppBuildInfo {
     ]
     #else
     private static let platformChanges = [
+        "Fixed: a transcript finished in the background is copied once and no longer overwrites what you copied since",
         "Fixed: the AI cleanup model download is checked before it is used, and a damaged file is deleted",
         "Fixed: AI cleanup keeps the words your dictionary put into a dictation as written, as on Mac",
         "Changed: Auto-Stop Recording is off by default, so a pause no longer ends a dictation (Settings → Transcriptions)",

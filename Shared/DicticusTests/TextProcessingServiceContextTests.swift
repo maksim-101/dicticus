@@ -221,4 +221,24 @@ final class TextProcessingServiceContextTests: XCTestCase {
         XCTAssertEqual(resolved, .code)
         XCTAssertEqual(CleanupPrompt.version(for: .transcriptionist, context: resolved), "v-transcriptionist-code")
     }
+
+    // MARK: - saveToHistory (261103-9c7)
+
+    /// `saveToHistory: false` returns the same text as the default call, creates no History row
+    /// and leaves `lastSavedEntry` nil; the default call still saves exactly one row.
+    func testSaveToHistoryFalseSkipsOnlyTheHistoryRow() async {
+        let mock = MockCleanupProvider()
+        mock.returnValue = "Hello, world."
+        let service = TextProcessingService(cleanupService: mock, historyService: testHistory)
+        let rowsBefore = testHistory.entries.count
+
+        let withoutSave = await service.process(text: "hello world", language: "en", mode: .aiCleanup, saveToHistory: false)
+        XCTAssertNil(service.lastSavedEntry)
+        XCTAssertEqual(testHistory.entries.count, rowsBefore)
+
+        let withSave = await service.process(text: "hello world", language: "en", mode: .aiCleanup)
+        XCTAssertEqual(withSave, withoutSave, "saving must not change the returned text")
+        XCTAssertNotNil(service.lastSavedEntry)
+        XCTAssertEqual(testHistory.entries.count, rowsBefore + 1)
+    }
 }
