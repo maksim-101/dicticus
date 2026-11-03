@@ -324,6 +324,9 @@ class HotkeyManager: ObservableObject {
     /// into a three-way table: an idle-unloaded model no longer blocks recording — it
     /// starts recording AND kicks a reload, so the reload runs in parallel with the
     /// recording + ASR time that already elapses before cleanup would need the model.
+    /// 261103-r9g adds a fourth row: no CleanupService at all while a download is on offer
+    /// (model not downloaded) records like `.proceed`; the rules-only text is pasted and only
+    /// then does `offerModelDownload()` ask. Without an offer the old abort stands.
     /// `isLoaded` can be false for two different reasons that must NOT be conflated:
     /// the initial launch load still in flight (abort, as before D-11), or the model
     /// was idle-unloaded (reload and proceed). `isLoaded == true` always wins, even
@@ -339,7 +342,7 @@ class HotkeyManager: ObservableObject {
     /// Pure decision table backing `AiCleanupKeyDownAction`. `nonisolated` and static
     /// so it is trivially unit-testable without constructing a `HotkeyManager`.
     nonisolated static func aiCleanupKeyDownAction(cleanupServicePresent: Bool, isLoaded: Bool, idleUnloaded: Bool, modelDownloadOffered: Bool = false) -> AiCleanupKeyDownAction {
-        guard cleanupServicePresent else { return .abortLlmLoading }
+        guard cleanupServicePresent else { return modelDownloadOffered ? .proceedAndOfferDownload : .abortLlmLoading }
         if isLoaded { return .proceed }
         if idleUnloaded { return .reloadAndProceed }
         return .abortLlmLoading
@@ -367,8 +370,38 @@ class HotkeyManager: ObservableObject {
         }
     }
 
+    /// True while the download alert is up, so a second AI press cannot stack another.
+    private var isOfferingModelDownload = false
+
+    /// Ask once whether to download the model. Runs in its own Task so the dictation Task has
+    /// already ended and the prompt never holds the paste pipeline.
+    private func offerModelDownload() {
+        guard !isOfferingModelDownload else { return }
+        isOfferingModelDownload = true
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.isOfferingModelDownload = false }
+            if self.modelDownloadPrompt() {
+                self.warmupService?.downloadLlmOnDemand()
+            }
+        }
+    }
+
+    /// Modal alert, shown after the paste so activating Dicticus cannot take the text from its
+    /// target. Re-activates the previously frontmost app afterwards.
     static func presentModelDownloadAlert() -> Bool {
-        false
+        let previous = NSWorkspace.shared.frontmostApplication
+        let alert = NSAlert()
+        alert.messageText = "AI Cleanup needs a 2.7 GB model, downloaded once from Hugging Face and run on this Mac. Download now?"
+        alert.addButton(withTitle: "Download")
+        let notNow = alert.addButton(withTitle: "Not now")
+        notNow.keyEquivalent = "\u{1b}"
+        NSApp.activate(ignoringOtherApps: true)
+        let download = alert.runModal() == .alertFirstButtonReturn
+        if let previous, previous != NSRunningApplication.current {
+            previous.activate(from: NSRunningApplication.current, options: [])
+        }
+        return download
     }
 
     /// Handle hotkey key-down event — start recording if conditions met.
@@ -402,7 +435,8 @@ class HotkeyManager: ObservableObject {
             let action = Self.aiCleanupKeyDownAction(
                 cleanupServicePresent: cleanupService != nil,
                 isLoaded: cleanupService?.isLoaded ?? false,
-                idleUnloaded: warmupService.isCleanupUnloaded
+                idleUnloaded: warmupService.isCleanupUnloaded,
+                modelDownloadOffered: warmupService.offersLlmDownload
             )
             switch action {
             case .abortLlmLoading:
@@ -668,6 +702,10 @@ class HotkeyManager: ObservableObject {
                         NotificationService.shared.post(.cleanupTimedOut)
                     case .applied, .notLoaded, .alreadyRunning, .failed:
                         break  // applied = success; the other pre-run states already notify elsewhere (llmLoading/busy)
+                    }
+                    // 261103-r9g: the rules-only text has landed; only now ask about the model.
+                    if self.warmupService?.offersLlmDownload == true {
+                        self.offerModelDownload()
                     }
                 }
 

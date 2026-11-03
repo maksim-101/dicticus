@@ -13,7 +13,9 @@ import os.log
 /// compilation and are fast (~162 ms warm load).
 ///
 /// D-07/D-08: LLM warmup runs sequentially after ASR to avoid memory pressure spikes.
-/// D-09: Qwen2.5-3B-Instruct GGUF (~1.93 GB) downloaded from HuggingFace on first run (CLEANRD-01).
+/// D-09: the cleanup GGUF (Qwen3.5-4B, ~2.7 GB) is fetched from HuggingFace only after the user agrees:
+/// from the first-use prompt, the Settings Download button, or at launch when "Download the model
+/// automatically" is on (261103-r9g). A model file already on disk is verified and loaded at launch as before.
 /// Threat T-04-08: Sequential loading + existing 600-second watchdog covers combined warmup.
 /// Threat T-02.1-03: Compilation runs on Task.detached(priority: .utility) to avoid
 /// blocking the main thread. [weak self] prevents retain cycles on app quit.
@@ -46,7 +48,7 @@ enum LlmStatus: Equatable {
 
 extension ModelWarmupService {
     /// D-08: shown when a GGUF fails verification a second time — `acquireVerifiedModel`
-    /// has already deleted the bad file, so a relaunch downloads afresh. AI cleanup
+    /// has already deleted the bad file, so the Download button or prompt fetches it afresh. AI cleanup
     /// stays disabled for the rest of this session (`isLlmReady` false, `cleanupService`
     /// nil) rather than looping retries indefinitely against a possibly-corrupted URL.
     static let verificationFailedStatus = "Model failed verification \u{2014} Retry download."
@@ -69,7 +71,8 @@ extension ModelWarmupService {
     }
 
     nonisolated static func llmLaunchAction(modelFileExists: Bool, autoDownload: Bool) -> LlmLaunchAction {
-        modelFileExists ? .load : .download
+        if modelFileExists { return .load }
+        return autoDownload ? .download : .leaveNotDownloaded
     }
 
     // MARK: - Phase 50 D-10/D-11: idle unload of the cleanup LLM
@@ -271,88 +274,21 @@ class ModelWarmupService: ObservableObject {
                     }
                 }
 
-                // Step 4: Download + initialize LLM for AI cleanup (D-07, D-08).
+                // Step 4: initialize LLM for AI cleanup (D-07, D-08).
                 // Sequential after ASR to avoid memory pressure spikes (D-08).
-                // Downloads ~1.93 GB Qwen2.5-3B GGUF on first run from HuggingFace CDN (D-09, CLEANRD-01).
+                // The ~2.7 GB GGUF is downloaded only with consent (261103-r9g): a file already on
+                // disk is verified and loaded; an absent file is fetched only when "Download the
+                // model automatically" is on, otherwise the status stays "Not downloaded".
                 // Non-fatal: if LLM fails, plain dictation still works.
-                do {
-                    let cached = ModelDownloadService.isModelCached()
-                    let fileExists = FileManager.default.fileExists(atPath: ModelDownloadService.modelPath().path)
-                    warmupLog.info("LLM Step 4: cached=\(cached) fileExists=\(fileExists)")
-                    if !fileExists {
-                        // No file at all — a genuine download.
-                        await MainActor.run { self?.llmStatus = .downloading }
-                    } else if !cached {
-                        // A file exists but isn't yet cheaply verified — the
-                        // first-launch-after-upgrade hash (10-30s for 2.74 GB) is
-                        // running, not a download. Distinguishing this from
-                        // .downloading avoids a misleading "Downloading model…"
-                        // label while D-08's verify-then-stamp does its one-time work.
-                        await MainActor.run { self?.llmStatus = .loading }
-                    }
-
-                    try await ModelDownloadService.downloadIfNeeded()
-                    warmupLog.info("LLM download complete, loading model...")
-
-                    await MainActor.run { self?.llmStatus = .loading }
-
-                    let modelPath = ModelDownloadService.modelPath().path
-                    warmupLog.info("LLM model path: \(modelPath)")
-                    // Phase 20.06 hotfix: CleanupService.init and .loadModel are now
-                    // nonisolated, so `llama_model_load_from_file` (synchronous ~30s C
-                    // call) runs on this detached task instead of blocking MainActor.
-                    CleanupService.initializeBackend()
-                    // Preserve pre-extraction macOS timeout (5 s) — the shared
-                    // init default is 8 s, tuned for iOS (D-04).
-                    // `-llmTimeoutSeconds <n>` overrides the 5 s default so the benchmark can run
-                    // UNTIMED — a truncated inference cannot tell you what the work actually needs.
-                    // Phase 44 Plan 14: 20 s (was 5 s). AI Cleanup is a deliberate Ctrl+Shift+D,
-                    // not automatic, so a longer budget is acceptable; the old 5 s silently discarded
-                    // Qwen3.5's completed work on long utterances. The output-budget guard caps how
-                    // long an inference can run, and anything past that surfaces an honest "inserted
-                    // without cleanup" notice rather than a silent fallback.
-                    let timeoutOverride = UserDefaults.standard.double(forKey: "llmTimeoutSeconds")
-                    let cleanup = CleanupService(
-                        inferenceTimeoutSeconds: timeoutOverride > 0 ? timeoutOverride : 20.0
-                    )
-                    try cleanup.loadModel(from: modelPath)
-
-                    warmupLog.info("LLM model loaded successfully")
-                    await MainActor.run {
-                        self?.cleanupService = cleanup
-                        self?.isLlmReady = true
-                        self?.llmStatus = .ready
-                        // Phase 50 D-10: the idle clock starts now; the loop itself
-                        // starts once, here, and runs for the app's lifetime.
-                        self?.llmLoadedAt = Date()
-                        self?.startIdleUnloadLoop()
-                    }
-
-                    // Phase 44 Plan 14: same benchmark as iOS, same 8 real corpus utterances, so
-                    // the two platforms' latency numbers are directly comparable.
-                    if CleanupBenchmark.isEnabled {
-                        await CleanupBenchmark.run(
-                            using: cleanup,
-                            model: ModelDownloadService.activeModelFileName
-                        )
-                    }
-                } catch is CancellationError {
-                    warmupLog.error("LLM warmup cancelled")
-                    throw CancellationError()
-                } catch let error as ModelIntegrityError {
-                    // D-08: acquireVerifiedModel already deleted the bad file (and its
-                    // stamp) after the second mismatch — nothing to clean up here.
-                    // AI cleanup stays disabled for this session; a relaunch re-runs
-                    // Step 4 and downloads afresh.
-                    warmupLog.error("LLM model failed verification: \(error.localizedDescription)")
-                    await MainActor.run {
-                        self?.llmStatus = .failed(Self.verificationFailedStatus)
-                    }
-                } catch {
-                    warmupLog.error("LLM warmup failed: \(error.localizedDescription)")
-                    await MainActor.run {
-                        self?.llmStatus = .failed("AI cleanup unavailable")
-                    }
+                let fileExists = FileManager.default.fileExists(atPath: ModelDownloadService.modelPath().path)
+                let autoDownload = Self.autoDownloadEnabled(from: DicticusDefaults.suite)
+                let action = Self.llmLaunchAction(modelFileExists: fileExists, autoDownload: autoDownload)
+                warmupLog.info("LLM Step 4: fileExists=\(fileExists) autoDownload=\(autoDownload) action=\(String(describing: action), privacy: .public)")
+                switch action {
+                case .leaveNotDownloaded:
+                    await MainActor.run { self?.llmStatus = .notDownloaded }
+                case .load, .download:
+                    try await self?.acquireAndLoadLlm()
                 }
             } catch is CancellationError {
                 await MainActor.run {
@@ -382,6 +318,103 @@ class ModelWarmupService: ObservableObject {
             if self.isWarming {
                 self.cancelWarmup()
             }
+        }
+    }
+
+    /// Step 4 of `warmup()` and the on-demand download share this body: verify or download the
+    /// pinned GGUF, load it, publish the `CleanupService`. Callers decide whether a download is
+    /// wanted; this only does the work. A CancellationError is rethrown for `warmup()`'s handler.
+    private nonisolated func acquireAndLoadLlm() async throws {
+        let warmupLog = Logger(subsystem: "com.dicticus", category: "warmup")
+        do {
+            let cached = ModelDownloadService.isModelCached()
+            let fileExists = FileManager.default.fileExists(atPath: ModelDownloadService.modelPath().path)
+            warmupLog.info("LLM Step 4: cached=\(cached) fileExists=\(fileExists)")
+            if !fileExists {
+                // No file at all — a genuine download (the caller has consent: prompt, button or setting).
+                await MainActor.run { self.llmStatus = .downloading }
+            } else if !cached {
+                // A file exists but isn't yet cheaply verified — the
+                // first-launch-after-upgrade hash (10-30s for 2.74 GB) is
+                // running, not a download. Distinguishing this from
+                // .downloading avoids a misleading "Downloading model…"
+                // label while D-08's verify-then-stamp does its one-time work.
+                await MainActor.run { self.llmStatus = .loading }
+            }
+
+            try await ModelDownloadService.downloadIfNeeded()
+            warmupLog.info("LLM download complete, loading model...")
+
+            await MainActor.run { self.llmStatus = .loading }
+
+            let modelPath = ModelDownloadService.modelPath().path
+            warmupLog.info("LLM model path: \(modelPath)")
+            // Phase 20.06 hotfix: CleanupService.init and .loadModel are now
+            // nonisolated, so `llama_model_load_from_file` (synchronous ~30s C
+            // call) runs on this detached task instead of blocking MainActor.
+            CleanupService.initializeBackend()
+            // Preserve pre-extraction macOS timeout (5 s) — the shared
+            // init default is 8 s, tuned for iOS (D-04).
+            // `-llmTimeoutSeconds <n>` overrides the 5 s default so the benchmark can run
+            // UNTIMED — a truncated inference cannot tell you what the work actually needs.
+            // Phase 44 Plan 14: 20 s (was 5 s). AI Cleanup is a deliberate Ctrl+Shift+D,
+            // not automatic, so a longer budget is acceptable; the old 5 s silently discarded
+            // Qwen3.5's completed work on long utterances. The output-budget guard caps how
+            // long an inference can run, and anything past that surfaces an honest "inserted
+            // without cleanup" notice rather than a silent fallback.
+            let timeoutOverride = UserDefaults.standard.double(forKey: "llmTimeoutSeconds")
+            let cleanup = CleanupService(
+                inferenceTimeoutSeconds: timeoutOverride > 0 ? timeoutOverride : 20.0
+            )
+            try cleanup.loadModel(from: modelPath)
+
+            warmupLog.info("LLM model loaded successfully")
+            await MainActor.run {
+                self.cleanupService = cleanup
+                self.isLlmReady = true
+                self.llmStatus = .ready
+                // Phase 50 D-10: the idle clock starts now; the loop itself
+                // starts once, here, and runs for the app's lifetime.
+                self.llmLoadedAt = Date()
+                self.startIdleUnloadLoop()
+            }
+
+            // Phase 44 Plan 14: same benchmark as iOS, same 8 real corpus utterances, so
+            // the two platforms' latency numbers are directly comparable.
+            if CleanupBenchmark.isEnabled {
+                await CleanupBenchmark.run(
+                    using: cleanup,
+                    model: ModelDownloadService.activeModelFileName
+                )
+            }
+        } catch is CancellationError {
+            warmupLog.error("LLM warmup cancelled")
+            throw CancellationError()
+        } catch let error as ModelIntegrityError {
+            // D-08: acquireVerifiedModel already deleted the bad file (and its
+            // stamp) after the second mismatch — nothing to clean up here.
+            // AI cleanup stays disabled for this session; the file is gone, so the
+            // Download button / prompt (offersLlmDownload) fetch it afresh.
+            warmupLog.error("LLM model failed verification: \(error.localizedDescription)")
+            await MainActor.run {
+                self.llmStatus = .failed(Self.verificationFailedStatus)
+            }
+        } catch {
+            warmupLog.error("LLM warmup failed: \(error.localizedDescription)")
+            await MainActor.run {
+                self.llmStatus = .failed("AI cleanup unavailable")
+            }
+        }
+    }
+
+    /// Download (or verify) and load the cleanup model on the user's request. Gated on
+    /// `offersLlmDownload`; the status flips to `.downloading` synchronously so a second click
+    /// finds nothing to start. `DicticusApp`'s `isLlmReady` observer wires the loaded service in.
+    func downloadLlmOnDemand() {
+        guard offersLlmDownload else { return }
+        llmStatus = .downloading
+        Task.detached(priority: .utility) { [weak self] in
+            try? await self?.acquireAndLoadLlm()
         }
     }
 
