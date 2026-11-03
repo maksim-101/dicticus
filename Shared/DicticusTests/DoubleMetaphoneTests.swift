@@ -13,8 +13,7 @@ import XCTest
 /// assertion driver (1545/1545 agreement with the `abydos` reference); these
 /// XCTests are the permanent regression net.
 ///
-/// This file is kept BYTE-IDENTICAL in `macOS/DicticusTests/` and
-/// `iOS/DicticusTests/` (cross-platform parity).
+/// Lives in Shared/DicticusTests, so it runs in both the macOS and iOS test bundles.
 final class DoubleMetaphoneTests: XCTestCase {
 
     // MARK: - Reference vectors (canonical Lawrence Philips primary code)

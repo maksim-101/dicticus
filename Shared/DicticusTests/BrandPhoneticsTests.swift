@@ -13,8 +13,7 @@ import XCTest
 /// `*.xcodeproj`. Correctness in 36.5-01 was proven by standalone `swiftc`
 /// assertion drivers; these XCTests are the permanent regression net.
 ///
-/// This file is kept BYTE-IDENTICAL in `macOS/DicticusTests/` and
-/// `iOS/DicticusTests/` (cross-platform parity).
+/// Lives in Shared/DicticusTests, so it runs in both the macOS and iOS test bundles.
 final class BrandPhoneticsTests: XCTestCase {
 
     // MARK: - BrandStringMetrics.damerauLevenshtein (OSA)

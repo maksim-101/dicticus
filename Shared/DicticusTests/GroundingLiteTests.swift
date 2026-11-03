@@ -11,9 +11,7 @@ import XCTest
 /// letter-expansion guard positive/negative fixtures (eval_set.json
 /// en-inve-030/032 + a genuine "C++" dictation).
 ///
-/// Byte-identical with iOS/DicticusTests/GroundingLiteTests.swift per
-/// cross-platform test convention (Shared/ changes ship macOS + iOS
-/// together).
+/// Lives in Shared/DicticusTests, so it runs in both the macOS and iOS test bundles.
 ///
 /// @MainActor: the leak-strip positive fixtures call `CleanupService.
 /// stripPreamble`, which is MainActor-isolated (inherited from the

@@ -18,8 +18,7 @@ import XCTest
 /// any actor hop or service instantiation, matching the style of
 /// `SelfCorrectionResolverTests`.
 ///
-/// Per `feedback_cleanup_cross_platform_parity`: this file is byte-identical
-/// to `iOS/DicticusTests/CapitalizationTests.swift`.
+/// Lives in Shared/DicticusTests, so it runs in both the macOS and iOS test bundles.
 final class CapitalizationTests: XCTestCase {
 
     // MARK: - First-letter capitalization (the 42-05 UAT gate-revert failures)

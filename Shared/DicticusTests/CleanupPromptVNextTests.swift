@@ -7,8 +7,7 @@ import XCTest
 /// CleanupService's ChatML feed/stop/strip path: the prompt's framing must be
 /// exactly what CleanupService tokenizes, stops on, and strips.
 ///
-/// Byte-identical with iOS/DicticusTests/CleanupPromptVNextTests.swift per
-/// cross-platform parity convention (Shared/ changes ship macOS + iOS together).
+/// Lives in Shared/DicticusTests, so it runs in both the macOS and iOS test bundles.
 @MainActor
 final class CleanupPromptVNextTests: XCTestCase {
 

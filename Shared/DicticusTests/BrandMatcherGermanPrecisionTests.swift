@@ -27,7 +27,7 @@ import XCTest
 /// limited to a couple of distinctive non-word sanity checks so the pass is not
 /// vacuous.
 ///
-/// Kept BYTE-IDENTICAL in `macOS/DicticusTests/` and `iOS/DicticusTests/`.
+/// Lives in Shared/DicticusTests, so it runs in both the macOS and iOS test bundles.
 @MainActor
 final class BrandMatcherGermanPrecisionTests: XCTestCase {
 

@@ -12,9 +12,7 @@ import XCTest
 /// prompt itself changes — shipping the default flip early would make the
 /// 44-13 bake-off's evidence unattributable.
 ///
-/// Byte-identical with iOS/DicticusTests per cross-platform parity
-/// convention via the Shared/DicticusTests/** shared-source-group (this file
-/// lives in Shared/, not per-platform, so there is only one copy).
+/// Lives in Shared/DicticusTests, so it runs in both the macOS and iOS test bundles.
 final class CleanupPromptVariantTests: XCTestCase {
 
     // MARK: - D-09 attribution lock

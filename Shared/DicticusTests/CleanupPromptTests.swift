@@ -29,8 +29,7 @@ import XCTest
 /// unambiguous rule (keep only the corrected value). `currentVersion` bumps
 /// v-brave -> v-transcriptionist.
 ///
-/// Byte-identical with iOS/DicticusTests/CleanupPromptTests.swift per
-/// cross-platform parity convention (Shared/ changes ship macOS + iOS together).
+/// Lives in Shared/DicticusTests, so it runs in both the macOS and iOS test bundles.
 final class CleanupPromptTests: XCTestCase {
 
     // MARK: - R-03: Known-terms dictionary injection removed at source

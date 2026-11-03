@@ -15,8 +15,7 @@ import XCTest
 ///   - PRECISION (load-bearing): 0 of the 20 adversarial negatives is rewritten
 ///     (the `could→Claude` failure mode the comprehensive lexicon prevents).
 ///
-/// This file is kept BYTE-IDENTICAL in `macOS/DicticusTests/` and
-/// `iOS/DicticusTests/` (cross-platform parity).
+/// Lives in Shared/DicticusTests, so it runs in both the macOS and iOS test bundles.
 @MainActor
 final class BrandMatcherTests: XCTestCase {
 

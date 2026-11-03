@@ -28,7 +28,7 @@ import XCTest
 /// here for a hermetic repro, mirroring the existing "C++"/"C#" injection
 /// pattern in `BrandMatcherTests.testShortLetterNeverRewrittenToSymbolSuffixedCanonical`.
 ///
-/// Kept BYTE-IDENTICAL in `macOS/DicticusTests/` and `iOS/DicticusTests/`.
+/// Lives in Shared/DicticusTests, so it runs in both the macOS and iOS test bundles.
 @MainActor
 final class BrandMatcherShortAcronymGuardTests: XCTestCase {
 
