@@ -28,6 +28,7 @@ import XCTest
 private final class UnusedAudioRecorder: AudioRecording {
     var isRecording = false
     var onSilenceDetected: (() -> Void)?
+    var onCaptureInterrupted: (() -> Void)?
     // Never expected to be called — every recording in this suite is seeded
     // directly via PendingRecordingStore.enqueue(), bypassing startDictation()/
     // stopDictation() entirely, since this suite's subject is the drain/lifecycle

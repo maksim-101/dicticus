@@ -30,6 +30,10 @@ protocol AudioRecording: AnyObject {
     func stopRecording() throws -> RecordingArtifact
     func cancelRecording()
     var onSilenceDetected: (() -> Void)? { get set }
+    /// Fires once when the system ends the capture (interruption, input device gone, engine
+    /// reconfiguration). Separate from `onSilenceDetected` because silence is ignored while
+    /// backgrounded and an interruption must end the recording there too.
+    var onCaptureInterrupted: (() -> Void)? { get set }
 }
 
 /// Tap-to-disk WAV writer, deliberately separate from `AudioRecorder` itself so it is
@@ -136,6 +140,66 @@ final class AudioRecorder: AudioRecording {
 
     /// Callback triggered when Auto-Stop detects sustained silence.
     var onSilenceDetected: (() -> Void)?
+
+    /// Callback triggered once when the system ends the capture (261103-9c7).
+    var onCaptureInterrupted: (() -> Void)?
+
+    private var interruptionObservers: [NSObjectProtocol] = []
+
+    /// Whether a system notification means the capture can no longer continue and the audio
+    /// recorded so far must be finalized. Pure so the decision table is testable without a
+    /// microphone. Connecting another input (`.newDeviceAvailable`) and the recorder's own
+    /// `.categoryChange` do not stop a recording; an interruption's `.ended` is not an event.
+    nonisolated static func shouldStopRecording(name: Notification.Name, userInfo: [AnyHashable: Any]?) -> Bool {
+        switch name {
+        case AVAudioSession.interruptionNotification:
+            guard let raw = userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt else { return false }
+            return AVAudioSession.InterruptionType(rawValue: raw) == .began
+        case AVAudioSession.routeChangeNotification:
+            guard let raw = userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt else { return false }
+            return AVAudioSession.RouteChangeReason(rawValue: raw) == .oldDeviceUnavailable
+        case .AVAudioEngineConfigurationChange:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Registered only after `audioEngine.start()` succeeded: registering earlier would let the
+    /// recorder's own setCategory/setActive reconfiguration stop it. One-shot, because the three
+    /// notifications often arrive together and a second stop request before `stopDictation` runs
+    /// would begin a second background task and orphan the first.
+    private func startObservingInterruptions() {
+        stopObservingInterruptions()
+        let session = AVAudioSession.sharedInstance()
+        let sources: [(Notification.Name, AnyObject)] = [
+            (AVAudioSession.interruptionNotification, session),
+            (AVAudioSession.routeChangeNotification, session),
+            (.AVAudioEngineConfigurationChange, audioEngine),
+        ]
+        for (name, object) in sources {
+            let observer = NotificationCenter.default.addObserver(forName: name, object: object, queue: .main) { [weak self] note in
+                let stop = Self.shouldStopRecording(name: note.name, userInfo: note.userInfo)
+                guard stop else { return }
+                MainActor.assumeIsolated { self?.handleCaptureInterrupted(trigger: name.rawValue) }
+            }
+            interruptionObservers.append(observer)
+        }
+    }
+
+    private func stopObservingInterruptions() {
+        for observer in interruptionObservers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        interruptionObservers.removeAll()
+    }
+
+    private func handleCaptureInterrupted(trigger: String) {
+        guard isRecording else { return }
+        Self.log.info("Capture interrupted by \(trigger, privacy: .public)")
+        stopObservingInterruptions()
+        onCaptureInterrupted?()
+    }
 
     /// Settable seam so the D-04 haptic-timing assertion is testable without haptic
     /// hardware. Fires exactly once per recording START, on the first buffer the
@@ -396,6 +460,7 @@ final class AudioRecorder: AudioRecording {
         }
 
         isRecording = true
+        startObservingInterruptions()
         return uuid
     }
 
@@ -486,6 +551,7 @@ final class AudioRecorder: AudioRecording {
     func stopRecording() throws -> RecordingArtifact {
         guard isRecording else { throw RecorderError.notRecording }
 
+        stopObservingInterruptions()
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
         // Release the mic session on every exit path (success or throw). Without this
@@ -509,6 +575,7 @@ final class AudioRecorder: AudioRecording {
 
     func cancelRecording() {
         guard isRecording else { return }
+        stopObservingInterruptions()
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
         writer?.discard()

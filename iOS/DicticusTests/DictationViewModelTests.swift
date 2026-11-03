@@ -13,6 +13,7 @@ import XCTest
 private final class FakeAudioRecorder: AudioRecording {
     private(set) var isRecording = false
     var onSilenceDetected: (() -> Void)?
+    var onCaptureInterrupted: (() -> Void)?
 
     var startCallCount = 0
     var stopCallCount = 0
@@ -1399,6 +1400,44 @@ final class DictationViewModelTests: XCTestCase {
                       "The pending recording's WAV must exist on disk (D-01 durability)")
 
         // Cleanup
+        testStore.delete(row)
+        try? FileManager.default.removeItem(at: tempContainer)
+    }
+
+    /// 261103-9c7: a system interruption (call, Siri, AirPods out, engine reconfiguration) ends the
+    /// recording like a user stop, also while backgrounded, and keeps the captured audio.
+    /// The recorder is injected AFTER init, so the wiring must also run on assignment.
+    func testCaptureInterruptionEndsRecordingAndKeepsAudioWhileBackgrounded() async throws {
+        let vm = DictationViewModel()
+        let tempContainer = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let testHistory = HistoryService.makeForTesting(containerURLProvider: { tempContainer })
+        let testStore = PendingRecordingStore.makeForTesting(historyService: testHistory)
+        vm.historyService = testHistory
+        vm.pendingStore = testStore
+        vm.isBackgroundedProvider = { true }
+        let fakeRecorder = FakeAudioRecorder()
+        vm.audioRecorder = fakeRecorder
+        vm.state = .recording
+
+        let interrupt = try XCTUnwrap(fakeRecorder.onCaptureInterrupted, "the view model must wire onCaptureInterrupted on assignment")
+        interrupt()
+        let deadline = Date().addingTimeInterval(5)
+        while (vm.state != .idle || fakeRecorder.stopCallCount == 0) && Date() < deadline {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertEqual(vm.state, .idle)
+        XCTAssertEqual(fakeRecorder.stopCallCount, 1)
+        XCTAssertEqual(testStore.pendingRecordings.count, 1, "the captured audio must be held, not dropped")
+        let row = try XCTUnwrap(testStore.pendingRecordings.first)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: try testStore.fileURL(for: row).path))
+
+        // A second notification of the same interruption changes nothing.
+        interrupt()
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(fakeRecorder.stopCallCount, 1)
+        XCTAssertEqual(testStore.pendingRecordings.count, 1)
+
         testStore.delete(row)
         try? FileManager.default.removeItem(at: tempContainer)
     }

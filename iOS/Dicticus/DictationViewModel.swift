@@ -67,12 +67,21 @@ class DictationViewModel: ObservableObject {
 
     // Phase 46-02 (D-01): recorder is now independent of ASR model readiness.
     // Injectable so tests can drive DictationViewModel without a microphone.
-    var audioRecorder: AudioRecording = AudioRecorder()
+    var audioRecorder: AudioRecording = AudioRecorder() {
+        didSet { wireRecorderCallbacks() }
+    }
     // Phase 46-02 (D-01/D-09/D-10): durable queue of captured-but-not-yet-transcribed
     // recordings. Injectable so tests never touch the real user database.
     var pendingStore: PendingRecordingStore = .shared
 
     init() {
+        // `didSet` does not run for the default value, so the default recorder is wired here.
+        wireRecorderCallbacks()
+    }
+
+    /// Wires the recorder's callbacks. Called from `init` and on every `audioRecorder`
+    /// assignment, so an injected recorder gets the same behaviour as the default one.
+    private func wireRecorderCallbacks() {
         audioRecorder.onSilenceDetected = { [weak self] in
             Task { @MainActor in
                 guard let self else { return }
@@ -84,6 +93,14 @@ class DictationViewModel: ObservableObject {
                 guard !self.isBackgroundedProvider() else { return }
                 await self.stopDictation()
             }
+        }
+        // 261103-9c7: a call, Siri, AirPods removal or an engine reconfiguration ends the
+        // recording like a user stop, also while backgrounded. The audio captured so far is
+        // kept: finalizeIfRecording guards on .recording, begins the background task the
+        // transcribe tail needs and runs stopDictation.
+        audioRecorder.onCaptureInterrupted = { [weak self] in
+            Self.log.info("Capture interrupted by the system, finalizing the recording")
+            self?.finalizeIfRecording()
         }
     }
 

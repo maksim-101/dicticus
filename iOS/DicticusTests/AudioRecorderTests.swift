@@ -25,6 +25,41 @@ final class AudioRecorderTests: XCTestCase {
         super.tearDown()
     }
 
+    // MARK: - 261103-9c7: which system events end a recording
+
+    private func interruption(_ type: AVAudioSession.InterruptionType?) -> Bool {
+        AudioRecorder.shouldStopRecording(
+            name: AVAudioSession.interruptionNotification,
+            userInfo: type.map { [AVAudioSessionInterruptionTypeKey: $0.rawValue] }
+        )
+    }
+
+    private func routeChange(_ reason: AVAudioSession.RouteChangeReason?) -> Bool {
+        AudioRecorder.shouldStopRecording(
+            name: AVAudioSession.routeChangeNotification,
+            userInfo: reason.map { [AVAudioSessionRouteChangeReasonKey: $0.rawValue] }
+        )
+    }
+
+    func testInterruptionBeganStopsAndEndedDoesNot() {
+        XCTAssertTrue(interruption(.began))
+        XCTAssertFalse(interruption(.ended))
+        XCTAssertFalse(interruption(nil), "a notification without a type must not stop the recording")
+    }
+
+    func testOnlyOldDeviceUnavailableRouteChangeStops() {
+        XCTAssertTrue(routeChange(.oldDeviceUnavailable))
+        XCTAssertFalse(routeChange(.newDeviceAvailable), "connecting a microphone must not stop the recording")
+        XCTAssertFalse(routeChange(.categoryChange), "the recorder's own category change must not stop it")
+        XCTAssertFalse(routeChange(.override))
+        XCTAssertFalse(routeChange(nil))
+    }
+
+    func testEngineConfigurationChangeStopsAndUnrelatedNotificationDoesNot() {
+        XCTAssertTrue(AudioRecorder.shouldStopRecording(name: .AVAudioEngineConfigurationChange, userInfo: nil))
+        XCTAssertFalse(AudioRecorder.shouldStopRecording(name: Notification.Name("SomethingElse"), userInfo: nil))
+    }
+
     // MARK: - Helpers
 
     private func makeFormat(sampleRate: Double = 48000) -> AVAudioFormat {
