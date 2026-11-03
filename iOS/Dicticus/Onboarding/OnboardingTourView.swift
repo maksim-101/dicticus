@@ -91,7 +91,7 @@ struct OnboardingTourView: View {
             Text("Custom Dictionary")
                 .font(.title).bold()
 
-            Text("Fix recurring mishearings with find-and-replace entries. Import CSV files or bundled starter packs to get started quickly.\n\nFind it under **Settings → Custom Dictionary**.")
+            Text("Fix recurring mishearings with find-and-replace entries. Import CSV files or bundled starter packs to get started quickly.\n\nFind it under the **Dictionary** tab.")
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
         }

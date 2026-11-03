@@ -151,7 +151,7 @@ struct AiCleanupSection: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("History storage degraded")
                     .font(.subheadline.weight(.semibold))
-                Text("Dicticus is using local app storage for transcription history. History will not be visible to the Dicticus keyboard extension. Reinstall the app if this is unexpected.")
+                Text("Dicticus is using local app storage for transcription history. Reinstall the app if this is unexpected.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

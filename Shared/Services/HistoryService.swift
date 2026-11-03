@@ -111,7 +111,7 @@ class HistoryService: ObservableObject {
         }
         if !didLogFallback {
             didLogFallback = true
-            log.warning("App Group container 'group.com.dicticus' not found — falling back to per-app applicationSupport. History will NOT be visible to keyboard extensions until entitlements are restored.")
+            log.warning("App Group container 'group.com.dicticus' not found — falling back to per-app applicationSupport.")
         }
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let bundleID = Bundle.main.bundleIdentifier ?? "com.dicticus.fallback"

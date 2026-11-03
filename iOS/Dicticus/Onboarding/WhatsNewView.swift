@@ -37,7 +37,7 @@ struct WhatsNewView: View {
                     icon: "book.fill",
                     color: .purple,
                     title: "Custom Dictionary",
-                    description: "Your custom replacements now sync across your devices via the shared pipeline."
+                    description: "Fix recurring mishearings with find-and-replace entries that apply to every dictation."
                 )
             }
             .padding(.horizontal)
