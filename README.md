@@ -103,13 +103,18 @@ brew install xcodegen
 # macOS
 cd macOS
 xcodegen generate
-xcodebuild -scheme Dicticus -configuration Release build
+# Unsigned Debug build, no certificate needed
+xcodebuild -project Dicticus.xcodeproj -scheme Dicticus -configuration Debug -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' build
 
 # iOS
-cd iOS
+cd ../iOS
 xcodegen generate
 # Open Dicticus.xcodeproj in Xcode 26 and Run on Device/Simulator
 ```
+
+A signed Release build (`xcodebuild -scheme Dicticus -configuration Release build` in `macOS/`) needs a Developer ID Application certificate in your keychain and your Apple Developer team ID exported as `DEVELOPER_TEAM_ID` before `xcodegen generate`, because `macOS/project.yml` reads it.
+
+`Config/Local.xcconfig` is optional and gitignored. Copy `Config/Local.xcconfig.example` to it only when the gitignored `Shared/Services/PersonalLexicon.swift` exists on your machine; a clean clone builds without it.
 
 ## License
 
