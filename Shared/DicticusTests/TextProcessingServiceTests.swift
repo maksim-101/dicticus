@@ -13,8 +13,7 @@ import XCTest
 ///   - Phase 25.1-01 lang_used + emission_counter (#if DEBUG_RECORDER).
 ///   - Phase 27-02 dictionary_replacements end-to-end (#if DEBUG_RECORDER).
 ///
-/// Per feedback_cleanup_cross_platform_parity memory: this file is byte-
-/// identical to iOS/DicticusTests/TextProcessingServiceTests.swift.
+/// Lives in Shared/DicticusTests, so it runs in both the macOS and iOS test bundles.
 @MainActor
 final class TextProcessingServiceTests: XCTestCase {
 
@@ -460,8 +459,7 @@ final class TextProcessingServiceTests: XCTestCase {
 /// accessor populated from record(_:)) so the test does not depend on
 /// JSONL file I/O.
 ///
-/// Cross-platform parity (feedback_cleanup_cross_platform_parity): byte-
-/// identical between macOS and iOS test targets.
+/// Lives in Shared/DicticusTests, so it runs in both the macOS and iOS test bundles.
 @MainActor
 final class TextProcessingServiceRecorderTests: XCTestCase {
 

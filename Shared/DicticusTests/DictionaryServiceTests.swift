@@ -1,6 +1,7 @@
 import XCTest
 @testable import Dicticus
 
+/// Lives in Shared/DicticusTests, so it runs in both the macOS and iOS test bundles.
 @MainActor
 final class DictionaryServiceTests: XCTestCase {
     

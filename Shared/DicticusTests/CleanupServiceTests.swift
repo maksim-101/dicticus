@@ -1,6 +1,13 @@
 import XCTest
 @testable import Dicticus
 
+#if os(macOS)
+private typealias ModelDownloads = ModelDownloadService
+#else
+private typealias ModelDownloads = IOSModelDownloadService
+#endif
+
+/// Lives in Shared/DicticusTests, so it runs in both the macOS and iOS test bundles.
 @MainActor
 final class CleanupServiceTests: XCTestCase {
 
@@ -195,13 +202,13 @@ final class CleanupServiceTests: XCTestCase {
     /// The 30 s timeout keeps machine load from deciding the result.
     func testCleanupProducesOutputWithModel() async throws {
         try XCTSkipUnless(
-            IOSModelDownloadService.isModelCached(),
+            ModelDownloads.isModelCached(),
             "Cleanup LLM GGUF model not cached — skipping integration test"
         )
 
         CleanupService.initializeBackend()
         let service = CleanupService(inferenceTimeoutSeconds: 30)
-        try service.loadModel(from: IOSModelDownloadService.modelPath().path)
+        try service.loadModel(from: ModelDownloads.modelPath().path)
         XCTAssertTrue(service.isLoaded)
 
         CleanupService.lastCleanupOutcome = .failed
@@ -223,13 +230,13 @@ final class CleanupServiceTests: XCTestCase {
 
     func testCleanupStateTransitionsDuringInference() async throws {
         try XCTSkipUnless(
-            IOSModelDownloadService.isModelCached(),
+            ModelDownloads.isModelCached(),
             "Cleanup LLM GGUF model not cached — skipping integration test"
         )
 
         CleanupService.initializeBackend()
         let service = CleanupService()
-        try service.loadModel(from: IOSModelDownloadService.modelPath().path)
+        try service.loadModel(from: ModelDownloads.modelPath().path)
 
         XCTAssertEqual(service.state, .idle, "State must be idle before cleanup")
         // After cleanup completes, state returns to idle
@@ -242,13 +249,13 @@ final class CleanupServiceTests: XCTestCase {
     /// production seam; this is the only deterministic route to the empty-output branch.
     func testEmptyGenerationRecordsFailedOutcome() async throws {
         try XCTSkipUnless(
-            IOSModelDownloadService.isModelCached(),
+            ModelDownloads.isModelCached(),
             "Cleanup LLM GGUF model not cached — skipping integration test"
         )
 
         CleanupService.initializeBackend()
         let service = CleanupService(inferenceTimeoutSeconds: 30, maxOutputTokens: 0)
-        try service.loadModel(from: IOSModelDownloadService.modelPath().path)
+        try service.loadModel(from: ModelDownloads.modelPath().path)
 
         CleanupService.lastCleanupOutcome = .applied
         CleanupService.lastInferenceStats = CleanupService.InferenceStats(generatedTokens: -1)
@@ -270,13 +277,13 @@ final class CleanupServiceTests: XCTestCase {
     /// fires; the outcome must be the too-long skip the AI-cleanup hotkey reports, not .failed.
     func testPromptOverContextRecordsSkippedTooLong() async throws {
         try XCTSkipUnless(
-            IOSModelDownloadService.isModelCached(),
+            ModelDownloads.isModelCached(),
             "Cleanup LLM GGUF model not cached — skipping integration test"
         )
 
         CleanupService.initializeBackend()
         let service = CleanupService(inferenceTimeoutSeconds: 30, maxOutputTokens: Int32(CleanupService.contextTokens))
-        try service.loadModel(from: IOSModelDownloadService.modelPath().path)
+        try service.loadModel(from: ModelDownloads.modelPath().path)
 
         CleanupService.lastCleanupOutcome = .applied
         let input = "we cleaned the chain before the ride"
@@ -440,6 +447,96 @@ final class CleanupServiceTests: XCTestCase {
             claudeResult.contains(". claude"),
             "Phase 36.4 D-06 Pitfall 2: space must not be inserted before '.claude'"
         )
+    }
+
+    // MARK: - quick-260825-q2i: warm-up no-op contract
+
+    func testShouldWarmUpIsTrueWhenNeverInferred() {
+        let now = Date()
+        XCTAssertTrue(
+            CleanupService.shouldWarmUp(lastInferenceAt: nil, now: now, idleThreshold: 300),
+            "nil lastInferenceAt means never inferred — always cold, should warm up"
+        )
+    }
+
+    func testShouldWarmUpIsFalseWhenRecentlyInferred() {
+        let now = Date()
+        let tenSecondsAgo = now.addingTimeInterval(-10)
+        XCTAssertFalse(
+            CleanupService.shouldWarmUp(lastInferenceAt: tenSecondsAgo, now: now, idleThreshold: 300),
+            "recently-warm service (10s ago, 300s threshold) must not re-warm"
+        )
+    }
+
+    func testShouldWarmUpIsTrueWhenLongIdle() {
+        let now = Date()
+        let anHourAgo = now.addingTimeInterval(-3600)
+        XCTAssertTrue(
+            CleanupService.shouldWarmUp(lastInferenceAt: anHourAgo, now: now, idleThreshold: 300),
+            "idle long enough (1h ago, 300s threshold) should re-warm"
+        )
+    }
+
+    /// Pins the exact boundary value so the 300s idle-threshold constant cannot
+    /// drift silently. The predicate is documented as `>=` (inclusive at the
+    /// threshold): elapsed time exactly equal to idleThreshold counts as cold.
+    func testShouldWarmUpBoundaryIsInclusive() {
+        let now = Date()
+        let exactlyAtThreshold = now.addingTimeInterval(-300)
+        XCTAssertTrue(
+            CleanupService.shouldWarmUp(lastInferenceAt: exactlyAtThreshold, now: now, idleThreshold: 300),
+            "elapsed time exactly equal to idleThreshold must count as cold (inclusive boundary)"
+        )
+    }
+
+    func testWarmUpOnUnloadedServiceLeavesStateIdle() {
+        let service = CleanupService()
+        XCTAssertFalse(service.isLoaded)
+        service.warmUp()
+        XCTAssertEqual(service.state, .idle,
+            "warmUp() on an unloaded service must be a no-op — no cleaning state, no scheduled task")
+    }
+
+    func testRepeatedWarmUpOnUnloadedServiceStaysInert() {
+        let service = CleanupService()
+        service.warmUp()
+        service.warmUp()
+        service.warmUp()
+        XCTAssertEqual(service.state, .idle,
+            "repeated warmUp() calls on an unloaded service must remain inert and not crash")
+    }
+
+    // MARK: - Phase 50 D-09: unload() (strong-ref mechanism adaptation)
+
+    func testUnload_onUnloadedService_returnsFalseAndStaysUnloaded() {
+        let service = CleanupService()
+        XCTAssertFalse(service.unload(), "unload() on an already-unloaded service must return false")
+        XCTAssertFalse(service.isLoaded)
+        XCTAssertEqual(service.state, .idle)
+    }
+
+    func testUnloadThenReload_roundTrip() async throws {
+        try XCTSkipUnless(
+            ModelDownloads.isModelCached(),
+            "Cleanup LLM GGUF model not cached — skipping integration test"
+        )
+
+        CleanupService.initializeBackend()
+        let service = CleanupService()
+        try service.loadModel(from: ModelDownloads.modelPath().path)
+        XCTAssertTrue(service.isLoaded)
+
+        XCTAssertTrue(service.unload(), "unload() on a loaded, idle service must return true")
+        XCTAssertFalse(service.isLoaded)
+
+        let rawResult = await service.cleanup(text: "hello world", language: "en")
+        XCTAssertEqual(rawResult, "hello world", "cleanup() on an unloaded service returns the input unchanged (.notLoaded path)")
+
+        try service.loadModel(from: ModelDownloads.modelPath().path)
+        XCTAssertTrue(service.isLoaded)
+
+        let cleanedResult = await service.cleanup(text: "um so i went to the uh store", language: "en")
+        XCTAssertFalse(cleanedResult.isEmpty, "cleanup() after reload must produce non-empty output")
     }
 }
 

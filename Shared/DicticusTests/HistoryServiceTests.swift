@@ -1,7 +1,7 @@
 import XCTest
-import GRDB
 @testable import Dicticus
 
+/// Lives in Shared/DicticusTests, so it runs in both the macOS and iOS test bundles.
 @MainActor
 final class HistoryServiceTests: XCTestCase {
     
@@ -84,4 +84,56 @@ final class HistoryServiceTests: XCTestCase {
         service.clearAll()
         XCTAssertEqual(service.entries.count, 0)
     }
+
+#if os(iOS)
+    // iOS only: macOS keeps history in app-local storage (HistoryService.resolveStorage), so it has no App Group fallback, and only iOS Settings reads appGroupAvailable.
+
+    /// In a normally-provisioned simulator/test bundle the App Group
+    /// container is available and `appGroupAvailable` reports `true`.
+    /// In CI environments without provisioning, skip — the fallback path
+    /// is exercised by `testFallbackFlagSettableForUI` which does not
+    /// depend on the entitlement.
+    func testAppGroupAvailableFlagDefaultsTrue() throws {
+        let containerURL = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: "group.com.dicticus"
+        )
+        try XCTSkipIf(containerURL == nil,
+            "CI environment without App Group provisioning — fallback path covered by testFallbackFlagSettableForUI")
+        // Touch the singleton so its init runs and sets the flag.
+        _ = HistoryService.shared
+        XCTAssertTrue(HistoryService.appGroupAvailable,
+            "When App Group container is provisioned, appGroupAvailable must report true")
+    }
+
+    /// Inject a provider that returns `nil` to simulate App Group absence.
+    /// The resulting instance MUST:
+    ///   1. Construct successfully (no fatalError) — the resilience contract.
+    ///   2. Report `appGroupAvailable == false` — the visibility flag.
+    ///   3. Place its SQLite file under `applicationSupportDirectory`
+    ///      (the documented fallback location).
+    ///
+    /// This is the primary contract test for ACT-4-RESILIENCE. Without
+    /// the injectable factory there is no deterministic way to exercise
+    /// the fallback path in a unit test.
+    func testFallbackFlagSettableForUI() throws {
+        let service = HistoryService.makeForTesting(containerURLProvider: { nil })
+
+        // 2. Visibility flag flipped.
+        XCTAssertFalse(HistoryService.appGroupAvailable,
+            "When containerURL provider returns nil, appGroupAvailable must report false (fallback path active)")
+
+        // 3. Fallback storage path lives under applicationSupportDirectory.
+        let appSupport = try FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: false
+        )
+        let dbURL = service.databaseFileURL  // Plan 20.04 must expose this for the assertion.
+        XCTAssertTrue(
+            dbURL.path.hasPrefix(appSupport.path),
+            "Fallback DB path must live under applicationSupportDirectory. Got: \(dbURL.path), expected prefix: \(appSupport.path)"
+        )
+    }
+#endif
 }
