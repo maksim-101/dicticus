@@ -359,21 +359,45 @@ class IOSModelWarmupService: ObservableObject {
                 let appGroupDefaults = UserDefaults(suiteName: "group.com.dicticus") ?? UserDefaults.standard
                 let aiCleanupEnabled = appGroupDefaults.bool(forKey: "aiCleanupEnabled")
                 let hasEnoughRam = IOSModelWarmupService.isAiCleanupSupported  // D-03
+                // 261103-9c7: the gate only needs the file to exist. A file downloaded by an
+                // older build has no stamp yet and is hashed once, below, off the main thread.
                 let isCached = IOSModelDownloadService.isModelCached()
+                let hasFile = IOSModelDownloadService.hasModelFile()
 
                 // Phase 44 Plan 14: record the gate's three inputs to the probe artifact.
                 // Step 4 skipping is silent by design, which makes a "stuck preparing" launch
                 // indistinguishable from a working one without this line.
-                let gateNote = "aiCleanupEnabled=\(aiCleanupEnabled) hasEnoughRam=\(hasEnoughRam) isCached=\(isCached) path=\(IOSModelDownloadService.modelPath().lastPathComponent)"
+                let gateNote = "aiCleanupEnabled=\(aiCleanupEnabled) hasEnoughRam=\(hasEnoughRam) isCached=\(isCached) hasFile=\(hasFile) path=\(IOSModelDownloadService.modelPath().lastPathComponent)"
                 await MemoryProbe.shared.mark("llm_gate", note: gateNote)
 
-                guard aiCleanupEnabled, hasEnoughRam, isCached else {
-                    warmupLog.info("Step 4 skipped — aiCleanupEnabled=\(aiCleanupEnabled, privacy: .public), hasEnoughRam=\(hasEnoughRam, privacy: .public), isCached=\(isCached, privacy: .public)")
+                guard aiCleanupEnabled, hasEnoughRam, hasFile else {
+                    warmupLog.info("Step 4 skipped — aiCleanupEnabled=\(aiCleanupEnabled, privacy: .public), hasEnoughRam=\(hasEnoughRam, privacy: .public), hasFile=\(hasFile, privacy: .public)")
                     return  // Leaves llmStatus = .idle, isLlmReady = false — safe default
                 }
 
                 do {
                     await MainActor.run { self?.llmStatus = .loading }
+
+                    // 261103-9c7 (T-9C7-01/05): a file without a valid stamp is hashed once here,
+                    // inside the detached task and under the existing "loading" status.
+                    switch IOSModelDownloadService.verifyExistingModel() {
+                    case .verified(let rehashed):
+                        warmupLog.info("Step 4: model verified (rehashed=\(rehashed, privacy: .public))")
+                    case .mismatch(let actual) where actual == "hash-error":
+                        warmupLog.error("Step 4: model file could not be read for verification")
+                        await MainActor.run {
+                            self?.llmStatus = .failed("AI Cleanup could not read its model file. Relaunch Dicticus to try again.")
+                            self?.isLlmReady = false
+                        }
+                        return
+                    case .mismatch, .missing:
+                        warmupLog.error("Step 4: model file failed verification and was removed")
+                        await MainActor.run {
+                            self?.llmStatus = .failed("AI Cleanup's model file was damaged and has been removed. Download it again in Settings.")
+                            self?.isLlmReady = false
+                        }
+                        return
+                    }
                     warmupLog.info("Step 4: CleanupService.loadModel starting (off-MainActor)")
 
                     let modelPath = IOSModelDownloadService.modelPath().path

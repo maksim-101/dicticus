@@ -29,7 +29,9 @@ struct AiCleanupSection: View {
 
     /// Local mirror of on-disk cache state so UI refreshes when the downloader
     /// transitions to `.completed`.
-    @State private var isModelCached: Bool = IOSModelDownloadService.isModelCached()
+    /// 261103-9c7: file presence, not verification. A file from an older build awaits its
+    /// one-time hash in warmup and must not make this section offer a download.
+    @State private var isModelCached: Bool = IOSModelDownloadService.hasModelFile()
 
     /// D-05 (Phase 37 Plan 02): presented only when warmupService.isOnCellular is
     /// true — reuses the shared warmupService flag; no separate network-path
@@ -86,8 +88,12 @@ struct AiCleanupSection: View {
             // Refresh cached-state when download completes so the panel swaps to
             // the "relaunch to enable" hint.
             if newState == .completed {
-                isModelCached = IOSModelDownloadService.isModelCached()
+                isModelCached = IOSModelDownloadService.hasModelFile()
             }
+        }
+        // Warmup deletes a file that fails verification; bring the download panel back.
+        .onChange(of: warmupService.llmStatus) { _, _ in
+            isModelCached = IOSModelDownloadService.hasModelFile()
         }
         .confirmationDialog(
             "Download over Cellular?",
@@ -256,6 +262,15 @@ struct AiCleanupSection: View {
                     Label("Resume", systemImage: "play.circle")
                 }
                 .buttonStyle(.borderedProminent)
+
+            case .verifying:
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("Verifying download\u{2026}")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
             case .completed:
                 HStack(alignment: .top, spacing: 8) {

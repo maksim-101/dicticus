@@ -45,6 +45,29 @@ enum ModelIntegrity {
 
     private static let log = Logger(subsystem: "com.dicticus", category: "model-integrity")
 
+    /// The one GGUF file name that has a pin. Both platforms download the same
+    /// artifact from the same URL under this name.
+    static let pinnedModelFileName = "qwen3.5-4b-q4_k_m.gguf"
+
+    /// D-06/D-08 ledger: this SHA-256 was derived 2026-09-12 from TWO independent
+    /// sources, a local `shasum -a 256` over the benchmarked file AND the
+    /// HuggingFace CDN's `x-linked-etag` response header for the same artifact,
+    /// both recorded as MATCH in `50-GATE-DIFF.md` section D (not typed from the
+    /// elided source comment in the old doc-comments).
+    static let pinnedModelSHA256 = "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4"
+
+    /// D-08: expected byte size of the pinned GGUF, from the same section D derivation.
+    static let pinnedModelByteCount = 2_740_937_888
+
+    /// The expected SHA-256 for `name`, or nil if `name` has no pin. Only the
+    /// shipped file name is pinned; the dev `-llmModelFileOverride` file (a DEBUG
+    /// benchmark knob) has no pin and loads unverified with a warning (T-50-04-03,
+    /// accepted: a local attacker able to set that default already controls the
+    /// user session).
+    nonisolated static func expectedSHA256(forFileName name: String) -> String? {
+        name == pinnedModelFileName ? pinnedModelSHA256 : nil
+    }
+
     /// The stamp sidecar lives next to the model file: `<model>.gguf.stamp.json`.
     static func stampURL(for modelURL: URL) -> URL {
         modelURL.appendingPathExtension("stamp.json")
@@ -150,5 +173,20 @@ enum ModelIntegrity {
     static func isVerifiedCheaply(modelURL: URL, expectedSHA256: String) -> Bool {
         guard let facts = fileFacts(at: modelURL) else { return false }
         return stampMatches(readStamp(for: modelURL), bytes: facts.bytes, mtime: facts.mtime, expectedSHA256: expectedSHA256)
+    }
+}
+
+/// D-08: an existing or freshly downloaded file failed hash verification `attempts`
+/// times (across the existing-file check and any re-downloads), exceeding
+/// `ModelDownloadService.maxVerificationFailures`. No file is left at the target
+/// path when this is thrown.
+enum ModelIntegrityError: Error, Equatable, LocalizedError {
+    case verificationFailed(attempts: Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .verificationFailed(let attempts):
+            return "Model failed verification after \(attempts) attempt(s)."
+        }
     }
 }

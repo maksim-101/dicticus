@@ -20,12 +20,15 @@ final class MockURLProtocol: URLProtocol {
     nonisolated(unsafe) static var chunkDelay: TimeInterval = 0.05
     // If non-nil, force a .networkConnectionLost failure after N bytes sent.
     nonisolated(unsafe) static var failAfterBytes: Int? = nil
+    // If non-nil, answer with this HTTP status instead of 200/206 (error-page tests).
+    nonisolated(unsafe) static var forcedStatusCode: Int? = nil
 
     static func reset() {
         responseData = [:]
         chunkCount = 4
         chunkDelay = 0.05
         failAfterBytes = nil
+        forcedStatusCode = nil
     }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
@@ -54,7 +57,7 @@ final class MockURLProtocol: URLProtocol {
             "Content-Range": "bytes \(startOffset)-\(data.count - 1)/\(data.count)",
             "Accept-Ranges": "bytes"
         ]
-        let statusCode = startOffset > 0 ? 206 : 200
+        let statusCode = Self.forcedStatusCode ?? (startOffset > 0 ? 206 : 200)
         let response = HTTPURLResponse(url: url,
                                        statusCode: statusCode,
                                        httpVersion: "HTTP/1.1",

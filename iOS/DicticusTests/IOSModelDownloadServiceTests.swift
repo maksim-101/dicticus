@@ -1,4 +1,5 @@
 import XCTest
+import CryptoKit
 @testable import Dicticus
 
 /// Wave 0 scaffold — IOSModelDownloadService tests (D-10, Q6).
@@ -34,22 +35,28 @@ final class IOSModelDownloadServiceTests: XCTestCase {
         // Make sure any leftover GGUF from a previous test doesn't skew
         // the backup-exclusion assertion (fresh download each run).
         try? FileManager.default.removeItem(at: IOSModelDownloadService.modelPath())
+        try? FileManager.default.removeItem(at: IOSModelDownloadService.modelPath().appendingPathExtension("stamp.json"))
     }
 
     override func tearDown() async throws {
         MockURLProtocol.reset()
         try? FileManager.default.removeItem(at: IOSModelDownloadService.modelPath())
+        try? FileManager.default.removeItem(at: IOSModelDownloadService.modelPath().appendingPathExtension("stamp.json"))
         try await super.tearDown()
     }
 
     /// Make a service wired to MockURLProtocol with a small in-memory payload.
     private func makeService(payloadBytes: Int = 8 * 1024, chunkCount: Int = 4) -> IOSModelDownloadService {
-        MockURLProtocol.responseData[IOSModelDownloadService.modelURL.absoluteString] =
-            Data(repeating: 0xAB, count: payloadBytes)
+        let payload = Data(repeating: 0xAB, count: payloadBytes)
+        MockURLProtocol.responseData[IOSModelDownloadService.modelURL.absoluteString] = payload
         MockURLProtocol.chunkCount = chunkCount
         let cfg = URLSessionConfiguration.ephemeral
         cfg.protocolClasses = [MockURLProtocol.self]
-        return IOSModelDownloadService(sessionConfiguration: cfg)
+        return IOSModelDownloadService(sessionConfiguration: cfg, expectedSHA256: Self.sha256Hex(of: payload))
+    }
+
+    private static func sha256Hex(of data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     // MARK: - D-10: Progress callbacks over ≥3 chunks
@@ -133,16 +140,168 @@ final class IOSModelDownloadServiceTests: XCTestCase {
     // MARK: - isModelCached lifecycle
 
     func testIsModelCachedReflectsDiskState() async throws {
-        try XCTSkipIf(!isWave2Ready,
-                      "Pending Wave 2: IOSModelDownloadService not yet implemented")
-        // Fresh — setUp deletes any stale file.
         XCTAssertFalse(IOSModelDownloadService.isModelCached())
         MockURLProtocol.chunkDelay = 0
         let service = makeService(payloadBytes: 512, chunkCount: 1)
         try await service.startAndWaitForCompletion()
-        XCTAssertTrue(IOSModelDownloadService.isModelCached())
-        try FileManager.default.removeItem(at: IOSModelDownloadService.modelPath())
+
+        // The payload's hash is not the pin, so the stamp records a fact that does not
+        // make the file "cached" for the shipped model.
+        let url = IOSModelDownloadService.modelPath()
+        let payloadHash = Self.sha256Hex(of: Data(repeating: 0xAB, count: 512))
+        XCTAssertEqual(ModelIntegrity.readStamp(for: url)?.sha256, payloadHash)
         XCTAssertFalse(IOSModelDownloadService.isModelCached())
+
+        try FileManager.default.removeItem(at: url)
+        XCTAssertFalse(IOSModelDownloadService.hasModelFile())
+        XCTAssertFalse(IOSModelDownloadService.isModelCached())
+    }
+
+    // MARK: - 261103-9c7: integrity (HTTP status, pinned SHA-256, stamp)
+
+    private var stampPath: URL {
+        IOSModelDownloadService.modelPath().appendingPathExtension("stamp.json")
+    }
+
+    /// RED-1: an error response must not be saved as the model.
+    func testNon2xxResponseFailsAndLeavesNoFile() async throws {
+        MockURLProtocol.chunkDelay = 0
+        MockURLProtocol.forcedStatusCode = 404
+        let service = makeService(payloadBytes: 512, chunkCount: 1)
+        do {
+            try await service.startAndWaitForCompletion()
+            XCTFail("a 404 download must throw")
+        } catch {}
+        guard case .failed(let message) = service.state else {
+            return XCTFail("expected .failed, got \(service.state)")
+        }
+        XCTAssertTrue(message.contains("404"), "message must name the status: \(message)")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: IOSModelDownloadService.modelPath().path))
+    }
+
+    /// RED-2: with the default (pinned) hash, bytes that are not the pinned model are rejected.
+    func testDefaultPinRejectsWrongBytesAndLeavesNoFileOrStamp() async throws {
+        MockURLProtocol.chunkDelay = 0
+        MockURLProtocol.responseData[IOSModelDownloadService.modelURL.absoluteString] =
+            Data(repeating: 0xAB, count: 512)
+        MockURLProtocol.chunkCount = 1
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.protocolClasses = [MockURLProtocol.self]
+        let service = IOSModelDownloadService(sessionConfiguration: cfg)
+        do {
+            try await service.startAndWaitForCompletion()
+            XCTFail("a download that does not match the pin must throw")
+        } catch {}
+        guard case .failed = service.state else {
+            return XCTFail("expected .failed, got \(service.state)")
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: IOSModelDownloadService.modelPath().path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stampPath.path))
+    }
+
+    /// RED-3: a file with no stamp is not "cached" (it has never been hashed).
+    func testUnstampedFileIsNotCached() throws {
+        let modelsDir = IOSModelDownloadService.modelPath().deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: modelsDir, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: IOSModelDownloadService.modelPath().path, contents: Data("stub".utf8))
+        XCTAssertFalse(IOSModelDownloadService.isModelCached())
+    }
+
+    /// A verified download keeps the file, flags it out of backups and stamps it afterwards.
+    func testVerifiedDownloadStampsFileAfterBackupFlag() async throws {
+        MockURLProtocol.chunkDelay = 0
+        let service = makeService(payloadBytes: 2048, chunkCount: 2)
+        try await service.startAndWaitForCompletion()
+        XCTAssertEqual(service.state, .completed)
+
+        let url = IOSModelDownloadService.modelPath()
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+        XCTAssertTrue(try url.resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup ?? false)
+        let facts = try XCTUnwrap(ModelIntegrity.fileFacts(at: url))
+        let stamp = try XCTUnwrap(ModelIntegrity.readStamp(for: url))
+        XCTAssertEqual(stamp.sha256, Self.sha256Hex(of: Data(repeating: 0xAB, count: 2048)))
+        XCTAssertEqual(stamp.bytes, facts.bytes)
+        XCTAssertEqual(stamp.mtime, facts.mtime)
+    }
+
+    /// A hash mismatch with an injected expectation deletes nothing into place and fails.
+    func testInjectedHashMismatchFails() async throws {
+        MockURLProtocol.chunkDelay = 0
+        MockURLProtocol.responseData[IOSModelDownloadService.modelURL.absoluteString] = Data(repeating: 0xCD, count: 256)
+        MockURLProtocol.chunkCount = 1
+        let cfg = URLSessionConfiguration.ephemeral
+        cfg.protocolClasses = [MockURLProtocol.self]
+        let service = IOSModelDownloadService(sessionConfiguration: cfg, expectedSHA256: String(repeating: "0", count: 64))
+        do {
+            try await service.startAndWaitForCompletion()
+            XCTFail("mismatching hash must throw")
+        } catch {}
+        guard case .failed(let message) = service.state else {
+            return XCTFail("expected .failed, got \(service.state)")
+        }
+        XCTAssertTrue(message.contains("did not match"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: IOSModelDownloadService.modelPath().path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stampPath.path))
+    }
+
+    /// A stamp that carries the pin and matches the file makes it cached without hashing.
+    func testStampWithPinMakesFileCached() throws {
+        let url = IOSModelDownloadService.modelPath()
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: url.path, contents: Data("stub".utf8))
+        try ModelIntegrity.writeStamp(for: url, sha256: ModelIntegrity.pinnedModelSHA256)
+        XCTAssertTrue(IOSModelDownloadService.isModelCached())
+        // Touching the file invalidates the stamp (size changes).
+        try Data("stub-longer".utf8).write(to: url)
+        XCTAssertFalse(IOSModelDownloadService.isModelCached())
+    }
+
+    // MARK: verifyExistingModel (older build's unstamped file)
+
+    private func writeStub() throws {
+        let url = IOSModelDownloadService.modelPath()
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: url.path, contents: Data("stub".utf8))
+    }
+
+    func testVerifyExistingModelHashesOnceThenUsesStamp() throws {
+        try writeStub()
+        var calls = 0
+        let first = IOSModelDownloadService.verifyExistingModel(hasher: { _ in calls += 1; return ModelIntegrity.pinnedModelSHA256 })
+        XCTAssertEqual(first, .verified(rehashed: true))
+        XCTAssertEqual(calls, 1)
+        XCTAssertTrue(IOSModelDownloadService.isModelCached())
+        let second = IOSModelDownloadService.verifyExistingModel(hasher: { _ in calls += 1; return "never" })
+        XCTAssertEqual(second, .verified(rehashed: false))
+        XCTAssertEqual(calls, 1)
+    }
+
+    func testVerifyExistingModelMismatchDeletesFileAndStamp() throws {
+        try writeStub()
+        let verdict = IOSModelDownloadService.verifyExistingModel(hasher: { _ in "not-the-pin" })
+        XCTAssertEqual(verdict, .mismatch(actual: "not-the-pin"))
+        XCTAssertFalse(IOSModelDownloadService.hasModelFile())
+        XCTAssertFalse(FileManager.default.fileExists(atPath: stampPath.path))
+    }
+
+    func testVerifyExistingModelHashErrorKeepsFile() throws {
+        try writeStub()
+        struct Boom: Error {}
+        let verdict = IOSModelDownloadService.verifyExistingModel(hasher: { _ in throw Boom() })
+        XCTAssertEqual(verdict, .mismatch(actual: "hash-error"))
+        XCTAssertTrue(IOSModelDownloadService.hasModelFile(), "a transient read error must not delete the model")
+    }
+
+    func testVerifyExistingModelMissing() {
+        XCTAssertEqual(IOSModelDownloadService.verifyExistingModel(hasher: { _ in "x" }), .missing)
+    }
+
+    /// Guards a future model swap that updates one platform's file name and forgets the pin.
+    func testShippedFileNameHasTheSharedPin() {
+        let pin = ModelIntegrity.expectedSHA256(forFileName: IOSModelDownloadService.modelFileName)
+        XCTAssertEqual(pin, ModelIntegrity.pinnedModelSHA256)
+        XCTAssertEqual(pin?.count, 64)
+        XCTAssertNil(ModelIntegrity.expectedSHA256(forFileName: "other.gguf"))
     }
 
     // MARK: - Sanity: MockURLProtocol Range header handling

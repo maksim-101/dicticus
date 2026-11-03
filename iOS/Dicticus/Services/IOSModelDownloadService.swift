@@ -29,6 +29,8 @@ public final class IOSModelDownloadService: NSObject, ObservableObject, URLSessi
         case downloading
         case paused
         case completed
+        /// 261103-9c7: the file is complete and its SHA-256 is being compared with the pin.
+        case verifying
         case failed(String)
     }
 
@@ -77,14 +79,54 @@ public final class IOSModelDownloadService: NSObject, ObservableObject, URLSessi
             .appendingPathComponent(activeModelFileName)
     }
 
-    /// Whether the GGUF is already present on disk (for onboarding / warmup gating).
+    /// Whether the GGUF is present AND verified. For the pinned file this is the cheap
+    /// stamp check (exists and the stamp matches current size and mtime); it never
+    /// hashes. A file without a stamp (downloaded by an older build, or never
+    /// verified) is not cached until `verifyExistingModel()` has hashed it once.
+    /// An unpinned dev-override file falls back to plain existence.
     /// Also triggers best-effort orphan cleanup of the retired Gemma file on a cache hit.
     public nonisolated static func isModelCached() -> Bool {
-        let cached = FileManager.default.fileExists(atPath: modelPath().path)
+        let cached: Bool
+        if let expected = ModelIntegrity.expectedSHA256(forFileName: activeModelFileName) {
+            cached = ModelIntegrity.isVerifiedCheaply(modelURL: modelPath(), expectedSHA256: expected)
+        } else {
+            cached = FileManager.default.fileExists(atPath: modelPath().path)
+        }
         if cached {
             removeOrphanedModelsIfPresent()
         }
         return cached
+    }
+
+    /// Plain existence of the model file, verified or not. For the two places that
+    /// must not show download UI for a legitimate file still awaiting its one-time hash.
+    public nonisolated static func hasModelFile() -> Bool {
+        FileManager.default.fileExists(atPath: modelPath().path)
+    }
+
+    /// One-time verification of a file that has no valid stamp (downloaded by an
+    /// older build). Hashes 2.74 GB, so it must never run on the main actor: warmup
+    /// Step 4 calls it from its detached task. A match stamps the file; a different
+    /// hash deletes the file and its stamp so Settings offers the download again;
+    /// a read error keeps the file (a transient error must not force a re-download).
+    nonisolated static func verifyExistingModel(
+        hasher: (URL) throws -> String = { try ModelIntegrity.sha256Hex(of: $0) }
+    ) -> ModelIntegrity.Verdict {
+        let url = modelPath()
+        guard let expected = ModelIntegrity.expectedSHA256(forFileName: activeModelFileName) else {
+            return FileManager.default.fileExists(atPath: url.path) ? .verified(rehashed: false) : .missing
+        }
+        let verdict = ModelIntegrity.verify(modelURL: url, expectedSHA256: expected, hasher: hasher)
+        switch verdict {
+        case .verified:
+            removeOrphanedModelsIfPresent()
+        case .mismatch(let actual) where actual != "hash-error":
+            try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(at: ModelIntegrity.stampURL(for: url))
+        case .mismatch, .missing:
+            break
+        }
+        return verdict
     }
 
     /// Best-effort removal of retired GGUFs (Gemma, Qwen2.5) once the current model is present.
@@ -113,6 +155,9 @@ public final class IOSModelDownloadService: NSObject, ObservableObject, URLSessi
     private var lastBytes: Int64 = 0
     private var lastSampleAt: Date = .distantPast
     private var completionContinuation: CheckedContinuation<Void, Error>?
+    /// The SHA-256 a finished download must match, or nil for the unpinned dev override.
+    /// `nonisolated` so the delegate callback (non-main queue) can read it.
+    private nonisolated let expectedSHA256: String?
 
     // MARK: - Init (test seam)
 
@@ -120,7 +165,13 @@ public final class IOSModelDownloadService: NSObject, ObservableObject, URLSessi
     ///   `protocolClasses = [MockURLProtocol.self]` in tests. Defaults to
     ///   `URLSessionConfiguration.default`, which waits for connectivity on
     ///   Wi-Fi drops.
-    public init(sessionConfiguration: URLSessionConfiguration = .default) {
+    /// - Parameter expectedSHA256: The hash a finished download must have. Defaults to
+    ///   the shared pin for the active file name; tests inject the hash of their payload.
+    init(
+        sessionConfiguration: URLSessionConfiguration = .default,
+        expectedSHA256: String? = ModelIntegrity.expectedSHA256(forFileName: IOSModelDownloadService.activeModelFileName)
+    ) {
+        self.expectedSHA256 = expectedSHA256
         super.init()
         sessionConfiguration.waitsForConnectivity = true
         // Delegate queue must be non-main — Apple docs warn that main-queue
@@ -185,7 +236,7 @@ public final class IOSModelDownloadService: NSObject, ObservableObject, URLSessi
     /// Test helper: await whatever in-flight download settles. Polls state at
     /// 50 ms intervals. Safe to call when `state` is already terminal.
     public func waitForCompletion() async {
-        while state == .downloading || state == .paused {
+        while state == .downloading || state == .paused || state == .verifying {
             try? await Task.sleep(nanoseconds: 50_000_000)
         }
     }
@@ -221,24 +272,61 @@ public final class IOSModelDownloadService: NSObject, ObservableObject, URLSessi
         downloadTask: URLSessionDownloadTask,
         didFinishDownloadingTo location: URL
     ) {
-        // Called on delegate queue. Move the file synchronously while `location`
-        // is still valid (iOS deletes the temp file as soon as this method returns),
-        // then hop to MainActor for the state publish.
+        // Called on the serial, non-main delegate queue. `location` is deleted by the
+        // system when this method returns, so the status check, the hash and the move
+        // all happen synchronously here; only the @Published writes hop to MainActor.
+
+        // 261103-9c7 (T-9C7-02): an error page is never saved as the model.
+        if let status = (downloadTask.response as? HTTPURLResponse)?.statusCode,
+           !(200...299).contains(status) {
+            fail("Download failed (HTTP \(status)). Tap Retry to try again.",
+                 error: URLError(.badServerResponse))
+            return
+        }
+
+        // 261103-9c7 (T-9C7-01): hash before the file can reach modelPath().
+        if let expected = expectedSHA256 {
+            Task { @MainActor in
+                if self.state == .downloading { self.state = .verifying }
+            }
+            let actual: String
+            do {
+                actual = try ModelIntegrity.sha256Hex(of: location)
+            } catch {
+                fail("The downloaded model could not be checked and was discarded. Tap Retry to download it again.",
+                     error: error)
+                return
+            }
+            guard actual == expected else {
+                fail("The downloaded model did not match the expected file and was deleted. Tap Retry to download it again.",
+                     error: ModelIntegrityError.verificationFailed(attempts: 1))
+                return
+            }
+        } else {
+            log.warning("LLM model file override in use, saving unverified")
+        }
+
         let dest = Self.modelPath()
         let parent = dest.deletingLastPathComponent()
         var moveError: Error?
         do {
             try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
-            // Overwrite any stale file (e.g. failed previous run).
+            // Overwrite any stale file (e.g. failed previous run) and its stamp.
             try? FileManager.default.removeItem(at: dest)
+            try? FileManager.default.removeItem(at: ModelIntegrity.stampURL(for: dest))
             try FileManager.default.moveItem(at: location, to: dest)
 
-            // Q6 / D-14: exclude from iCloud backup. ~1.93 GB cacheable blob should
+            // Q6 / D-14: exclude from iCloud backup. ~2.74 GB cacheable blob should
             // never bloat user backups; Apple App Review flags this.
             var urlRef = dest
             var values = URLResourceValues()
             values.isExcludedFromBackup = true
             try urlRef.setResourceValues(values)
+
+            // Stamp last: setting the resource value above could change the facts it records.
+            if let expected = expectedSHA256 {
+                try ModelIntegrity.writeStamp(for: dest, sha256: expected)
+            }
 
             // CLEANRD-01: reclaim disk from the retired Gemma model now that Qwen is present.
             Self.removeOrphanedModelsIfPresent()
@@ -255,6 +343,16 @@ public final class IOSModelDownloadService: NSObject, ObservableObject, URLSessi
                 self.state = .completed
                 self.completionContinuation?.resume()
             }
+            self.completionContinuation = nil
+            self.task = nil
+        }
+    }
+
+    /// Publishes a terminal failure from the delegate queue. Moves nothing into place.
+    private nonisolated func fail(_ message: String, error: Error) {
+        Task { @MainActor in
+            self.state = .failed(message)
+            self.completionContinuation?.resume(throwing: error)
             self.completionContinuation = nil
             self.task = nil
         }

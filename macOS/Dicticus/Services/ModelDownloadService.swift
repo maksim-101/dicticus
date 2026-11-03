@@ -25,13 +25,12 @@ class ModelDownloadService {
     /// (oid 00fe7986…f11a4, 2,740,937,888 bytes). Qwen3.5 unified base+instruct in one model.
     static let modelURL = URL(string: "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/Qwen3.5-4B-Q4_K_M.gguf")!
 
-    /// D-06/D-08: the pinned SHA-256 for `modelFileName`'s content — derived from
-    /// `50-GATE-DIFF.md` §D (local `shasum -a 256` MATCH against HuggingFace's
-    /// `x-linked-etag`), not typed from the elided source comment above.
-    static let expectedModelSHA256 = "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4"
+    /// The pin lives in `ModelIntegrity` (Shared/), compiled into both apps; see the
+    /// D-06/D-08 ledger comment there.
+    static let expectedModelSHA256 = ModelIntegrity.pinnedModelSHA256
 
-    /// D-08: expected byte size of the pinned GGUF, from the same §D derivation.
-    static let expectedModelByteCount = 2_740_937_888
+    /// D-08: expected byte size of the pinned GGUF.
+    static let expectedModelByteCount = ModelIntegrity.pinnedModelByteCount
 
     /// D-08: at most this many hash mismatches (across an existing file plus
     /// re-downloads) are tolerated before `acquireVerifiedModel` gives up. A second
@@ -45,7 +44,7 @@ class ModelDownloadService {
     /// warning (T-50-04-03, accepted: a local attacker able to set that default
     /// already controls the user session).
     static func expectedSHA256(forFileName name: String) -> String? {
-        name == modelFileName ? expectedModelSHA256 : nil
+        ModelIntegrity.expectedSHA256(forFileName: name)
     }
 
     /// Local cache file name — matches the URL's artifact name (lowercased). Contains "qwen3" so
@@ -201,20 +200,5 @@ class ModelDownloadService {
         }
 
         removeOrphanedModelsIfPresent()
-    }
-}
-
-/// D-08: an existing or freshly downloaded file failed hash verification `attempts`
-/// times (across the existing-file check and any re-downloads), exceeding
-/// `ModelDownloadService.maxVerificationFailures`. No file is left at the target
-/// path when this is thrown.
-enum ModelIntegrityError: Error, Equatable, LocalizedError {
-    case verificationFailed(attempts: Int)
-
-    var errorDescription: String? {
-        switch self {
-        case .verificationFailed(let attempts):
-            return "Model failed verification after \(attempts) attempt(s)."
-        }
     }
 }
