@@ -26,4 +26,10 @@ public enum DicticusDefaults {
         return UserDefaults(suiteName: "group.com.dicticus") ?? .standard
 #endif
     }
+
+    /// Swiss German spelling and number format. A missing key means ON, matching both settings screens.
+    public static var useSwissGerman: Bool {
+        let key = SwissDefaultMigration.toggleKey
+        return suite.object(forKey: key) == nil ? true : suite.bool(forKey: key)
+    }
 }

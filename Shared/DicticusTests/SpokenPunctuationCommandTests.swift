@@ -25,7 +25,7 @@ final class SpokenPunctuationCommandTests: XCTestCase {
 
     var dictionaryService: DictionaryService!
     var testHistory: HistoryService!
-    var savedUseSwissGerman: Bool = false
+    var savedUseSwissGerman: Any?
 
     override func setUp() {
         super.setUp()
@@ -35,12 +35,16 @@ final class SpokenPunctuationCommandTests: XCTestCase {
         let historyContainer = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
             .appendingPathComponent("SPCTests-\(UUID().uuidString)", isDirectory: true)
         testHistory = HistoryService.makeForTesting(containerURLProvider: { historyContainer })
-        savedUseSwissGerman = DicticusDefaults.suite.bool(forKey: "useSwissGerman")
-        DicticusDefaults.suite.set(false, forKey: "useSwissGerman")
+        savedUseSwissGerman = DicticusDefaults.suite.object(forKey: SwissDefaultMigration.toggleKey)
+        DicticusDefaults.suite.set(false, forKey: SwissDefaultMigration.toggleKey)
     }
 
     override func tearDown() {
-        DicticusDefaults.suite.set(savedUseSwissGerman, forKey: "useSwissGerman")
+        if let saved = savedUseSwissGerman {
+            DicticusDefaults.suite.set(saved, forKey: SwissDefaultMigration.toggleKey)
+        } else {
+            DicticusDefaults.suite.removeObject(forKey: SwissDefaultMigration.toggleKey)
+        }
         testHistory = nil
         super.tearDown()
     }

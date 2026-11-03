@@ -203,7 +203,7 @@ class TextProcessingService: ObservableObject {
         // paths whenever the useSwissGerman toggle is ON. Intentionally applies
         // regardless of language so users who dictate mixed de/en don't have
         // rogue Eszett slip through when Swiss orthography is selected.
-        if DicticusDefaults.suite.bool(forKey: "useSwissGerman") {
+        if DicticusDefaults.useSwissGerman {
             processedText = ITNUtility.applySwissITN(to: processedText)
         }
 
@@ -508,7 +508,7 @@ class TextProcessingService: ObservableObject {
         // Phase 20.08: thousands grouping was struck (year-bug fix).
         // Idempotent on already-Swiss output, so a future re-introduction of
         // the post-LLM call inside CleanupService would not double-format.
-        if DicticusDefaults.suite.bool(forKey: "useSwissGerman") {
+        if DicticusDefaults.useSwissGerman {
             processedText = SwissNumberFormatter.format(processedText)
         }
 

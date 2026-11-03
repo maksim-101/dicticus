@@ -60,24 +60,19 @@ struct AiCleanupPane: View {
 
 /// Swiss German toggle row styled for a Settings Form (LabeledContent layout).
 ///
-/// Backs the `useSwissGerman` key in app-local UserDefaults on macOS.
+/// Backs the `useSwissGerman` key on `DicticusDefaults.suite`.
 private struct SwissGermanFormRow: View {
-    private static let appGroupDefaults = UserDefaults.standard
-
     @State private var isOn: Bool = SwissGermanFormRow.currentValue()
 
     private static func currentValue() -> Bool {
         SwissDefaultMigration.runIfNeeded()
-        let defaults = appGroupDefaults
-        return defaults.object(forKey: "useSwissGerman") == nil
-            ? true
-            : defaults.bool(forKey: "useSwissGerman")
+        return DicticusDefaults.useSwissGerman
     }
 
     var body: some View {
         Toggle("Swiss German spelling (ß→ss)", isOn: $isOn)
             .onChange(of: isOn) { _, newValue in
-                Self.appGroupDefaults.set(newValue, forKey: "useSwissGerman")
+                DicticusDefaults.suite.set(newValue, forKey: SwissDefaultMigration.toggleKey)
             }
     }
 }
