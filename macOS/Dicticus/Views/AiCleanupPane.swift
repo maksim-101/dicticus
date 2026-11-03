@@ -53,7 +53,7 @@ struct AiCleanupPane: View {
         case .ready:   return Color(red: 0.17, green: 0.64, blue: 0.44)   // DESIGN.md `ready` light
         case .failed:  return .red
         case .downloading, .loading: return .orange
-        case .idle:    return .secondary
+        case .idle, .notDownloaded: return .secondary
         }
     }
 }

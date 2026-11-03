@@ -129,11 +129,17 @@ class HotkeyManager: ObservableObject {
     /// preview toggle is on; hidden before the paste and on every discard path.
     private let overlay: LiveOverlayPresenting
 
+    /// Asks whether to download the AI cleanup model; true means yes. A test passes a spy so
+    /// no real alert is shown in the test host.
+    private let modelDownloadPrompt: @MainActor () -> Bool
+
     init(
         overlay: LiveOverlayPresenting? = nil,
         textInjector: TextInjector? = nil,
-        mediaController: MediaController? = nil
+        mediaController: MediaController? = nil,
+        modelDownloadPrompt: (@MainActor () -> Bool)? = nil
     ) {
+        self.modelDownloadPrompt = modelDownloadPrompt ?? { HotkeyManager.presentModelDownloadAlert() }
         self.overlay = overlay ?? LiveOverlayController()
         self.textInjector = textInjector ?? TextInjector.shared
         self.mediaController = mediaController ?? MediaController()
@@ -326,12 +332,13 @@ class HotkeyManager: ObservableObject {
     enum AiCleanupKeyDownAction: Equatable {
         case proceed
         case reloadAndProceed
+        case proceedAndOfferDownload
         case abortLlmLoading
     }
 
     /// Pure decision table backing `AiCleanupKeyDownAction`. `nonisolated` and static
     /// so it is trivially unit-testable without constructing a `HotkeyManager`.
-    nonisolated static func aiCleanupKeyDownAction(cleanupServicePresent: Bool, isLoaded: Bool, idleUnloaded: Bool) -> AiCleanupKeyDownAction {
+    nonisolated static func aiCleanupKeyDownAction(cleanupServicePresent: Bool, isLoaded: Bool, idleUnloaded: Bool, modelDownloadOffered: Bool = false) -> AiCleanupKeyDownAction {
         guard cleanupServicePresent else { return .abortLlmLoading }
         if isLoaded { return .proceed }
         if idleUnloaded { return .reloadAndProceed }
@@ -358,6 +365,10 @@ class HotkeyManager: ObservableObject {
         case .delivered, .blocked:
             return nil
         }
+    }
+
+    static func presentModelDownloadAlert() -> Bool {
+        false
     }
 
     /// Handle hotkey key-down event — start recording if conditions met.
@@ -402,7 +413,7 @@ class HotkeyManager: ObservableObject {
                 return
             case .reloadAndProceed:
                 warmupService.reloadCleanupServiceIfNeeded()
-            case .proceed:
+            case .proceed, .proceedAndOfferDownload:
                 break
             }
         }

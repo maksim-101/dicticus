@@ -160,4 +160,46 @@ final class ModelWarmupServiceTests: XCTestCase {
             "garbage (negative) value must fall back to the default"
         )
     }
+
+    // MARK: - 261103-r9g: model download on first use
+
+    func testLlmLaunchAction_fileAbsentAndAutoDownloadOff_leavesModelNotDownloaded() {
+        XCTAssertEqual(
+            ModelWarmupService.llmLaunchAction(modelFileExists: false, autoDownload: false),
+            .leaveNotDownloaded,
+            "no model file and no consent: launch makes no download call"
+        )
+    }
+
+    func testLlmLaunchAction_fileAbsentAndAutoDownloadOn_downloads() {
+        XCTAssertEqual(ModelWarmupService.llmLaunchAction(modelFileExists: false, autoDownload: true), .download)
+    }
+
+    func testLlmLaunchAction_filePresent_loadsRegardlessOfSetting() {
+        XCTAssertEqual(ModelWarmupService.llmLaunchAction(modelFileExists: true, autoDownload: false), .load)
+        XCTAssertEqual(ModelWarmupService.llmLaunchAction(modelFileExists: true, autoDownload: true), .load)
+    }
+
+    func testAutoDownloadEnabled_missingKeyMeansOff() {
+        XCTAssertEqual(ModelWarmupService.autoDownloadDefaultsKey, "llmAutoDownload")
+        let defaults = InMemoryUserDefaults()
+        XCTAssertFalse(ModelWarmupService.autoDownloadEnabled(from: defaults))
+        defaults.set(true, forKey: ModelWarmupService.autoDownloadDefaultsKey)
+        XCTAssertTrue(ModelWarmupService.autoDownloadEnabled(from: defaults))
+        defaults.set(false, forKey: ModelWarmupService.autoDownloadDefaultsKey)
+        XCTAssertFalse(ModelWarmupService.autoDownloadEnabled(from: defaults))
+    }
+
+    func testNotDownloadedStatus_isNotActiveAndOffersDownload() {
+        XCTAssertEqual(LlmStatus.notDownloaded.label, "Not downloaded")
+        XCTAssertFalse(LlmStatus.notDownloaded.isActive)
+
+        let service = ModelWarmupService()
+        service.llmStatus = .notDownloaded
+        XCTAssertTrue(service.offersLlmDownload)
+        for status in [LlmStatus.idle, .downloading, .loading, .ready] {
+            service.llmStatus = status
+            XCTAssertFalse(service.offersLlmDownload, "\(status) must not offer a download")
+        }
+    }
 }

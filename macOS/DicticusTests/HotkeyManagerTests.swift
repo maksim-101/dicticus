@@ -78,6 +78,24 @@ final class RecordingInjector: TextInjector {
     }
 }
 
+/// Stands in for the download alert: records how often it was asked and what the injector had
+/// pasted at that moment, and answers with `answer` (default: Not now).
+@MainActor
+final class ModelDownloadPromptSpy {
+    private(set) var snapshots: [[String]] = []
+    var answer = false
+    private let snapshot: @MainActor () -> [String]
+
+    init(snapshot: @escaping @MainActor () -> [String]) {
+        self.snapshot = snapshot
+    }
+
+    func ask() -> Bool {
+        snapshots.append(snapshot())
+        return answer
+    }
+}
+
 @MainActor
 final class HotkeyManagerTests: XCTestCase {
 
@@ -227,6 +245,65 @@ final class HotkeyManagerTests: XCTestCase {
         )
     }
 
+    // MARK: - 261103-r9g: model download on first use
+
+    func testAiCleanupKeyDownAction_modelNotDownloaded_proceedsAndOffersDownload() {
+        XCTAssertEqual(
+            HotkeyManager.aiCleanupKeyDownAction(
+                cleanupServicePresent: false, isLoaded: false, idleUnloaded: false, modelDownloadOffered: true),
+            .proceedAndOfferDownload,
+            "no model and a download on offer: record, paste rules-only text, then ask"
+        )
+        XCTAssertEqual(
+            HotkeyManager.aiCleanupKeyDownAction(
+                cleanupServicePresent: false, isLoaded: false, idleUnloaded: false, modelDownloadOffered: false),
+            .abortLlmLoading,
+            "no model and no download on offer (loading or idle): abort as before"
+        )
+        XCTAssertEqual(
+            HotkeyManager.aiCleanupKeyDownAction(
+                cleanupServicePresent: true, isLoaded: true, idleUnloaded: false, modelDownloadOffered: true),
+            .proceed,
+            "a loaded model always proceeds"
+        )
+    }
+
+    private func makeRulesOnlyProcessor() -> TextProcessingService {
+        let container = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+            .appendingPathComponent("HKMTests-\(UUID().uuidString)", isDirectory: true)
+        let history = HistoryService.makeForTesting(containerURLProvider: { container })
+        return TextProcessingService(cleanupService: nil, historyService: history)
+    }
+
+    func testAiCleanupPressWithoutModel_pastesRulesOutputThenOffersDownloadOnce() async {
+        DicticusDefaults.suite.set(false, forKey: ContextResolver.enabledKey)
+        defer { DicticusDefaults.suite.removeObject(forKey: ContextResolver.enabledKey) }
+        rig.warmup.llmStatus = .notDownloaded
+        rig.manager.textProcessingService = makeRulesOnlyProcessor()
+        let expected = await makeRulesOnlyProcessor().process(text: "hello world", language: "en", mode: .aiCleanup)
+
+        rig.manager.handleKeyDown(mode: .aiCleanup)
+        rig.manager.handleKeyUp(mode: .aiCleanup)
+        _ = await HotkeyManagerTests.eventually { self.rig.prompt.snapshots.count == 1 }
+        // Let a stray second prompt show up before asserting "once".
+        try? await Task.sleep(for: .milliseconds(100))
+
+        XCTAssertEqual(rig.stub.startCount, 1, "the press must record, not abort")
+        XCTAssertEqual(rig.injector.injected, [expected])
+        XCTAssertEqual(rig.prompt.snapshots, [[expected]], "asked once, and only after the paste")
+        XCTAssertNil(rig.manager.lastPostedNotification)
+        XCTAssertEqual(rig.warmup.llmStatus, .notDownloaded, "Not now changes nothing")
+    }
+
+    func testPlainPressWithoutModel_neverOffersDownload() async {
+        rig.warmup.llmStatus = .notDownloaded
+        await rig.dictate()
+        try? await Task.sleep(for: .milliseconds(100))
+
+        XCTAssertTrue(rig.prompt.snapshots.isEmpty)
+        XCTAssertEqual(rig.injector.injected, ["hello world"])
+    }
+
     // MARK: - Phase 50 WR-03: paste-outcome to notification mapping
 
     func testNotificationForOutcome_mapsBothUndeliverableOutcomesDistinctly() {
@@ -272,11 +349,18 @@ final class HotkeyManagerTests: XCTestCase {
         let stub = StubTranscriber()
         let warmup = ModelWarmupService()
         let injector: RecordingInjector
+        let prompt: ModelDownloadPromptSpy
         let manager: HotkeyManager
 
         init() {
-            injector = RecordingInjector(spy: spy)
-            manager = HotkeyManager(overlay: spy, textInjector: injector, mediaController: .makeForTesting())
+            let injector = RecordingInjector(spy: spy)
+            self.injector = injector
+            let prompt = ModelDownloadPromptSpy(snapshot: { injector.injected })
+            self.prompt = prompt
+            manager = HotkeyManager(
+                overlay: spy, textInjector: injector, mediaController: .makeForTesting(),
+                modelDownloadPrompt: { prompt.ask() }
+            )
             warmup.isReady = true
             manager.attach(transcriptionService: stub, warmupService: warmup)
         }

@@ -22,6 +22,7 @@ import os.log
 /// LLM loading status — observable by the menu bar dropdown for progress indication.
 enum LlmStatus: Equatable {
     case idle
+    case notDownloaded
     case downloading
     case loading
     case ready
@@ -30,6 +31,7 @@ enum LlmStatus: Equatable {
     var label: String {
         switch self {
         case .idle:                return "Waiting"
+        case .notDownloaded:       return "Not downloaded"
         case .downloading:         return "Downloading model\u{2026}"
         case .loading:             return "Loading model\u{2026}"
         case .ready:               return "Ready"
@@ -48,6 +50,27 @@ extension ModelWarmupService {
     /// stays disabled for the rest of this session (`isLlmReady` false, `cleanupService`
     /// nil) rather than looping retries indefinitely against a possibly-corrupted URL.
     static let verificationFailedStatus = "Model failed verification \u{2014} Retry download."
+
+    // MARK: - 261103-r9g: model download on first use
+
+    /// `UserDefaults` key backing the Settings switch "Download the model automatically".
+    /// A missing key reads as off.
+    nonisolated static let autoDownloadDefaultsKey = "llmAutoDownload"
+
+    nonisolated static func autoDownloadEnabled(from defaults: UserDefaults) -> Bool {
+        defaults.bool(forKey: autoDownloadDefaultsKey)
+    }
+
+    /// What launch does about the cleanup model.
+    enum LlmLaunchAction: Equatable {
+        case load
+        case download
+        case leaveNotDownloaded
+    }
+
+    nonisolated static func llmLaunchAction(modelFileExists: Bool, autoDownload: Bool) -> LlmLaunchAction {
+        modelFileExists ? .load : .download
+    }
 
     // MARK: - Phase 50 D-10/D-11: idle unload of the cleanup LLM
 
@@ -162,6 +185,19 @@ class ModelWarmupService: ObservableObject {
     /// 10-minute ceiling covers first-launch ~626 MB WhisperKit CoreML download on slower
     /// hardware and initial CoreML compilation.
     private let warmupTimeoutSeconds: UInt64 = 600
+
+    /// True when the model is absent and nothing is fetching it: the prompt, the Settings
+    /// Download button and `downloadLlmOnDemand()` all gate on this one predicate.
+    var offersLlmDownload: Bool {
+        switch llmStatus {
+        case .notDownloaded:
+            return true
+        case .failed:
+            return !FileManager.default.fileExists(atPath: ModelDownloadService.modelPath().path)
+        case .idle, .downloading, .loading, .ready:
+            return false
+        }
+    }
 
     /// Whether the warm-up row should be visible in the dropdown.
     /// True while loading (isWarming) or when loading failed (error != nil).
