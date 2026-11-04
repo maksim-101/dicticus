@@ -50,8 +50,12 @@ class IOSModelWarmupService: ObservableObject {
     /// Whether the current device meets the RAM requirement for AI cleanup.
     /// Read at launch by `SettingsView` to decide between showing the AI
     /// Cleanup toggle or a device-unsupported explainer.
+    public nonisolated static func isAiCleanupSupported(physicalMemory: UInt64) -> Bool {
+        physicalMemory >= requiredPhysicalMemoryBytes
+    }
+
     public nonisolated static var isAiCleanupSupported: Bool {
-        ProcessInfo.processInfo.physicalMemory >= requiredPhysicalMemoryBytes
+        isAiCleanupSupported(physicalMemory: ProcessInfo.processInfo.physicalMemory)
     }
 
     // MARK: - Cellular download warning (D-05, Phase 37 Plan 02)
