@@ -28,8 +28,8 @@ A fully local dictation app for macOS and iOS. Hold a key or trigger a shortcut,
 - ~1 GB disk for the ASR model, plus ~2.7 GB for the optional AI-cleanup model (downloaded only if you enable AI cleanup)
 
 ### iOS / iPadOS
-- iOS 17+
-- iPhone 15 or later (for Action Button optimization), or any modern iPhone/iPad. AI cleanup requires a device with ≥5 GB RAM.
+- iOS 26+ / iPadOS 26+
+- Any iPhone or iPad that runs iOS 26. AI cleanup needs a device with 8 GB of memory; Settings → AI Cleanup says whether yours has it.
 - ~1.2 GB disk for the ASR model (Parakeet TDT v3), plus ~2.7 GB for the optional AI-cleanup model.
 
 ## Installation

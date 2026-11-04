@@ -56,6 +56,7 @@ enum AppBuildInfo {
     ]
     #else
     private static let platformChanges = [
+        "Changed: Dicticus runs on every iPhone and iPad with iOS 26; AI cleanup needs 8 GB of memory, and Settings → AI Cleanup tells you whether your device has it",
         "Fixed: a phone call, Siri or removing AirPods ends the dictation and keeps what you said",
         "Fixed: a transcript finished in the background is copied once and no longer overwrites what you copied since",
         "Fixed: the AI cleanup model download is checked before it is used, and a damaged file is deleted",

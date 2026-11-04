@@ -54,13 +54,7 @@ struct DicticusApp: App {
 
     var body: some Scene {
         WindowGroup {
-            if !DeviceCapabilityGate.isCurrentDeviceSupported {
-                // WHISP-05: runtime iPhone 15+ (A16) floor. Short-circuits before
-                // OnboardingView/ContentView ever mount, so warmup() (and its
-                // ~630 MB Parakeet Ultra download) never fires on a
-                // device that can't run the model.
-                UnsupportedDeviceView()
-            } else if hasCompletedOnboarding {
+            if hasCompletedOnboarding {
                 ContentView()
                     .environmentObject(warmupService)
                     .environmentObject(dictionaryService)
@@ -109,7 +103,7 @@ struct DicticusApp: App {
                 // D-D1 (Phase 19.5): Re-read FS on foreground so a download that completed
                 // in the background flips hasModels to true here, and a stale-false from a
                 // prior session gets corrected.
-                if hasCompletedOnboarding && DeviceCapabilityGate.isCurrentDeviceSupported {
+                if hasCompletedOnboarding {
                     warmupService.checkHasModels()
                     if warmupService.hasModels {
                         warmupService.warmup()

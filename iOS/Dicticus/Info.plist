@@ -28,10 +28,8 @@
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIRequiredDeviceCapabilities</key>
-	<!-- iphone-ipad-minimum-performance-a12 is coarse defense-in-depth only (blocks
-	     pre-2019 A11-and-earlier devices at install time). It is NOT the iPhone 15+
-	     enforcement — the real WHISP-05 floor is the runtime DeviceCapabilityGate
-	     check added in Phase 41-07 (no finer-grained Info.plist key exists). -->
+	<!-- iphone-ipad-minimum-performance-a12 is the App Store install-time floor. Dicticus has no
+	     runtime device check; only AI Cleanup is gated, by memory (IOSModelWarmupService.isAiCleanupSupported). -->
 	<array>
 		<string>armv7</string>
 		<string>iphone-ipad-minimum-performance-a12</string>
