@@ -337,7 +337,7 @@ class DictationViewModel: ObservableObject {
             } else {
                 // FOREGROUND PATH — unchanged from 36-02:
                 // Toggle-respecting mode, TextProcessingService.process() (saves entry), clipboard write.
-                let wantsAiCleanup = (UserDefaults(suiteName: "group.com.dicticus") ?? .standard).bool(forKey: "aiCleanupEnabled")
+                let wantsAiCleanup = Self.wantsAiCleanup
                 let llmReady = cleanupService?.isLoaded ?? false
                 let mode: DictationMode = Self.selectMode(wantsAiCleanup: wantsAiCleanup, llmReady: llmReady)
 
@@ -431,6 +431,13 @@ class DictationViewModel: ObservableObject {
         guard finalizeBackgroundTask != .invalid else { return }
         UIApplication.shared.endBackgroundTask(finalizeBackgroundTask)
         finalizeBackgroundTask = .invalid
+    }
+
+    /// The AI Cleanup toggle counts only on a device that passes the memory gate; a toggle left
+    /// on under an older, lower floor would otherwise keep background transcripts pending for an LLM that never loads.
+    nonisolated private static var wantsAiCleanup: Bool {
+        (UserDefaults(suiteName: "group.com.dicticus") ?? .standard).bool(forKey: "aiCleanupEnabled")
+            && IOSModelWarmupService.isAiCleanupSupported
     }
 
     /// Testable seam for cleanup mode selection (D-13 / D-23 gating).
@@ -746,7 +753,7 @@ class DictationViewModel: ObservableObject {
                     mode = .plain
                     cleanupProvider = nil
                 } else {
-                    let wantsAiCleanup = (UserDefaults(suiteName: "group.com.dicticus") ?? .standard).bool(forKey: "aiCleanupEnabled")
+                    let wantsAiCleanup = Self.wantsAiCleanup
                     let llmReady = cleanupService?.isLoaded ?? false
                     mode = Self.selectMode(wantsAiCleanup: wantsAiCleanup, llmReady: llmReady)
                     cleanupProvider = cleanupService
@@ -881,7 +888,7 @@ class DictationViewModel: ObservableObject {
         // Show processing state while cleanup may run (D-02b).
         state = .transcribing
 
-        let wantsAiCleanup = (UserDefaults(suiteName: "group.com.dicticus") ?? .standard).bool(forKey: "aiCleanupEnabled")
+        let wantsAiCleanup = Self.wantsAiCleanup
         let llmReady = cleanupService?.isLoaded ?? false
 
         // 261103-9c7: UUIDs whose plain text already reached the clipboard while the LLM was

@@ -47,6 +47,17 @@ final class DeviceEligibilityTests: XCTestCase {
                       "an 8 GB device reporting 8 GiB must pass")
     }
 
+    // MARK: - Settings explainer
+
+    func testUnavailableMessageRoundsMemoryToWholeGB() {
+        XCTAssertEqual(
+            IOSModelWarmupService.aiCleanupUnavailableMessage(physicalMemory: 6_000_000_000),
+            "AI Cleanup needs a device with 8 GB of memory. This one has about 6 GB.")
+        XCTAssertEqual(
+            IOSModelWarmupService.aiCleanupUnavailableMessage(physicalMemory: 3_900_000_000),
+            "AI Cleanup needs a device with 8 GB of memory. This one has about 4 GB.")
+    }
+
     // MARK: - D-03: Runtime eligibility on current device
 
     func testIsAiCleanupSupportedOnCurrentDevice() throws {

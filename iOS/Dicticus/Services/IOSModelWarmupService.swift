@@ -40,22 +40,35 @@ class IOSModelWarmupService: ObservableObject {
 
     // MARK: - Device eligibility (D-03)
 
-    /// Per D-03: AI cleanup requires ≥5 GB RAM to safely coexist with the
-    /// ~2.7 GB Parakeet ASR model. iPhone 12/13 (4 GB A14) are below this
-    /// threshold; iPhone 14+ (6 GB) meet it.
+    /// AI Cleanup runs the ~2.7 GB Qwen3.5-4B cleanup model beside the ~630 MB
+    /// Parakeet Ultra speech model and needs a device with 8 GB of memory; it has
+    /// never run on a 6 GB device. `ProcessInfo.physicalMemory` reports at or a
+    /// little below the nominal RAM, so the floor sits at 6.5 GiB: a 6 GB device
+    /// cannot report more than 6 GiB, and an 8 GB device would need more than
+    /// 1.5 GiB withheld to fall below it. The "8 GB" in
+    /// `aiCleanupUnavailableMessage(physicalMemory:)` belongs to this floor;
+    /// change both together.
     /// `nonisolated` so SettingsView (and any other call site, including
     /// non-main contexts) can read it without actor hops.
-    public nonisolated static let requiredPhysicalMemoryBytes: UInt64 = 5 * 1024 * 1024 * 1024
+    public nonisolated static let requiredPhysicalMemoryBytes: UInt64 = 13 * 512 * 1024 * 1024
 
-    /// Whether the current device meets the RAM requirement for AI cleanup.
-    /// Read at launch by `SettingsView` to decide between showing the AI
-    /// Cleanup toggle or a device-unsupported explainer.
+    /// Pure form of the memory gate, so the boundaries are testable without a device.
     public nonisolated static func isAiCleanupSupported(physicalMemory: UInt64) -> Bool {
         physicalMemory >= requiredPhysicalMemoryBytes
     }
 
+    /// Whether the current device meets the memory requirement for AI cleanup.
+    /// Reads `ProcessInfo` through `isAiCleanupSupported(physicalMemory:)` and gates
+    /// the Settings toggle, warmup step 4 and DictationViewModel's AI-cleanup decisions.
     public nonisolated static var isAiCleanupSupported: Bool {
         isAiCleanupSupported(physicalMemory: ProcessInfo.processInfo.physicalMemory)
+    }
+
+    /// Shown in Settings when the device is below the floor; N rounds the reported GiB,
+    /// which reads a little under nominal, to the nearest whole number.
+    public nonisolated static func aiCleanupUnavailableMessage(physicalMemory: UInt64) -> String {
+        let gigabytes = Int((Double(physicalMemory) / 1_073_741_824).rounded())
+        return "AI Cleanup needs a device with 8 GB of memory. This one has about \(gigabytes) GB."
     }
 
     // MARK: - Cellular download warning (D-05, Phase 37 Plan 02)

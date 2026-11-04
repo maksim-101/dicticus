@@ -133,7 +133,7 @@ struct AiCleanupSection: View {
                     .foregroundStyle(.secondary)
                     .font(.subheadline)
             }
-            Text("Requires iPhone 14 or newer (at least 5 GB of RAM).")
+            Text(IOSModelWarmupService.aiCleanupUnavailableMessage(physicalMemory: ProcessInfo.processInfo.physicalMemory))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
