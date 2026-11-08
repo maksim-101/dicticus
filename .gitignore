@@ -65,8 +65,7 @@ Config/Local.xcconfig
 # Agent/executor hermetic scratch (swiftc drivers, etc.)
 scratchpad/
 
-# Internal agent instructions & session state — never public (contain ops/signing details)
-CLAUDE.md
+# Session state — never public. Signing/ops details live in the untracked CLAUDE.local.md.
 .continue-here
 
 # Coverage + Xcode user state
