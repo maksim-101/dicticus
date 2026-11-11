@@ -1,10 +1,10 @@
 # State
 Slice: 53-probe-test-isolation (quick)
 Step: build
-Next: build step 3 for 53 on AC power (the full suites load the cleanup model): live-folder snapshot, full macOS suite under schemes Dicticus and Dicticus-Debug-Recorder, check-running-copy, iOS simulator suite, snapshot again; then flow:review from git merge-base main HEAD.
+Next: build step 3 for 53: the iOS simulator suite (first run: test runner hung before connecting; rerun waits for AC through heavy-gate); macOS gates passed on the branch (evidence/live-folder-runs.md). Then flow:review from git merge-base main HEAD.
 Waiting on: nothing
 Started: 2026-11-11T07:47:37Z
-Baseline: not yet measured
+Baseline: main dee0299: macOS scheme Dicticus 1947 tests, 8 skipped, 2 failed (DictionaryServiceK7AddsTests.testK7_DoesNotOverrideUserCustomization, EditGuardCompoundRepairTests.testR0_checkerSignalsOnThisMac); scheme Dicticus-Debug-Recorder 2023 tests, 10 skipped, 1 failed (testK7_DoesNotOverrideUserCustomization)
 Base: branch point
 Risk: none
 Carried:
