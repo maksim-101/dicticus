@@ -1,7 +1,7 @@
 # State
 Slice: 53-probe-test-isolation (quick)
-Step: plan
-Next: flow:plan for 53 (brief approved 2026-11-11). After 53: row 54 (context from the app's category), then 55 (LLM timeout), then the spikes 56-58.
+Step: build
+Next: flow:build task 1 of 53 (one resolver, ten writers, canary per probe). After 53: row 54, then 55, then the spikes 56-58.
 Waiting on: nothing
 Started: 2026-11-11T07:47:37Z
 Baseline: not yet measured
@@ -21,3 +21,4 @@ Carried:
 - 2026-11-08 migration: moved from GSD to flow on the owner's go ("migrate now", before the 50.1 verdict run). GSD records stay in the gitignored planning tree; ROADMAP seeded with every phase under its old number; 50.1 is the first slice, at brief.
 - 2026-11-11 53 brief: owner asked to fix the debug-log test leak found by the 2026-11-10 audit ("address this"); quick slice 53 opened ahead of 50.1, which stays planned and unbriefed.
 - 2026-11-11 53 brief: approved by the owner. Owner also scheduled, in this order after 53: automatic context detection (54); LLM timeout investigated and addressed (55); followed up and tested: pick before sending (56), LLM returns an edit list (57), learn from post-paste corrections (58). Clean-while-speaking, paste-now-improve-later and on-screen names not chosen.
+- 2026-11-11 53 plan: one task, a shared resolver for all ten writers. The owner's "slice 53 is approved" is taken as covering this plan, which adds no choice the brief left open; stated in the reply.
