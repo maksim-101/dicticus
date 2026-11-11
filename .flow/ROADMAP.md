@@ -75,3 +75,4 @@ Migrated from GSD on 2026-11-08. Rows up to 51 are GSD phases under their old nu
 | 51 | live-transcript-overlay | live transcript overlay while speaking | shipped |
 | 50.1 | editguard-run-on-split-recovery | long dictations keep the LLM's interior sentence splits; spike 017 round 2 verdict due 2026-11-09 | planned |
 | 52 | dictionary-ux | voice-teachable corrections and heard-form aliases (DICTUX-01/02) | planned |
+| 53 | probe-test-isolation | test runs no longer write rows into the live debug logs: every diagnostics writer honours the test directory | active |
