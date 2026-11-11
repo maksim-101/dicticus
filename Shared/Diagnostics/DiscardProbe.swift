@@ -167,23 +167,12 @@ public actor DiscardProbe {
 
     public static let shared = DiscardProbe()
 
-    private let directoryURL: URL
+    nonisolated let directoryURL: URL
     private let retentionDays: Int = 14
     private var hasPurgedThisLaunch = false
 
     private init() {
-        let fm = FileManager.default
-        let appSupport = (try? fm.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        )) ?? URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent("Library/Application Support")
-
-        self.directoryURL = appSupport
-            .appendingPathComponent("Dicticus", isDirectory: true)
-            .appendingPathComponent("DebugRecordings", isDirectory: true)
+        self.directoryURL = DebugRecorder.recordingsDirectory()
     }
 
     /// One segment's silence-relevant fields, captured at Layer 3.

@@ -32,24 +32,13 @@ public actor AudioCaptureProbe {
 
     public static let shared = AudioCaptureProbe()
 
-    private let directoryURL: URL
+    nonisolated let directoryURL: URL
     private let retentionDays: Int = 14
     private var hasPurgedThisLaunch = false
     private let sampleRate: Double = 16000
 
     private init() {
-        let fm = FileManager.default
-        let appSupport = (try? fm.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        )) ?? URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent("Library/Application Support")
-
-        self.directoryURL = appSupport
-            .appendingPathComponent("Dicticus", isDirectory: true)
-            .appendingPathComponent("DebugRecordings", isDirectory: true)
+        self.directoryURL = DebugRecorder.recordingsDirectory()
     }
 
     /// True when the ASR text shows the clip signature (does not end on terminal

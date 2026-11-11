@@ -64,23 +64,12 @@ public actor PasteProbe {
 
     public static let shared = PasteProbe()
 
-    private let directoryURL: URL
+    nonisolated let directoryURL: URL
     private let retentionDays: Int = 14
     private var hasPurgedThisLaunch = false
 
     private init() {
-        let fm = FileManager.default
-        let appSupport = (try? fm.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        )) ?? URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent("Library/Application Support")
-
-        self.directoryURL = appSupport
-            .appendingPathComponent("Dicticus", isDirectory: true)
-            .appendingPathComponent("DebugRecordings", isDirectory: true)
+        self.directoryURL = DebugRecorder.recordingsDirectory()
     }
 
     /// Read Carbon's secure-input flag. Call from the main actor immediately

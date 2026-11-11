@@ -42,22 +42,7 @@ public actor FilenameMangleProbe {
     private var hasPurgedThisLaunch = false
 
     private init() {
-        if let override = DebugRecorder.directoryOverrideForTesting {
-            self.directoryURL = override
-            return
-        }
-        let fm = FileManager.default
-        let appSupport = (try? fm.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        )) ?? URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent("Library/Application Support")
-
-        self.directoryURL = appSupport
-            .appendingPathComponent("Dicticus", isDirectory: true)
-            .appendingPathComponent("DebugRecordings", isDirectory: true)
+        self.directoryURL = DebugRecorder.recordingsDirectory()
     }
 
     // MARK: - Public interface
