@@ -54,13 +54,13 @@ Approved by the owner 2026-11-11.
 - **Affects:** the production path only through the resolver's fallback, which builds the same URL as today. `PreviewFlagRecorderTests` still injects its own directory through `init(directoryURL:)`, which is unchanged. iOS compiles without DEBUG_RECORDER, so all of this is compiled out there. No other test asserts on the probes' path construction: `DebugRecordings` appears in tests only in the canary and the bootstrap.
 - **Verify:**
   - `grep -rn '"DebugRecordings"' Shared macOS iOS | grep '\.swift:' | grep -v Tests` prints exactly one line, in `DebugRecorder.swift`.
-  - `cd macOS && xcodegen generate >/dev/null && xcodebuild -project Dicticus.xcodeproj -scheme Dicticus -derivedDataPath build -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' -only-testing:DicticusTests/TestIsolationCanaryTests test` prints `TEST SUCCEEDED`.
+  - `cd macOS && xcodegen generate >/dev/null && xcodebuild -project Dicticus.xcodeproj -scheme Dicticus-Debug-Recorder -derivedDataPath build -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' -only-testing:DicticusTests/TestIsolationCanaryTests test` prints `TEST SUCCEEDED`.
   - Once, put the old path back in `PasteProbe`, rerun the same command and see `TEST FAILED` on the PasteProbe assertion, then restore it.
 - **Depends on:** none.
 
 End-of-build gates (build step 3), covering criteria 3 and 4:
 - Take a snapshot before and after the full macOS suite: `wc -l` of the live `DebugRecordings/*.jsonl` plus a listing of `preview-flags/`. Check any new row's `ts` against the app's real dictations.
-- Run the full macOS suite with the config test command, without `-only-testing`. It is expected to print `TEST SUCCEEDED`, with 7 skips when the screen is on.
+- Run the full macOS suite with the config test command (scheme `Dicticus`) and again with scheme `Dicticus-Debug-Recorder`, which is the only one that compiles the probes and their canary, without `-only-testing`. It is expected to print `TEST SUCCEEDED`, with 7 skips when the screen is on.
 - Run `scripts/check-running-copy.sh`, which must print OK.
 - Run the iOS simulator suite: `cd iOS && xcodegen generate >/dev/null && xcodebuild -project Dicticus.xcodeproj -scheme Dicticus -derivedDataPath build/DerivedData -destination 'platform=iOS Simulator,name=iPhone 18 Pro' CODE_SIGNING_ALLOWED=NO test`. It must print `TEST SUCCEEDED`.
 
