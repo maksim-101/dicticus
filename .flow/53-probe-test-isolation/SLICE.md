@@ -35,3 +35,5 @@ Three test runs on 2026-10-31 put 30 fake rows into the live logs, and the 2026-
 **Size and risk:** quick: two tasks, one session, no new dependency. Risk: none.
 
 **Open:** none.
+
+Approved by the owner 2026-11-11.
