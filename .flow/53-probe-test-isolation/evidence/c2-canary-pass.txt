@@ -1,0 +1,9 @@
+commit c1e97e4, scheme Dicticus-Debug-Recorder, -only-testing:DicticusTests/TestIsolationCanaryTests
+	 Executed 6 tests, with 0 failures (0 unexpected) in 0.598 (0.600) seconds
+** TEST SUCCEEDED **
+Test Case '-[DicticusTests.TestIsolationCanaryTests testBootstrapRan]' passed.
+Test Case '-[DicticusTests.TestIsolationCanaryTests testDebugRecordingsRedirectedToTestDirectory]' passed.
+Test Case '-[DicticusTests.TestIsolationCanaryTests testHostIdentityIsNotProduction]' passed.
+Test Case '-[DicticusTests.TestIsolationCanaryTests testMacProbesRedirectedToTestDirectory]' passed.
+Test Case '-[DicticusTests.TestIsolationCanaryTests testRealDomainUnreachable]' passed.
+Test Case '-[DicticusTests.TestIsolationCanaryTests testSuiteIsEphemeral]' passed.

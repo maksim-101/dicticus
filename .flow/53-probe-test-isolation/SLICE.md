@@ -78,3 +78,18 @@ None.
 | R3 | WARNING | Carried: the standard test command uses scheme `Dicticus`, whose Debug config defines no `DEBUG_RECORDER` (`macOS/project.yml:109`, `:172`). So no probe and no recorder canary is compiled in the standard check, and a future leak would pass it. | defer: ROADMAP row 59, a check command that runs both macOS schemes. Outside this slice's criteria; the slice's own gates ran both schemes. |
 
 Not reviewed: none left after the main loop's checks above.
+
+## Verify
+
+The code under test is 3898e38. Later commits on the slice touch only `.flow/`, so evidence from runs at 1a18ee1 and 44e0be8 still counts.
+
+| # | Criterion | Evidence | Verdict |
+|---|---|---|---|
+| 1 | `[check]` one resolver; `"DebugRecordings"` built in exactly one place outside tests | `evidence/c1-single-resolver.txt` (c1e97e4): count 1, `Shared/Diagnostics/DebugRecorder.swift:472` | pass |
+| 2 | `[check]` the canary asserts all eight probes and fails when one leaks | `evidence/c2-canary-pass.txt` (c1e97e4): 6 tests, 0 failures, `testMacProbesRedirectedToTestDirectory` and `testDebugRecordingsRedirectedToTestDirectory` passed. `evidence/c2-canary-fails-on-leak.txt`: with PasteProbe reverted, TEST FAILED at `TestIsolationCanaryTests.swift:98` naming PasteProbe; then restored | pass |
+| 3 | `[check]` a full macOS test run adds no row to the live folder | `evidence/live-folder-runs.md`: main wrote 117 rows (all with ts 08:17:04–08:17:21Z, no real dictation that day); the branch runs, scheme Dicticus (1948 tests, 0 failed) and Dicticus-Debug-Recorder (2025 tests, 0 failed), left an empty snapshot diff; check-running-copy OK | pass |
+| 4 | `[check]` the iOS simulator suite still passes | `evidence/live-folder-runs.md`, last line: 1775 tests, 10 skipped, 0 failed (rerun 2026-11-12; the first run's test runner hung before connecting) | pass |
+
+The four criteria are single-clause `[check]` items about code paths. None is about content, so no fresh-agent check (quick slice, under 5 criteria).
+
+**For the owner:** no `[judge]` criteria. One decision: R3 (WARNING, from review). The standard test command runs only scheme `Dicticus`, which compiles none of the diagnostics code, so a future leak would pass it. The default is to defer it to ROADMAP row 59, a check command that runs both schemes, and ship 53 without it. 53's own runs used both schemes.

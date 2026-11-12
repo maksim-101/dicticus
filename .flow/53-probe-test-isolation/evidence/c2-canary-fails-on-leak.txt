@@ -1,0 +1,4 @@
+commit c1e97e4 with PasteProbe reverted to its own live path (temporary, restored after the run), scheme Dicticus-Debug-Recorder
+** TEST FAILED **
+Shared/DicticusTests/TestIsolationCanaryTests.swift:98: error: -[DicticusTests.TestIsolationCanaryTests testMacProbesRedirectedToTestDirectory] : XCTAssertEqual failed: ("<path> is not equal to ("<test-dir>") - PasteProbe
+Test Case '-[DicticusTests.TestIsolationCanaryTests testMacProbesRedirectedToTestDirectory]' failed.

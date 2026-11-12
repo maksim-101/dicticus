@@ -1,8 +1,8 @@
 # State
 Slice: 53-probe-test-isolation (quick)
 Step: verify
-Next: flow:verify for 53: criteria 1-4 against evidence (grep, canary run + reintroduced-leak failure, live-folder snapshots, iOS run).
-Waiting on: nothing
+Next: owner's verdict on 53 (all four [check] criteria pass); on sign-off, flow:ship.
+Waiting on: the owner: sign-off of 53 and the R3 deferral to row 59
 Started: 2026-11-11T07:47:37Z
 Baseline: main dee0299: macOS scheme Dicticus 1947 tests, 8 skipped, 2 failed (DictionaryServiceK7AddsTests.testK7_DoesNotOverrideUserCustomization, EditGuardCompoundRepairTests.testR0_checkerSignalsOnThisMac); scheme Dicticus-Debug-Recorder 2023 tests, 10 skipped, 1 failed (testK7_DoesNotOverrideUserCustomization)
 Base: branch point
@@ -25,3 +25,4 @@ Carried:
 - 2026-11-11 53 build: task 1 done (3898e38); its Verify uses scheme Dicticus-Debug-Recorder, since the Dicticus scheme compiles no probes (a change within the slice, plan wording fixed).
 - 2026-11-12 53 build: closed. Branch: macOS Dicticus 1948 tests 0 failed (7 skipped), Dicticus-Debug-Recorder 2025 tests 0 failed (8 skipped), live folder unchanged across both; check-running-copy OK; iOS simulator 1775 tests 0 failed (10 skipped) on the rerun, the first run's test runner hung before connecting.
 - 2026-11-12 53 review: one round (quick). The reviewer covered the production path (no findings) and left three parts unchecked; the main loop checked two against the test runs (no finding). The carried scheme gap (R3, WARNING) was deferred to ROADMAP row 59.
+- 2026-11-12 53 verify: criteria 1-4 pass with evidence; handed to the owner with the R3 deferral as the one decision.
