@@ -12,3 +12,4 @@ Snapshot = `wc -l` of every live `*.jsonl` plus the `preview-flags/` file list (
 The baseline runs also purged the live files from 10-20 to 10-27. That is the probes' normal 14-day retention, run from the test host.
 No capture or cleanup rows were written on 2026-11-11, so none of the 117 rows is a real dictation. They were moved out of the live folder after the run.
 `scripts/check-running-copy.sh` printed OK after the macOS runs and again at the end.
+- iOS simulator (iPhone 18 Pro), slice branch: 1775 tests, 10 skipped, 0 failed (rerun on 2026-11-12; the first run on 2026-11-11 failed with "test runner hung before establishing connection").

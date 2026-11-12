@@ -1,7 +1,7 @@
 # State
 Slice: 53-probe-test-isolation (quick)
-Step: build
-Next: build step 3 for 53: the iOS simulator suite (first run: test runner hung before connecting; rerun waits for AC through heavy-gate); macOS gates passed on the branch (evidence/live-folder-runs.md). Then flow:review from git merge-base main HEAD.
+Step: review
+Next: flow:review for 53 (quick: code-review low, one round), diff from dee0299.
 Waiting on: nothing
 Started: 2026-11-11T07:47:37Z
 Baseline: main dee0299: macOS scheme Dicticus 1947 tests, 8 skipped, 2 failed (DictionaryServiceK7AddsTests.testK7_DoesNotOverrideUserCustomization, EditGuardCompoundRepairTests.testR0_checkerSignalsOnThisMac); scheme Dicticus-Debug-Recorder 2023 tests, 10 skipped, 1 failed (testK7_DoesNotOverrideUserCustomization)
@@ -24,3 +24,4 @@ Carried:
 - 2026-11-11 53 brief: approved by the owner. Owner also scheduled, in this order after 53: automatic context detection (54); LLM timeout investigated and addressed (55); followed up and tested: pick before sending (56), LLM returns an edit list (57), learn from post-paste corrections (58). Clean-while-speaking, paste-now-improve-later and on-screen names not chosen.
 - 2026-11-11 53 plan: one task, a shared resolver for all ten writers. The owner's "slice 53 is approved" is taken as covering this plan, which adds no choice the brief left open; stated in the reply.
 - 2026-11-11 53 build: task 1 done (3898e38); its Verify uses scheme Dicticus-Debug-Recorder, since the Dicticus scheme compiles no probes (a change within the slice, plan wording fixed).
+- 2026-11-12 53 build: closed. Branch: macOS Dicticus 1948 tests 0 failed (7 skipped), Dicticus-Debug-Recorder 2025 tests 0 failed (8 skipped), live folder unchanged across both; check-running-copy OK; iOS simulator 1775 tests 0 failed (10 skipped) on the rerun, the first run's test runner hung before connecting.
