@@ -66,3 +66,15 @@ End-of-build gates (build step 3), covering criteria 3 and 4:
 
 ### Departures from the brief
 None.
+
+## Review
+
+**Correctness** (`code-review low`): run twice. Both runs made one tool call over the non-test diff. The second answered explicitly: the production path is byte-identical, since `recordingsDirectory()` builds the same URL and fallback as each inline copy it replaces, and the `nonisolated let directoryURL: URL` constants are Sendable and safe to read from outside the actor. It reported three parts as not checked. The main loop checked them against the source and the test runs:
+
+| Id | Severity | Finding | Disposition |
+|---|---|---|---|
+| R1 | — | Not reviewed by the reviewer: whether a probe initialises before `DicticusTestBootstrap` sets the override. | Checked by the main loop. The canary asserts the actual `.shared` instances of all eight probes, and passed in the full Debug-Recorder suite (2025 tests). The live-folder snapshot was unchanged across both branch suites (evidence/live-folder-runs.md). No finding. |
+| R2 | — | Not reviewed by the reviewer: the canary's `@MainActor` and `#if` nesting. | Checked: it compiles under both schemes, and `testMacProbesRedirectedToTestDirectory` ran and passed. The reintroduced PasteProbe leak made it fail. No finding. |
+| R3 | WARNING | Carried: the standard test command uses scheme `Dicticus`, whose Debug config defines no `DEBUG_RECORDER` (`macOS/project.yml:109`, `:172`). So no probe and no recorder canary is compiled in the standard check, and a future leak would pass it. | defer: ROADMAP row 59, a check command that runs both macOS schemes. Outside this slice's criteria; the slice's own gates ran both schemes. |
+
+Not reviewed: none left after the main loop's checks above.

@@ -1,14 +1,13 @@
 # State
 Slice: 53-probe-test-isolation (quick)
-Step: review
-Next: flow:review for 53 (quick: code-review low, one round), diff from dee0299.
+Step: verify
+Next: flow:verify for 53: criteria 1-4 against evidence (grep, canary run + reintroduced-leak failure, live-folder snapshots, iOS run).
 Waiting on: nothing
 Started: 2026-11-11T07:47:37Z
 Baseline: main dee0299: macOS scheme Dicticus 1947 tests, 8 skipped, 2 failed (DictionaryServiceK7AddsTests.testK7_DoesNotOverrideUserCustomization, EditGuardCompoundRepairTests.testR0_checkerSignalsOnThisMac); scheme Dicticus-Debug-Recorder 2023 tests, 10 skipped, 1 failed (testK7_DoesNotOverrideUserCustomization)
 Base: branch point
 Risk: none
 Carried:
-- 53 review: the config test command runs scheme Dicticus (Debug, no DEBUG_RECORDER), so no diagnostics probe or recorder canary is compiled in the standard check; only the Dicticus-Debug-Recorder scheme tests them.
 - 50.1 brief: the GSD pre-approval of the 2026-11-09 verdict run lapsed with the migration (owner chose to migrate before the run, 2026-11-08); the run goes into the 50.1 plan for the owner's approval.
 - 50.1 brief: owner corrections from the GSD discuss pass, to carry into the done criteria: the bar is measured evidence (zero REGRESSION), German is evaluated separately, option (a) only if the spike wins.
 - 50.1 brief: any b1 REGRESSION closes 50.1 as measured, not shipped (ROADMAP status `dropped`, with the reason), no third round; the comma-only c1 release is a separate decision.
@@ -25,3 +24,4 @@ Carried:
 - 2026-11-11 53 plan: one task, a shared resolver for all ten writers. The owner's "slice 53 is approved" is taken as covering this plan, which adds no choice the brief left open; stated in the reply.
 - 2026-11-11 53 build: task 1 done (3898e38); its Verify uses scheme Dicticus-Debug-Recorder, since the Dicticus scheme compiles no probes (a change within the slice, plan wording fixed).
 - 2026-11-12 53 build: closed. Branch: macOS Dicticus 1948 tests 0 failed (7 skipped), Dicticus-Debug-Recorder 2025 tests 0 failed (8 skipped), live folder unchanged across both; check-running-copy OK; iOS simulator 1775 tests 0 failed (10 skipped) on the rerun, the first run's test runner hung before connecting.
+- 2026-11-12 53 review: one round (quick). The reviewer covered the production path (no findings) and left three parts unchecked; the main loop checked two against the test runs (no finding). The carried scheme gap (R3, WARNING) was deferred to ROADMAP row 59.

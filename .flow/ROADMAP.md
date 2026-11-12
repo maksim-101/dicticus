@@ -81,3 +81,4 @@ Migrated from GSD on 2026-11-08. Rows up to 51 are GSD phases under their old nu
 | 56 | cleanup-preselection-spike | measured on the logged dictations: which ones can skip the LLM without losing a good edit | planned |
 | 57 | cleanup-edit-list-spike | the LLM returns a list of edits instead of a rewrite; tested for speed, good edits kept and gate rejections | planned |
 | 58 | learn-from-corrections-spike | recurring post-paste corrections become dictionary suggestions; tested on the post-edit logs | planned |
+| 59 | check-both-schemes | one check command runs both macOS test schemes, so diagnostics code and its isolation canary are tested on every check | planned |
