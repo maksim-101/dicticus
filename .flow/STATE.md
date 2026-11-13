@@ -1,7 +1,7 @@
 # State
 Slice: 54-context-from-app-category (standard)
 Step: build
-Next: flow:build task 1 of 54 (resolver: category + terminal fallback).
+Next: 54 build: tasks 1, 2 and 4(a,b) committed (0020ad9, e1b4f52, faf5a62). Waiting for host state: task 4(c)+5 replay runs by itself when AC power arrives (scratchpad run54.sh, heavy-gate slot replay-54, llama-server :18024, ceiling 45 min); task 3's screenshot needs the mac-space VM, refused at memory pressure 2 (projected free 29 % < 30 %); retry when the d1-2b service slot (9 GB) is gone or memory frees. Then end-of-build gates and the Debug-Recorder install.
 Waiting on: nothing
 Started: 2026-11-13T14:47:16Z
 Baseline: not yet measured
