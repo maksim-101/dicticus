@@ -29,8 +29,10 @@ final class AppCategoryReader {
             return cached
         }
         plistReads += 1
-        let plistURL = url.appendingPathComponent("Contents/Info.plist")
-        guard let info = NSDictionary(contentsOf: plistURL) else {
+        // macOS layout first, then the flat layout of an iPhone or iPad app running on
+        // Apple Silicon (Info.plist at the bundle root).
+        let candidates = [url.appendingPathComponent("Contents/Info.plist"), url.appendingPathComponent("Info.plist")]
+        guard let info = candidates.lazy.compactMap({ NSDictionary(contentsOf: $0) }).first else {
             return nil
         }
         let value = info[Self.categoryKey] as? String

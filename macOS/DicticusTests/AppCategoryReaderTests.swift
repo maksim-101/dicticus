@@ -18,9 +18,11 @@ final class AppCategoryReaderTests: XCTestCase {
         try? FileManager.default.removeItem(at: root)
     }
 
-    private func makeBundle(named name: String, category: String?) throws -> URL {
+    /// `flat: true` builds the iOS layout (Info.plist at the bundle root), as an iPhone or iPad
+    /// app running on Apple Silicon has it; the default is the macOS `Contents/` layout.
+    private func makeBundle(named name: String, category: String?, flat: Bool = false) throws -> URL {
         let app = root.appendingPathComponent("\(name).app", isDirectory: true)
-        let contents = app.appendingPathComponent("Contents", isDirectory: true)
+        let contents = flat ? app : app.appendingPathComponent("Contents", isDirectory: true)
         try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
         var plist: [String: Any] = [
             "CFBundleIdentifier": "com.example.\(name.lowercased())",
@@ -69,6 +71,25 @@ final class AppCategoryReaderTests: XCTestCase {
         XCTAssertEqual(app, missing)
         XCTAssertEqual(reader.category(atBundleURL: missing), ContextResolver.developerToolsCategory)
         XCTAssertEqual(reader.plistReads, 3)
+    }
+
+    func testFlatBundleIsRead() throws {
+        // R12: an iOS app bundle on Apple Silicon keeps Info.plist at its root.
+        let app = try makeBundle(named: "PhoneDevTool", category: ContextResolver.developerToolsCategory, flat: true)
+        let reader = AppCategoryReader()
+        XCTAssertEqual(reader.category(atBundleURL: app), ContextResolver.developerToolsCategory)
+        XCTAssertEqual(reader.category(atBundleURL: app), ContextResolver.developerToolsCategory)
+        XCTAssertEqual(reader.plistReads, 1, "a flat bundle is read once and cached like a Contents/ bundle")
+    }
+
+    func testCorruptPlistIsNotCached() throws {
+        // R14: a plist that exists but does not parse counts as unreadable, not as "no category".
+        let app = try makeBundle(named: "Broken", category: ContextResolver.developerToolsCategory)
+        try Data([0x00, 0xFF, 0x13, 0x37, 0x42]).write(to: app.appendingPathComponent("Contents/Info.plist"))
+        let reader = AppCategoryReader()
+        XCTAssertNil(reader.category(atBundleURL: app))
+        XCTAssertNil(reader.category(atBundleURL: app))
+        XCTAssertEqual(reader.plistReads, 2, "a corrupt plist must not be cached")
     }
 
     func testNilAppGivesNil() {
