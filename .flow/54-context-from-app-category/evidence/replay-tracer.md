@@ -13,4 +13,11 @@ Harness: `.planning/spikes/024-warp-code-prompt-replay/` (gitignored). The `gate
 
 Every item logged by the current prompt text reproduces byte for byte. Both arms (`prompt_D` default, `prompt_C` code) are built from the slice's code on the same `post_rules` text, so the 69 older items are compared on today's prompt text, as the route intends. `data/arms.jsonl` carries a `logged_identical` flag per item.
 
-**(c) Timed sample.** Waits for AC power (heavy-gate refuses model slots on battery); recorded below when run.
+**(c) Timed sample.** Run 2026-11-13 16:55Z under heavy-gate slot `replay-54` (mains power, memory pressure normal; the first launch at 16:50Z aborted before the sample and was relaunched with a warm-up request), llama-server 0.9.0, the app's model file (sha256 prefix 00fe7986), `-c 4096 -ngl 99 --seed 16 -np 1`, temperature 0, `cache_prompt` off. Five items per arm:
+
+| Arm | Mean wall per item |
+|---|---|
+| D (default prompt) | 3139 ms |
+| C (code prompt) | 3446 ms |
+
+Projection for 312 × 2 items: **34.2 min**, under the plan's 45 min ceiling, so the full run started at once (`data/timing.json`). The 022 estimate was 2.8 s/item; realised-to-sampled ratio is recorded with the run's wall time below.
