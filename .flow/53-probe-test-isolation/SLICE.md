@@ -93,3 +93,5 @@ The code under test is 3898e38. Later commits on the slice touch only `.flow/`, 
 The four criteria are single-clause `[check]` items about code paths. None is about content, so no fresh-agent check (quick slice, under 5 criteria).
 
 **For the owner:** no `[judge]` criteria. One decision: R3 (WARNING, from review). The standard test command runs only scheme `Dicticus`, which compiles none of the diagnostics code, so a future leak would pass it. The default is to defer it to ROADMAP row 59, a check command that runs both schemes, and ship 53 without it. 53's own runs used both schemes.
+
+Signed off: 2026-11-13, slice 53 and the R3 deferral to ROADMAP row 59 (owner: "okay, go ahead").
