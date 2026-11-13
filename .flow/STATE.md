@@ -1,8 +1,8 @@
 # State
 Slice: 54-context-from-app-category (standard)
 Step: build
-Next: 54 build: tasks 1, 2 and 4(a,b) committed (0020ad9, e1b4f52, faf5a62); end-of-build test gates already green on f02c288 (History). Task 4(c)+5 replay running since 16:54Z (scratchpad run54b.sh, slot replay-54, llama-server :18024, ceiling 45 min). Then task 3's screenshot in the mac-space VM (after the replay, so the two do not share memory), task 5's metrics and judge sample, check-running-copy and the Debug-Recorder install.
-Waiting on: nothing
+Next: 54 build: tasks 1, 2, 4 and 5 done (0020ad9, e1b4f52, faf5a62, 5bbcb52; judge sample in the spike's data/judge-sample.md, key separate); end-of-build test gates green (History). Open: task 3's screenshot, mac-space refused on disk (free 28 GB < the launcher's 40 GB); and the Debug-Recorder install (build running). Then Step: review with diff start 3f084ce.
+Waiting on: host: 12 GB more free disk for the mac-space VM (task 3 screenshot); the 21 GB Nemotron cache kept for spike 020 is the owner's lever
 Started: 2026-11-13T14:47:16Z
 Baseline: main 3f084ce (the branch point), slice 53's runs on it: macOS scheme Dicticus 1948 tests 0 failed (7 skipped), Dicticus-Debug-Recorder 2025 tests 0 failed (8 skipped), iOS simulator 1775 tests 0 failed (10 skipped); evidence .flow/53-probe-test-isolation/evidence/live-folder-runs.md
 Base: branch point
