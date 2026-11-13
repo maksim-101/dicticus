@@ -1,8 +1,8 @@
 # State
 Slice: 54-context-from-app-category (standard)
 Step: build
-Next: 54 build: tasks 1, 2 and 4(a,b) committed (0020ad9, e1b4f52, faf5a62). Task 4(c)+5 replay starts by itself once heavy-gate admits it (scratchpad run54.sh, slot replay-54, llama-server :18024, ceiling 45 min; mains power is on since 16:27Z, the gate still refuses on memory pressure 2 while the d1-2b service slot holds 9 GB; the wait ends 4 h after 16:30Z). Task 3's screenshot needs the mac-space VM, refused on the same memory state (projected free 29 % < 30 %). Then end-of-build gates and the Debug-Recorder install.
-Waiting on: host: memory pressure back to normal (another session's 9 GB d1-2b service slot) for the replay run and the VM screenshot
+Next: 54 build: tasks 1, 2 and 4(a,b) committed (0020ad9, e1b4f52, faf5a62); end-of-build test gates already green on f02c288 (History). Task 4(c)+5 replay running since 16:54Z (scratchpad run54b.sh, slot replay-54, llama-server :18024, ceiling 45 min). Then task 3's screenshot in the mac-space VM (after the replay, so the two do not share memory), task 5's metrics and judge sample, check-running-copy and the Debug-Recorder install.
+Waiting on: nothing
 Started: 2026-11-13T14:47:16Z
 Baseline: main 3f084ce (the branch point), slice 53's runs on it: macOS scheme Dicticus 1948 tests 0 failed (7 skipped), Dicticus-Debug-Recorder 2025 tests 0 failed (8 skipped), iOS simulator 1775 tests 0 failed (10 skipped); evidence .flow/53-probe-test-isolation/evidence/live-folder-runs.md
 Base: branch point
@@ -32,3 +32,4 @@ Carried:
 - 2026-11-13 54 brief: approved by the owner ("approved").
 - 2026-11-13 54 plan: five tasks (resolver, macOS reader + log field, Settings text, replay tracer, replay run + judge sample); route: category from the app's own Info.plist, rule in ContextResolver, replay prompts built from main's CleanupPrompt; replay ceiling 45 min generation. Waiting on approval.
 - 2026-11-13 54 plan: approved by the owner ("approved, go ahead"); the approval covers the replay run up to its 45 min ceiling.
+- 2026-11-13 54 build: end-of-build test gates run on f02c288 while the replay waited for the host: macOS scheme Dicticus 1953 tests 0 failed (7 skipped), Dicticus-Debug-Recorder 2030 tests 0 failed (8 skipped), iOS simulator 1776 tests 0 failed (9 skipped), simulator shut down after; live DebugRecordings folder unchanged across the Recorder run, and across the Dicticus run except one real dictation the owner made in Warp at 16:45Z (installed build, no category field yet); check-running-copy OK after each run. Replay first launch 16:50Z aborted: the sample's first request hit a broken pipe while the server loaded, the script then skipped the ceiling check and the run paused on swap growth from the test runs; stopped, partial output deleted, relaunched 16:54Z with a warm-up request and an abort when the sample writes no projection.
