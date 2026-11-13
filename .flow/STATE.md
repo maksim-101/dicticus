@@ -2,7 +2,7 @@
 Slice: 54-context-from-app-category (standard)
 Step: brief
 Next: flow:brief for 54: dictation context follows the app's declared category (LSApplicationCategoryType; Warp, Orca, VS Code and Claude desktop declare developer-tools, checked 2026-11-11) instead of ContextResolver.curatedMap; overrides stay; the focused-field idea is a possible later step. Evidence: .planning/debug/audit-2026-11-10/SYNTHESIS.md (Warp 312 records on .default, 47 % rejected).
-Waiting on: nothing
+Waiting on: the owner: approval of the 54 brief
 Started: 2026-11-13T14:47:16Z
 Baseline: not yet measured
 Base: branch point
@@ -28,3 +28,4 @@ Carried:
 - 2026-11-12 53 verify: criteria 1-4 pass with evidence; handed to the owner with the R3 deferral as the one decision.
 - 2026-11-13 53 verify: signed off by the owner ("okay, go ahead"), R3 deferred to row 59.
 - 2026-11-13 53 ship: merged to main, no tag (only the test host changes). Scorecard 2026-11-11T07:47Z to now: active agent time 1.1 h, owner inputs 2 typed + 1 slash, 0 questions, 2 subagent runs. Lines added: .flow 120 (+32 evidence), code 37, tests 19. Regression test: TestIsolationCanaryTests.testMacProbesRedirectedToTestDirectory plus the extended recorder canary.
+- 2026-11-13 54 brief: owner chose the app-category scope (developer-tools apps get .code, a short fallback list for terminals that declare another category, overrides on top; focused field not in this slice). BRIEF.md written, waiting on approval.
