@@ -58,6 +58,19 @@ final class AppCategoryReaderTests: XCTestCase {
         XCTAssertEqual(reader.plistReads, 2)
     }
 
+    func testUnreadablePlistIsNotCached() throws {
+        let missing = root.appendingPathComponent("Gone.app", isDirectory: true)
+        let reader = AppCategoryReader()
+        XCTAssertNil(reader.category(atBundleURL: missing))
+        XCTAssertNil(reader.category(atBundleURL: missing))
+        XCTAssertEqual(reader.plistReads, 2, "a failed read must not be cached as 'no category'")
+        // The bundle appears later (an update finished): the next lookup sees its category.
+        let app = try makeBundle(named: "Gone", category: ContextResolver.developerToolsCategory)
+        XCTAssertEqual(app, missing)
+        XCTAssertEqual(reader.category(atBundleURL: missing), ContextResolver.developerToolsCategory)
+        XCTAssertEqual(reader.plistReads, 3)
+    }
+
     func testNilAppGivesNil() {
         XCTAssertNil(AppCategoryReader().category(of: nil))
     }

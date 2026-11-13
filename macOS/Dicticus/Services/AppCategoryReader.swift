@@ -2,8 +2,11 @@ import AppKit
 
 /// Slice 54: the `LSApplicationCategoryType` an app declares in its own Info.plist, read
 /// through the running app's bundle URL and cached per URL for this process's lifetime, so
-/// a key press costs one plist read per new app and none after. Never Spotlight: an
-/// `mdfind` probe froze the popover on every menu bar click (CLAUDE.local.md, 22cf7a1).
+/// a key press costs one plist read per new app and none after. A plist that cannot be read
+/// (the bundle mid-update, a volume gone) is not cached, so the next press reads again. The
+/// plist is read as a dictionary, not through `Bundle(url:)`, which would keep an `NSBundle`
+/// per app resident. Never Spotlight: an `mdfind` probe froze the popover on every menu bar
+/// click (CLAUDE.local.md, 22cf7a1).
 @MainActor
 final class AppCategoryReader {
 
@@ -13,7 +16,7 @@ final class AppCategoryReader {
 
     private var cache: [URL: String?] = [:]
 
-    /// Test-only counter: how many times a plist was read.
+    /// Test-only counter: how many times a plist read was attempted.
     private(set) var plistReads = 0
 
     func category(of app: NSRunningApplication?) -> String? {
@@ -26,7 +29,11 @@ final class AppCategoryReader {
             return cached
         }
         plistReads += 1
-        let value = Bundle(url: url)?.infoDictionary?[Self.categoryKey] as? String
+        let plistURL = url.appendingPathComponent("Contents/Info.plist")
+        guard let info = NSDictionary(contentsOf: plistURL) else {
+            return nil
+        }
+        let value = info[Self.categoryKey] as? String
         cache[url] = .some(value)
         return value
     }
