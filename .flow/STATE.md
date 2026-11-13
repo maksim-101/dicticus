@@ -1,10 +1,10 @@
 # State
-Slice: 53-probe-test-isolation (quick)
-Step: ship
-Next: flow:ship for 53, then flow:brief for row 54 (context from the app's category).
+Slice: 54-context-from-app-category (standard)
+Step: brief
+Next: flow:brief for 54: dictation context follows the app's declared category (LSApplicationCategoryType; Warp, Orca, VS Code and Claude desktop declare developer-tools, checked 2026-11-11) instead of ContextResolver.curatedMap; overrides stay; the focused-field idea is a possible later step. Evidence: .planning/debug/audit-2026-11-10/SYNTHESIS.md (Warp 312 records on .default, 47 % rejected).
 Waiting on: nothing
-Started: 2026-11-11T07:47:37Z
-Baseline: main dee0299: macOS scheme Dicticus 1947 tests, 8 skipped, 2 failed (DictionaryServiceK7AddsTests.testK7_DoesNotOverrideUserCustomization, EditGuardCompoundRepairTests.testR0_checkerSignalsOnThisMac); scheme Dicticus-Debug-Recorder 2023 tests, 10 skipped, 1 failed (testK7_DoesNotOverrideUserCustomization)
+Started: not yet (set by flow:brief)
+Baseline: not yet measured
 Base: branch point
 Risk: none
 Carried:
@@ -27,3 +27,4 @@ Carried:
 - 2026-11-12 53 review: one round (quick). The reviewer covered the production path (no findings) and left three parts unchecked; the main loop checked two against the test runs (no finding). The carried scheme gap (R3, WARNING) was deferred to ROADMAP row 59.
 - 2026-11-12 53 verify: criteria 1-4 pass with evidence; handed to the owner with the R3 deferral as the one decision.
 - 2026-11-13 53 verify: signed off by the owner ("okay, go ahead"), R3 deferred to row 59.
+- 2026-11-13 53 ship: merged to main, no tag (only the test host changes). Scorecard 2026-11-11T07:47Z to now: active agent time 1.1 h, owner inputs 2 typed + 1 slash, 0 questions, 2 subagent runs. Lines added: .flow 120 (+32 evidence), code 37, tests 19. Regression test: TestIsolationCanaryTests.testMacProbesRedirectedToTestDirectory plus the extended recorder canary.
