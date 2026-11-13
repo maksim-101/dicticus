@@ -84,11 +84,28 @@ final class TestIsolationCanaryTests: XCTestCase {
         let redirected = DebugRecorder.shared.directoryURL.standardizedFileURL
         XCTAssertEqual(redirected, DicticusTestBootstrap.recorderDirectory.standardizedFileURL)
         XCTAssertNotEqual(redirected, real?.standardizedFileURL)
+        let expected = DicticusTestBootstrap.recorderDirectory.standardizedFileURL
+        XCTAssertEqual(FilenameMangleProbe.shared.directoryURL.standardizedFileURL, expected)
+        XCTAssertEqual(DiscardProbe.shared.directoryURL.standardizedFileURL, expected, "DiscardProbe")
+        XCTAssertEqual(AudioCaptureProbe.shared.directoryURL.standardizedFileURL, expected, "AudioCaptureProbe")
+        XCTAssertEqual(MediaPauseProbe.shared.directoryURL.standardizedFileURL, expected, "MediaPauseProbe")
+    }
+
+#if os(macOS)
+    @MainActor
+    func testMacProbesRedirectedToTestDirectory() {
+        let expected = DicticusTestBootstrap.recorderDirectory.standardizedFileURL
+        XCTAssertEqual(PasteProbe.shared.directoryURL.standardizedFileURL, expected, "PasteProbe")
+        XCTAssertEqual(OverlayProbe.shared.directoryURL.standardizedFileURL, expected, "OverlayProbe")
+        XCTAssertEqual(PostEditProbe.shared.directoryURL.standardizedFileURL, expected, "PostEditProbe")
+        XCTAssertEqual(LlmLifecycleProbe.shared.directoryURL.standardizedFileURL, expected, "LlmLifecycleProbe")
         XCTAssertEqual(
-            FilenameMangleProbe.shared.directoryURL.standardizedFileURL,
-            DicticusTestBootstrap.recorderDirectory.standardizedFileURL
+            PreviewFlagRecorder.shared.directoryURL.deletingLastPathComponent().standardizedFileURL,
+            expected,
+            "PreviewFlagRecorder"
         )
     }
+#endif
 #endif
 
 #if os(macOS)

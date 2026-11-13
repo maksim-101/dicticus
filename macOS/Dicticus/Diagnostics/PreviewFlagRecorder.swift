@@ -21,20 +21,8 @@ import AVFoundation
 @MainActor
 final class PreviewFlagRecorder: ObservableObject {
 
-    static let shared: PreviewFlagRecorder = {
-        let fm = FileManager.default
-        let appSupport = (try? fm.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        )) ?? URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent("Library/Application Support")
-        return PreviewFlagRecorder(directoryURL: appSupport
-            .appendingPathComponent("Dicticus", isDirectory: true)
-            .appendingPathComponent("DebugRecordings", isDirectory: true)
-            .appendingPathComponent("preview-flags", isDirectory: true))
-    }()
+    static let shared = PreviewFlagRecorder(directoryURL: DebugRecorder.recordingsDirectory()
+        .appendingPathComponent("preview-flags", isDirectory: true))
 
     nonisolated static let retentionDays = 14
 
@@ -100,7 +88,7 @@ final class PreviewFlagRecorder: ObservableObject {
         let appVersion: String?
     }
 
-    private let directoryURL: URL
+    let directoryURL: URL
     private var hold: Hold?
     private var generation = 0
     private var hasPurgedThisLaunch = false

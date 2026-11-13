@@ -454,6 +454,24 @@ public actor DebugRecorder {
     /// (todo 2026-09-01, quick 261031-nil).
     public nonisolated(unsafe) static var directoryOverrideForTesting: URL?
 
+    /// The folder every diagnostics writer logs to: the test override when set, otherwise
+    /// Application Support/Dicticus/DebugRecordings.
+    public static func recordingsDirectory() -> URL {
+        if let override = directoryOverrideForTesting {
+            return override
+        }
+        let appSupport = (try? FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )) ?? URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent("Library/Application Support")
+        return appSupport
+            .appendingPathComponent("Dicticus", isDirectory: true)
+            .appendingPathComponent("DebugRecordings", isDirectory: true)
+    }
+
     nonisolated let directoryURL: URL
     private let retentionDays: Int = 14
     private var hasPurgedThisLaunch = false
@@ -463,22 +481,7 @@ public actor DebugRecorder {
     public private(set) var lastRecordForTests: DebugCleanupRecord?
 
     private init() {
-        if let override = Self.directoryOverrideForTesting {
-            self.directoryURL = override
-            return
-        }
-        let fm = FileManager.default
-        let appSupport = (try? fm.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        )) ?? URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent("Library/Application Support")
-
-        self.directoryURL = appSupport
-            .appendingPathComponent("Dicticus", isDirectory: true)
-            .appendingPathComponent("DebugRecordings", isDirectory: true)
+        self.directoryURL = Self.recordingsDirectory()
     }
 
     private var asrTokenStash = AsrTokenStash()

@@ -23,23 +23,12 @@ public actor LlmLifecycleProbe {
 
     public static let shared = LlmLifecycleProbe()
 
-    private let directoryURL: URL
+    nonisolated let directoryURL: URL
     private let retentionDays: Int = 14
     private var hasPurgedThisLaunch = false
 
     private init() {
-        let fm = FileManager.default
-        let appSupport = (try? fm.url(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        )) ?? URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent("Library/Application Support")
-
-        self.directoryURL = appSupport
-            .appendingPathComponent("Dicticus", isDirectory: true)
-            .appendingPathComponent("DebugRecordings", isDirectory: true)
+        self.directoryURL = DebugRecorder.recordingsDirectory()
     }
 
     /// Record an idle-triggered unload of the cleanup LLM.
