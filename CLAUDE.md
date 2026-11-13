@@ -9,7 +9,7 @@ This project uses the flow method: start and resume with `flow:next`; state live
 Sequence: brief (mockup for visual or logic questions) → plan → build → review → verify → ship; owner findings → fix → verify (or ship, when only `[check]` criteria were touched and the `[judge]` items are signed off). Sequence, branches and who does what (subagents, models): `references/files.md` in the flow plugin.
 
 # Compact instructions
-Keep from `.flow/STATE.md`: slice, step, `Next:`, `Carried:`; the current task block and the done criteria in play; every owner decision and open question. After the compaction, re-read `.flow/STATE.md` and every file about to be edited; the current step's flow skill counts as read if its whole text was re-supplied, and otherwise is invoked again before the next edit; at `Step: done`, start flow:next only when the owner asks for new work, and otherwise wait.
+Keep from `.flow/STATE.md` and the open slice's `.flow/NN-<slug>/STATE.md`: slice, step, `Next:`, `Carried:`; the current task block and the done criteria in play; every owner decision and open question. After the compaction, re-read both STATE.md files and every file about to be edited, and flow's `references/host.md` before a step spawns an agent or calls a tool by its role; the current step's flow skill counts as read if its whole text was re-supplied, and otherwise is invoked again before the next edit; with no slice open, start flow:next only when the owner asks for new work, and otherwise wait.
 
 ## Working rules
 
@@ -41,8 +41,8 @@ Keep from `.flow/STATE.md`: slice, step, `Next:`, `Carried:`; the current task b
 - Allowlisted: `git log/diff/status`, `head`, `tail`, `grep`, `cat`, `printf`, `sleep`, `strings`, `cut`, `tr`, `uniq`, `comm`, `column`.
 
 ### History and research (read-only)
-- GSD history up to 2026-11-08 (phases, decisions, UAT, milestone archives) stays in `.planning/`, gitignored. A slice worktree doesn't have it; read it from the main checkout. `.flow/ROADMAP.md` lists every GSD phase under its old number.
-- Spikes (`.planning/spikes/`), seeds (`.planning/seeds/`), todos (`.planning/todos/`), backlog (`.planning/backlog/`, plus 999.x items in `.planning/ROADMAP.md`) and debug-log audits (`.planning/debug/`) stay there; one becomes a `.flow/ROADMAP.md` row only when the owner schedules it.
+- GSD history up to 2026-11-08 (phases, decisions, UAT, milestone archives) stays in `.planning/`, gitignored. A slice worktree doesn't have it; read it from the main checkout. `.flow/ARCHIVE.md` lists every GSD phase under its old number.
+- Spikes (`.planning/spikes/`), seeds (`.planning/seeds/`), todos (`.planning/todos/`), backlog (`.planning/backlog/`, plus 999.x items in `.planning/ROADMAP.md`) and debug-log audits (`.planning/debug/`) stay there; one becomes a `.flow/` item only when the owner schedules it.
 - Spike findings (implementation patterns, constraints, gotchas): `Skill("spike-findings-dicticus")`.
 
 ## Multi-Platform Strategy
@@ -62,7 +62,7 @@ dicticus/                    ← this repo (Apple platforms)
 ├── scripts/
 │   ├── build-dmg.sh         ← macOS release pipeline
 │   └── build-ipa.sh         ← iOS release pipeline (future)
-├── .flow/                   ← flow state (STATE.md, ROADMAP.md, slice folders)
+├── .flow/                   ← flow state (STATE.md marker, ROADMAP.md order, ARCHIVE.md, one folder per item)
 ├── .planning/               ← GSD history, read-only, gitignored
 └── CLAUDE.md
 
