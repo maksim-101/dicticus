@@ -317,8 +317,13 @@ private struct ContextOverridesEditor: View {
 
             DisclosureGroup("Built-in defaults (read-only)") {
                 VStack(alignment: .leading, spacing: 4) {
-                    ForEach(ContextResolver.curatedMap.keys.sorted(), id: \.self) { bundleID in
-                        LabeledContent(bundleID, value: ContextResolver.curatedMap[bundleID]!.rawValue.capitalized)
+                    Text("Apps that declare the developer-tools category (\(ContextResolver.developerToolsCategory)) get the Code context. Your overrides above win.")
+                        .font(.caption)
+                    Text("Terminals that declare another category:")
+                        .font(.caption)
+                        .padding(.top, 2)
+                    ForEach(ContextResolver.terminalFallback.keys.sorted(), id: \.self) { bundleID in
+                        LabeledContent(bundleID, value: ContextResolver.terminalFallback[bundleID]!.rawValue.capitalized)
                             .font(.system(.caption, design: .monospaced))
                     }
                 }

@@ -8,32 +8,30 @@ import Foundation
 /// unit-testable without any AppKit dependency.
 public enum ContextResolver {
 
-    /// Curated starter map (D-05/D-06) — built-in bundle-ID → context
-    /// fallback for common apps. Guarded, user-editable override-map
-    /// persistence lands in Plan 38-03; this is only the lowest-precedence
-    /// built-in layer.
-    public static let curatedMap: [String: DictationContext] = [
+    /// The `LSApplicationCategoryType` value an app declares in its Info.plist when it is a
+    /// developer tool. Slice 54: every such app gets the identifier-safe `.code` prompt, so a
+    /// new terminal or editor needs no list entry (Warp and Orca went unlisted for weeks and
+    /// ran on the default prompt).
+    public static let developerToolsCategory = "public.app-category.developer-tools"
+
+    /// Terminals whose Info.plist declares another category (Apple's Terminal says
+    /// `utilities`). Checked only after the category rule.
+    public static let terminalFallback: [String: DictationContext] = [
+        "com.apple.Terminal": .code,
         "com.googlecode.iterm2": .code,
         "com.mitchellh.ghostty": .code,
-        "com.apple.Terminal": .code,
-        "com.apple.dt.Xcode": .code,
-        "com.microsoft.VSCode": .code,
-        "com.apple.Safari": .default,
-        "com.google.Chrome": .default,
-        "company.thebrowser.Browser": .default,
-        "com.apple.mail": .prose,
-        "com.apple.MobileSMS": .prose,
-        "com.tinyspeck.slackmacgap": .prose,
     ]
 
     /// Resolution precedence, top to bottom:
     ///   1. `disabled == true` → `.default` (short-circuits everything else).
     ///   2. Explicit session `pin` non-nil → the pinned context.
     ///   3. `overrides[bundleID]` present → that context (user-editable, Plan 38-03).
-    ///   4. `curatedMap[bundleID]` present → that context.
-    ///   5. Otherwise → `.default` (includes unknown/nil bundle ID).
+    ///   4. `category == developerToolsCategory` → `.code`.
+    ///   5. `terminalFallback[bundleID]` present → that context.
+    ///   6. Otherwise → `.default` (includes unknown/nil bundle ID and category).
     public static func resolve(
         bundleID: String?,
+        category: String? = nil,
         pin: DictationContext? = nil,
         disabled: Bool = false,
         overrides: [String: DictationContext] = [:]
@@ -47,8 +45,11 @@ public enum ContextResolver {
         if let bundleID, let override = overrides[bundleID] {
             return override
         }
-        if let bundleID, let curated = curatedMap[bundleID] {
-            return curated
+        if category == developerToolsCategory {
+            return .code
+        }
+        if let bundleID, let terminal = terminalFallback[bundleID] {
+            return terminal
         }
         return .default
     }
