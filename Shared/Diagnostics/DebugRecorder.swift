@@ -43,6 +43,9 @@ public struct DebugCleanupRecord: Codable, Sendable {
     /// Phase 38 Plan 01 (D-10, CTXFMT-01): the raw value of the
     /// `DictationContext` resolved for this run. `nil` on pre-Phase-38 JSONL.
     public let resolved_context: String?
+    /// Slice 54: the frontmost app's declared `LSApplicationCategoryType`, which the
+    /// resolver reads before the terminal fallback. `nil` when absent or on older JSONL.
+    public let app_category: String?
     /// Quick task 260805-qme: every rewrite `BrandMatcher` made at Step 1b,
     /// so a fuzzy/phonetic brand rewrite is attributable in the JSONL instead
     /// of showing up as an unexplained raw→shipped divergence with empty
@@ -80,7 +83,7 @@ public struct DebugCleanupRecord: Codable, Sendable {
         case ts, session_id, lang, lang_used, mode, model, sampler, steps
         case dictionary_context_keys, dictionary_replacements, dictionary_blocked
         case anomaly, emission_counter, prompt_version
-        case detected_bundle_id, resolved_context, brand_rewrites, lexicon_vetoed, asr_tokens, dictated_mark_shortfall
+        case detected_bundle_id, resolved_context, app_category, brand_rewrites, lexicon_vetoed, asr_tokens, dictated_mark_shortfall
         case post_gate_dict_replacements
     }
 
@@ -101,6 +104,7 @@ public struct DebugCleanupRecord: Codable, Sendable {
         prompt_version: String = "v19d",
         detected_bundle_id: String? = nil,
         resolved_context: String? = nil,
+        app_category: String? = nil,
         brand_rewrites: [BrandRewriteEntry]? = nil,
         lexicon_vetoed: [DictionaryBlockedEntry]? = nil,
         asr_tokens: AsrTokenTrace? = nil,
@@ -123,6 +127,7 @@ public struct DebugCleanupRecord: Codable, Sendable {
         self.prompt_version = prompt_version
         self.detected_bundle_id = detected_bundle_id
         self.resolved_context = resolved_context
+        self.app_category = app_category
         self.brand_rewrites = brand_rewrites
         self.lexicon_vetoed = lexicon_vetoed
         self.asr_tokens = asr_tokens
@@ -151,6 +156,7 @@ public struct DebugCleanupRecord: Codable, Sendable {
         // Phase 38 Plan 01: tolerant decode for pre-Phase-38 JSONL — both default to nil when absent.
         self.detected_bundle_id = try c.decodeIfPresent(String.self, forKey: .detected_bundle_id) ?? nil
         self.resolved_context = try c.decodeIfPresent(String.self, forKey: .resolved_context) ?? nil
+        self.app_category = try c.decodeIfPresent(String.self, forKey: .app_category) ?? nil
         // Quick task 260805-qme: tolerant decode for pre-260805 JSONL — nil when absent.
         self.brand_rewrites = try c.decodeIfPresent([BrandRewriteEntry].self, forKey: .brand_rewrites) ?? nil
         self.lexicon_vetoed = try c.decodeIfPresent([DictionaryBlockedEntry].self, forKey: .lexicon_vetoed) ?? nil

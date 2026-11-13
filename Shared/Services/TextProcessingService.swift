@@ -117,6 +117,7 @@ class TextProcessingService: ObservableObject {
         confidence: Double = 1.0,
         context: DictationContext = .default,
         detectedBundleID: String? = nil,
+        detectedAppCategory: String? = nil,
         saveToHistory: Bool = true
     ) async -> String {
         lastSavedEntry = nil
@@ -649,6 +650,7 @@ class TextProcessingService: ObservableObject {
             // made a plain-mode record in a curated .code app claim "resolved_context":"code"
             // even though that context had zero effect on the record's text.
             resolved_context: (mode == .aiCleanup ? context : .default).rawValue,   // Phase 38 Plan 01 (D-10)
+            app_category: detectedAppCategory,   // slice 54: the app's declared LSApplicationCategoryType, local-only
             // Quick task 260805-qme: empty array (not nil) distinguishes "matcher
             // ran, changed nothing" from a historical record predating this field.
             brand_rewrites: dbgBrandRewrites.map { DebugCleanupRecord.BrandRewriteEntry(from: $0.surface, to: $0.canon, jw: $0.jw, dl: $0.dl) },
