@@ -1,8 +1,8 @@
 # State
 Slice: 54-context-from-app-category (standard)
-Step: plan
-Next: owner approves PLAN.md for 54; then flow:build task 1 (resolver: category + terminal fallback).
-Waiting on: the owner: approval of the 54 plan
+Step: build
+Next: flow:build task 1 of 54 (resolver: category + terminal fallback).
+Waiting on: nothing
 Started: 2026-11-13T14:47:16Z
 Baseline: not yet measured
 Base: branch point
@@ -31,3 +31,4 @@ Carried:
 - 2026-11-13 54 brief: owner chose the app-category scope (developer-tools apps get .code, a short fallback list for terminals that declare another category, overrides on top; focused field not in this slice). BRIEF.md written, waiting on approval.
 - 2026-11-13 54 brief: approved by the owner ("approved").
 - 2026-11-13 54 plan: five tasks (resolver, macOS reader + log field, Settings text, replay tracer, replay run + judge sample); route: category from the app's own Info.plist, rule in ContextResolver, replay prompts built from main's CleanupPrompt; replay ceiling 45 min generation. Waiting on approval.
+- 2026-11-13 54 plan: approved by the owner ("approved, go ahead"); the approval covers the replay run up to its 45 min ceiling.
