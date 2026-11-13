@@ -20,4 +20,4 @@ Every item logged by the current prompt text reproduces byte for byte. Both arms
 | D (default prompt) | 3139 ms |
 | C (code prompt) | 3446 ms |
 
-Projection for 312 × 2 items: **34.2 min**, under the plan's 45 min ceiling, so the full run started at once (`data/timing.json`). The 022 estimate was 2.8 s/item; realised-to-sampled ratio is recorded with the run's wall time below.
+Projection for 312 × 2 items: **34.2 min**, under the plan's 45 min ceiling, so the full run started at once (`data/timing.json`). The 022 estimate was 2.8 s/item. The full run (312 × 2 items) took 16.4 min of generation, ended 17:12Z, exit 0, both arms complete; realised-to-sampled ratio 0.48. Results: `evidence/replay-report.md`.
