@@ -72,3 +72,5 @@ Standard: four build tasks plus the replay, two platforms to keep building, one 
 ## Open
 
 - Whether the focused-field detection gets a row of its own: decided after this slice's logs, if the owner asks.
+
+Approved by the owner 2026-11-13.
