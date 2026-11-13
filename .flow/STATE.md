@@ -3,7 +3,7 @@ Slice: 54-context-from-app-category (standard)
 Step: brief
 Next: flow:brief for 54: dictation context follows the app's declared category (LSApplicationCategoryType; Warp, Orca, VS Code and Claude desktop declare developer-tools, checked 2026-11-11) instead of ContextResolver.curatedMap; overrides stay; the focused-field idea is a possible later step. Evidence: .planning/debug/audit-2026-11-10/SYNTHESIS.md (Warp 312 records on .default, 47 % rejected).
 Waiting on: nothing
-Started: not yet (set by flow:brief)
+Started: 2026-11-13T14:47:16Z
 Baseline: not yet measured
 Base: branch point
 Risk: none
