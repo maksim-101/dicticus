@@ -22,7 +22,7 @@ The owner, deciding whether a small-model build for 6 GB phones is worth a slice
 5. `[check]` `adapt` Every distinct shipped text of the holdout is labelled blind (better, equal, mixed, worse) by two labellers from different vendors with spike 022's rubric; disagreements are adjudicated in writing, and a sample of the agreed labels is read by a third, fresh reader, since the 50.1 review showed a single fast pass misses defects.
 6. `[check]` `new` The verdict per language follows the pass rule the owner chooses at approval, with no change to an arm after the holdout is decoded. Latency (median and p90 per request) is measured for Q and the better L arm on a machine with load under 4, or reported as not measured.
 7. `[check]` `new` A counts-only summary is in `evidence/`; a pass creates a `planned` item for the iOS build (model download, family-aware envelope, memory and speed on a real 6 GB iPhone); a fail records why and closes the question with the owner's standing answer for 6 GB phones unchanged.
-8. `[judge]` The owner reads ten holdout dictations, chosen at random with the seed, as raw text, Qwen's result and LFM3's result side by side, and says whether LFM3's cleanup is something he would want on a phone.
+8. `[judge]` The owner reads ten holdout dictations, chosen at random with the seed, as raw text, Qwen's result and LFM3's result side by side, and says whether LFM3's cleanup is worth having on a phone.
 
 ## Not in this slice
 - Any change to shipped code, on either platform. The envelope and prompt for LFM3 live in the spike folder.
