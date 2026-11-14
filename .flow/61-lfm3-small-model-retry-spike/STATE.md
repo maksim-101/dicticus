@@ -1,8 +1,8 @@
 # State of 61-lfm3-small-model-retry-spike
 Slice: 61-lfm3-small-model-retry-spike (size set at brief)
 Step: plan
-Next: flow:plan: read spike 022's PROTOCOL.md and scripts, write PLAN.md (protocol and hash lock, LFM3 envelope and one prompt on the dev set, holdout draw after 2026-10-29, decodes through the resource gate, blind labels, verdict by the 60 % rule), then the owner's approval
-Waiting on: nothing
+Next: the owner approves PLAN.md (six tasks; the approval is the go for about 1.5 h of local GPU decoding, ceiling 3 h, and a 1.1 GB download); then flow:build, task 1
+Waiting on: the owner: plan approval
 Started: 2026-11-14T09:02:41Z
 Baseline: no check command run yet
 Base: branch point
@@ -16,3 +16,4 @@ Carried: none
 
 ## History
 - 2026-11-14 61 brief: opened from the owner's two answers; branch flow/61-lfm3-small-model-retry-spike from main. Item 62 created as planned. The two question lines left the root Carried list. Checked: the `</corrected_text>` stop string is in CleanupService.swift since 2026-10-31; `modelWantsReasoningPreclose` still matches qwen3 only; spike 022's scripts, data and gate build are on disk.
+- 2026-11-14 61 brief: approved with the 60 % rule. 61 plan: PLAN.md written from spike 022's protocol and scripts; holdout pool counted from the frozen logs of 2026-10-30 to 11-12: English 300, German 59, none in the dev set; the LFM3 file is no longer on disk. Waiting for plan approval.
