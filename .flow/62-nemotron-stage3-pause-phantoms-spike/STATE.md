@@ -15,6 +15,7 @@ Carried: none
 - 2026-11-14 plan: approved by the owner, "Approve, run now": the go for about 18 minutes of GPU decoding, ceiling 27 minutes, on mains power through the resource gate; more than 20 disputed passages stops the slice before any listening.
 - 2026-11-14 question (build, the resource gate refused the 21 GB slot under its 30 % rule for 40 minutes): the owner chose "Yes, 10 % floor after the VM ends": this one run may be admitted with the gate's documented `--min-free 10`, once the other session's test VM is gone (about 13:30 CET) and memory pressure is normal; the run's own watchdog stays.
 - 2026-11-14 question (build, the gate paused the run 40 minutes after batch 1 on its 2 GB swap-growth rule, which Nemotron's load always exceeds): the owner chose "Raise the limit to 8 GB for this run": the remaining three batches run back to back with the gate's `HEAVY_GATE_SWAP_GROWTH_MB=8192`, the limit the owner set for this model in October; the run's watchdog still aborts at 8 GB of swap growth.
+- 2026-11-14 verify (remark, not yet the labels): the owner on the listening page: "I don't get your NemoTron pause test, but overall, based on what you're showing me, NemoTron performs significantly better than Whisper." No answer line was given; the agent explained the test and asked whether Nemotron's words were what was said on every card.
 
 ## History
 - 2026-11-14 62 brief: opened by the owner's /flow:next; branch flow/62-nemotron-stage3-pause-phantoms-spike from main.
