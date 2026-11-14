@@ -32,7 +32,7 @@ All texts, prompts, outputs and labels stay in the gitignored spike folder; `.fl
 - **Files:** `data/out-dev-L1.jsonl`, `data/gate-out-dev-L1.jsonl`; `evidence/dev-envelope.md`.
 - **Affects:** nothing.
 - **Verify:** `python3 -I metrics.py dev` exits 0 and prints, per language, failed closed, shipped change, gate pass and rejected edits for Q and L1; `python3 -I early_signal.py` exits 0 when failed closed is at most 20 and shipped changes are at least 50, and exits 1 with the numbers otherwise (then the owner is told before task 3).
-- **Status:** todo
+- **Status:** done: the early signal failed (evidence/dev-envelope.md); the owner stopped the slice here, tasks 3 to 6 not run
 - **Depends on:** 1
 
 ### 3. L2: one prompt written for LFM3, frozen

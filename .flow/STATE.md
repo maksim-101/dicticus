@@ -1,5 +1,5 @@
 # State
-Slice: 61-lfm3-small-model-retry-spike
+Slice: none
 Carried:
 - owner checks on TestFlight build 18 (still the current build on 2026-11-14), none blocking: the 9c7 device checks (phone call, Siri, AirPods out/in mid-dictation, stop right after start, AI-cleanup model download and relaunch; built, not verified on a device)
 - owner: a tester with an iPhone 11-14 (Parakeet speed on A13-A15 unmeasured) and ideally an 8 GB iPhone 15 Pro/16 (confirm the AI Cleanup gate admits it)
