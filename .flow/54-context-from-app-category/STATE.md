@@ -15,6 +15,8 @@ Carried: none
 - 2026-11-13 plan: approved by the owner ("approved, go ahead"), covering the replay run up to its 45 min ceiling.
 - 2026-11-13 question: the owner freed disk for the mac-space VM and had dictated in Orca and Warp on the installed build ("continue. There should be enough space to start the VM now and also I've already dictated a few times in Orca and Warp.").
 
+- 2026-11-14 question: the owner reports that this week the AI Cleanup mode restructures some sentences in a way that changes their meaning (the dictation before this report is one example, not the only one) and asks for an investigation with recommendations; the 54 verdict (blind sample) is still open. Investigation runs on the debug logs; its findings go to the owner in chat and, once scoped, to a new item.
+
 ## History
 - 2026-11-13 54 brief: owner chose the app-category scope (developer-tools apps get .code, a short fallback list for terminals that declare another category, overrides on top; focused field not in this slice). BRIEF.md written, waiting on approval.
 - 2026-11-13 54 brief: approved by the owner ("approved").
