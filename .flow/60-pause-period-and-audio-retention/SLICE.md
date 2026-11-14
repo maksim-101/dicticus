@@ -52,3 +52,20 @@ One round (quick): `code-review` at low on `3ddc4de..HEAD`, code files only, wit
 | R2 | NIT | Two dictations in the same timestamp would share a WAV name and the second write would replace the first. | **won't fix**: `DebugRecorder.iso8601Timestamp` formats with `.withFractionalSeconds` (millisecond), and dictations are sequential on one hotkey; two cannot end in the same millisecond. |
 
 No open BLOCKER or WARNING after the round.
+
+## Verify
+
+Commit handed over: 46348f5. Build on the owner's Mac: Debug-Recorder build of that commit, installed by `scripts/install-local.sh` (see STATE.md History for the time and `check-running-copy.sh` result).
+
+| # | criterion | evidence | verdict |
+|---|---|---|---|
+| 1 | `[check]` pause period becomes a comma before the LLM; abbreviations, numbers, ellipses, capitalised continuations and plain mode untouched | `evidence/unit-tests.md`: RulesCleanupServiceTests 11 passed (four pause-period tests: lowercase continuation in English and German, capitalised continuation stays, abbreviations/numbers/ellipses/question mark/U.S.A./a.m. stay, idempotent; 3 failures with the rule removed); `evidence/pause-period-replay.md`: 8 records converted, 0 of 8 legitimate cases changed; plain mode: `clean` runs only in the aiCleanup branch (`TextProcessingService.swift:241`) | **pass** |
+| 2 | `[check]` EditGuard baseline is the rules text; full check green | `evidence/unit-tests.md`: EditGuardPipelineTests 15 passed including `testPausePeriodBecomesCommaBeforeTheGate`; full check on f841f7c: macOS Dicticus 1960 tests 0 failures, Dicticus-Debug-Recorder 2042 tests 0 failures, iOS simulator 1780 tests 0 failures; the review fix touched the rule's exclusion only and reran its class | **pass** |
+| 3 | `[check]` Debug-Recorder build writes one WAV per dictation under `DebugRecordings/audio`, 16 kHz mono PCM16, through `recordingsDirectory()`, 7-day purge, nothing in the Dicticus scheme; runtime: the owner's first dictations leave one WAV each | unit part: `evidence/unit-tests.md`: AudioRetentionProbeTests 3 passed (RIFF header, 16 000 Hz, mono, 44 + 2n bytes; empty buffer writes nothing; 8-day-old WAV purged, fresh WAV and a .txt kept), TestIsolationCanaryTests 6 passed with the new writer's directory under the test folder; `nm` 0 symbols in the Dicticus scheme's debug dylib against 62 in the Recorder host. Runtime part: **owed**, read back from the live folder after the owner's first dictations on the installed build (`evidence/runtime-audio.md`) | unit **pass**, runtime owed |
+| 4 | `[check]` the cleanup record names its WAV in `audio_file` | unit part: DebugCleanupRecordCodableTests 10 passed (round trip with `audio_file`, legacy JSON decodes with nil). Runtime part: **owed**, same read-back | unit **pass**, runtime owed |
+
+Working rules: no Spotlight (grep over `macOS/Dicticus`, `Shared`: comments only); audio and text stay on this Mac (the probe writes under Application Support, no network code touched); `#if DEBUG_RECORDER` on the probe and its tests; tests use synthetic sentences and a synthetic sine buffer; every xcodebuild used `-derivedDataPath build`; `check-running-copy.sh` OK after each run and install; simulator shut down; `.flow` records written with Edit/Write (the evidence files by the commands that produced them).
+
+No `[judge]` criterion: the owner has nothing to judge; the owed runtime rows close on the owner's ordinary dictations.
+
+Signed off: (pending the runtime read-back)
