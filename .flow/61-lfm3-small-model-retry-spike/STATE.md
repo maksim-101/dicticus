@@ -1,7 +1,7 @@
 # State of 61-lfm3-small-model-retry-spike
 Slice: 61-lfm3-small-model-retry-spike (size set at brief)
 Step: build
-Next: flow:build, task 1 (spike folder 025, scripts copied with the app's stop list, gate rebuilt from main, LFM3 downloaded and hash-checked, determinism, Qwen reproduction)
+Next: flow:build, task 2: when the background LFM3 decodes of the dev set finish (L1, L2v1, L2v2 into .planning/spikes/025-lfm3-retry/data/out-dev-*.jsonl; the decode script resumes where a file stops), gate them, run metrics.py dev Q L1 and early_signal.py; then task 3
 Waiting on: nothing
 Started: 2026-11-14T09:02:41Z
 Baseline: no check command run yet
@@ -18,3 +18,4 @@ Carried: none
 ## History
 - 2026-11-14 61 brief: opened from the owner's two answers; branch flow/61-lfm3-small-model-retry-spike from main. Item 62 created as planned. The two question lines left the root Carried list. Checked: the `</corrected_text>` stop string is in CleanupService.swift since 2026-10-31; `modelWantsReasoningPreclose` still matches qwen3 only; spike 022's scripts, data and gate build are on disk.
 - 2026-11-14 61 brief: approved with the 60 % rule. 61 plan: PLAN.md written from spike 022's protocol and scripts; holdout pool counted from the frozen logs of 2026-10-30 to 11-12: English 300, German 59, none in the dev set; the LFM3 file is no longer on disk. Waiting for plan approval.
+- 2026-11-14 61 build: task 1 done: harness copied to spike 025 with the app's nine stop strings, gate rebuilt from main, both model hashes equal spike 022's protocol (LFM3 still on disk, no download), Qwen deterministic and equal to spike 022 on 238 of 238 dev outputs, gate fidelity 237 of 238 (evidence/setup.md). Qwen's 238 decodes took 432 s. LFM3 dev decodes started in the background.

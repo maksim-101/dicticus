@@ -24,7 +24,7 @@ All texts, prompts, outputs and labels stay in the gitignored spike folder; `.fl
 - **Files:** `.planning/spikes/025-lfm3-retry/*` (untracked); `evidence/setup.md`.
 - **Affects:** disk (1.1 GB), GPU. Nothing shipped.
 - **Verify:** `shasum -a 256 <LFM3 file>` shows the prefix; `python3 -I generate.py Q dev determinism` and `… L dev determinism` print `True` three times each; `python3 -I check_q_repro.py` exits 0 when at least 95 % of Qwen's new dev outputs equal spike 022's `out-dev-Q.jsonl` after the stop-string cut (a lower rate is investigated before anything else runs).
-- **Status:** todo
+- **Status:** done (evidence/setup.md; the model file was still on disk, nothing downloaded; LFM3's determinism line comes with task 2)
 - **Depends on:** none
 
 ### 2. L1 on the dev set: the envelope alone
