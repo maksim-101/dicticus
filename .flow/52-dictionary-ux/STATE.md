@@ -1,7 +1,7 @@
 # State of 52-dictionary-ux
 Slice: 52-dictionary-ux (size set at brief)
 Step: brief
-Next: collect what the dictionary code already does for aliases and corrections, then draft BRIEF.md
+Next: flow:mockup for the grouped row and the History pick-and-add flow, then the brief approval
 Waiting on: nothing
 Started: 2026-11-14T14:07:19Z
 Baseline: no check command yet
