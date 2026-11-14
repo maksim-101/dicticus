@@ -2,15 +2,6 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
-/// A model representing a single replacement entry for the SwiftUI Table.
-struct DictionaryEntry: Identifiable, Hashable {
-    let id: String // Use the 'original' string as the unique ID
-    var original: String
-    var replacement: String
-    var createdAt: Date
-    var source: LexiconSource
-}
-
 enum DictionarySortMode: String, CaseIterable, Identifiable {
     case alphabetical = "A-Z"
     case mostRecent = "Recent"
@@ -27,8 +18,10 @@ enum DictionarySortMode: String, CaseIterable, Identifiable {
 /// A window view for managing the custom dictionary find-replace pairs.
 struct DictionaryView: View {
     @EnvironmentObject var dictionaryService: DictionaryService
-    @State private var entries: [DictionaryEntry] = []
-    @State private var selection: Set<DictionaryEntry.ID> = []
+    @State private var groups: [DictionaryService.DictionaryGroup] = []
+    /// Selected rows, by spelling (slice 52).
+    @State private var selection: Set<String> = []
+    @State private var renamingSpelling: String? = nil
     
     @State private var sortMode: DictionarySortMode = .mostRecent
     @State private var isShowingRemoveAllConfirmation = false
@@ -37,11 +30,6 @@ struct DictionaryView: View {
     @State private var newOriginal: String = ""
     @State private var newReplacement: String = ""
     @State private var isShowingAddRow = false
-
-    // In-place edit state (quick task 260801-ftf). `editingOriginal` is the
-    // dictionary key currently being edited (the pre-edit "Original" string);
-    // nil means the inline form is in Add mode.
-    @State private var editingOriginal: String? = nil
 
     // Import / Export state (Phase 31-02)
     @State private var importResult: String? = nil
@@ -83,7 +71,7 @@ struct DictionaryView: View {
 
                 Spacer()
 
-                Text("\(dictionaryService.dictionary.count) \(dictionaryService.dictionary.count == 1 ? "entry" : "entries")")
+                Text("\(groups.count) \(groups.count == 1 ? "word" : "words") · \(dictionaryService.dictionary.count) heard \(dictionaryService.dictionary.count == 1 ? "form" : "forms")")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
 
@@ -104,27 +92,38 @@ struct DictionaryView: View {
 
             Divider()
 
-            // Main Table
-            Table(entries, selection: $selection) {
-                TableColumn("Original (ASR Error)") { entry in
-                    Text(entry.original)
-                        .font(.system(size: 13))
-                }
-                TableColumn("Replacement") { entry in
-                    Text(entry.replacement)
-                        .font(.system(size: 13))
-                }
+            // One row per correct spelling, heard forms as chips (slice 52, mockup
+            // `dictionary-rows` variant A). A List, not a Table: chip rows wrap onto
+            // further lines, which Table rows do not size for.
+            HStack(spacing: 16) {
+                Text("Correct spelling")
+                    .frame(width: DictionaryGroupRow.spellingColumnWidth, alignment: .leading)
+                Text("Heard as")
+                Spacer()
             }
-            .tableStyle(.inset)
-            .contextMenu {
-                Button("Edit…") {
-                    beginEdit()
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 4)
+
+            List(groups, selection: $selection) { group in
+                DictionaryGroupRow(group: group, renamingSpelling: $renamingSpelling) { message in
+                    withAnimation(.easeInOut(duration: 0.2)) { duplicateWarning = message }
                 }
-                .disabled(selection.count != 1)
+                .tag(group.spelling)
+            }
+            .listStyle(.inset)
+            .alternatingRowBackgrounds()
+            .contextMenu(forSelectionType: String.self) { items in
+                Button("Rename…") {
+                    renamingSpelling = items.first
+                }
+                .disabled(items.count != 1)
                 Button("Delete") {
-                    deleteSelected()
+                    for spelling in items { dictionaryService.removeGroup(spelling: spelling) }
+                    selection.subtract(items)
                 }
-                .disabled(selection.isEmpty)
+                .disabled(items.isEmpty)
             }
 
             // Duplicate Warning
@@ -165,12 +164,8 @@ struct DictionaryView: View {
                             .controlSize(.regular)
                             .font(.system(size: 13))
 
-                        Button(editingOriginal != nil ? "Save" : "Add") {
-                            if editingOriginal != nil {
-                                saveEdit()
-                            } else {
-                                addEntry()
-                            }
+                        Button("Add") {
+                            addEntry()
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.regular)
@@ -194,7 +189,7 @@ struct DictionaryView: View {
                     .controlSize(.regular)
 
                     Button("Edit") {
-                        beginEdit()
+                        renamingSpelling = selection.first
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.regular)
@@ -494,31 +489,31 @@ struct DictionaryView: View {
     }
 
     private func refreshEntries() {
-        let mapped = dictionaryService.dictionary.map {
-            DictionaryEntry(id: $0.key, original: $0.key, replacement: $0.value.replacement, createdAt: $0.value.createdAt, source: $0.value.source)
-        }
+        let mapped = DictionaryService.groups(of: dictionaryService.dictionary)
 
         switch sortMode {
         case .alphabetical:
-            entries = mapped.sorted { $0.original.lowercased() < $1.original.lowercased() }
+            groups = mapped.sorted { $0.spelling.localizedCaseInsensitiveCompare($1.spelling) == .orderedAscending }
         case .mostRecent:
             // Sort by source priority first (user > imported > default), then most
             // recent createdAt within each group. This ensures the user's own entries
             // always surface at the top regardless of when default entries were stamped.
-            entries = mapped.sorted {
+            groups = mapped.sorted {
                 let pa = $0.source.sortPriority, pb = $1.source.sortPriority
                 if pa != pb { return pa < pb }
-                return $0.createdAt > $1.createdAt
+                if $0.newestCreatedAt != $1.newestCreatedAt { return $0.newestCreatedAt > $1.newestCreatedAt }
+                return $0.spelling < $1.spelling
             }
         }
+        selection.formIntersection(Set(groups.map(\.spelling)))
 
         importedPacks = Set(DictionaryService.StarterPack.allCases.filter { dictionaryService.isStarterPackImported($0) })
     }
 
     private func checkForDuplicate(_ value: String) {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed != editingOriginal, dictionaryService.dictionary.keys.contains(trimmed) {
-            duplicateWarning = "Entry '\(trimmed)' already exists."
+        if let key = dictionaryService.existingKey(for: trimmed) {
+            duplicateWarning = "'\(key)' already becomes '\(dictionaryService.dictionary[key]?.replacement ?? "")'."
         } else {
             duplicateWarning = nil
         }
@@ -538,47 +533,11 @@ struct DictionaryView: View {
         newOriginal = ""
         newReplacement = ""
         duplicateWarning = nil
-        editingOriginal = nil
-    }
-
-    // MARK: - In-place editing (quick task 260801-ftf)
-
-    private func beginEdit() {
-        guard selection.count == 1, let id = selection.first,
-              let entry = dictionaryService.dictionary[id] else { return }
-        editingOriginal = id
-        newOriginal = id
-        newReplacement = entry.replacement
-        duplicateWarning = nil
-        withAnimation(.spring(response: 0.3)) {
-            isShowingAddRow = true
-        }
-    }
-
-    private func saveEdit() {
-        guard let oldOriginal = editingOriginal else { return }
-        let result = dictionaryService.renameEntry(from: oldOriginal, to: newOriginal, replacement: newReplacement)
-        switch result {
-        case .saved:
-            selection.removeAll()
-            isShowingAddRow = false
-            newOriginal = ""
-            newReplacement = ""
-            duplicateWarning = nil
-            editingOriginal = nil
-            refreshEntries()
-        case .collision(let key):
-            duplicateWarning = "'\(key)' already exists — choose a different Original."
-        case .invalid(let reason):
-            duplicateWarning = reason
-        case .notFound:
-            duplicateWarning = "This entry no longer exists."
-        }
     }
 
     private func deleteSelected() {
-        for id in selection {
-            dictionaryService.removeReplacement(for: id)
+        for spelling in selection {
+            dictionaryService.removeGroup(spelling: spelling)
         }
         selection.removeAll()
         refreshEntries()
