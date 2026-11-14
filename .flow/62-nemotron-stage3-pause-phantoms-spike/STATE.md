@@ -1,8 +1,9 @@
 # State of 62-nemotron-stage3-pause-phantoms-spike
 Slice: 62-nemotron-stage3-pause-phantoms-spike (quick)
-Step: verify
-Next: on the owner's sign-off: record it in the Verify section, then flow:ship (item shipped with the verdict FAIL, spike 020 closed in its records and the memory note, idea items the owner asks for, the recordings copy deleted or kept as answered, README line "no change needed")
-Waiting on: the owner: sign off the verdict FAIL (spike 020 closes without an engine item) or name findings; and say whether the copy of the 33 recordings in the spike's cache is deleted now or kept for a Whisper follow-up
+Step: done
+Next: nothing for this slice. The measurement is recorded; ideas 63 (gaps in Whisper's text) and 64 (Nemotron as an optional engine) wait for the owner to schedule. The next planned item in ROADMAP.md is 52-dictionary-ux, briefed when the owner asks.
+Waiting on: nothing
+README: no change needed: the slice changed nothing outside `.flow/` (a measurement, no code)
 Started: 2026-11-14T09:52:09Z
 Baseline: not run: the slice changes nothing outside `.flow/` and the gitignored planning tree, so the app's test suite cannot move
 Base: branch point
@@ -28,6 +29,7 @@ Carried: none
 - 2026-11-14 62 brief: approved with the strict rule and the sample that exists at the freeze. Step plan.
 - 2026-11-14 62 plan: Plan section written (three tasks). Checked: all 33 recordings have a log record with language and Whisper raw text (18 English, 15 German); the October Whisper decodes hold 118 rows for each of arms A and C-sil50; `nemo-speech transcribe --help` matches Stage 2's flags; the resource gate's usage read. Waiting for plan approval.
 - 2026-11-14 62 plan: approved, run now. Step build.
+- 2026-11-14 62 ship: records. Scorecard 09:52Z to 14:03Z: 1.3 h active agent time, 7 typed prompts, 2 slash commands, 5 question dialogs, 2 subagent runs. Lines since the branch point (count-lines.sh): 138 under `.flow/`, 131 evidence, 0 elsewhere. Model time: 804 s of decoding (evidence/run.md). The fresh verifier's points settled (per-language twin counts added). The owner did not accept FAIL as the outcome; recorded beside the frozen result. Item shipped as a measurement, ideas 63 and 64 created, ROADMAP line removed, root file back to Slice: none. No code, no tag, no deploy. README: no change needed.
 - 2026-11-14 62 verify: the owner's labels entered (7 of 7, extras unanswered); the scorer under the lock prints `verdict: FAIL` (verdict arm: 4 Whisper wrong, 1 Nemotron invented, 1 Nemotron lost). Checked after the labels: card 7's words were shown verbatim and it alone fails the strict rule; card 5 reads as a spelled name whose spoken hyphen Nemotron wrote out, shown without Whisper's hyphen; the app's discard log shows no filter removed speech on the three recordings where Whisper lacked words. Verify section and `STAGE3-RESULTS.md` written; a fresh verifier (sonnet) is checking the criteria against the evidence. Waiting for the owner's sign-off.
 - 2026-11-14 62 review: one round on the verdict code by a fresh agent (opus): no blocker; a gap in the frozen rule (split or equal-length rewrites) checked on the data and covered by 2 extra cards outside the verdict; `--apply` hardened; twin sets confirmed equal (SLICE.md Review). Step verify: the page (9 cards) rechecked headless; waiting for the owner's labels.
 - 2026-11-14 62 build: task 2 done: four batches, 804 s of decoding (ceiling 1,620 s), 12 of 12 pairing texts identical to Stage 2, no sockets, mains power in all 366 samples; two gate stalls of about 40 minutes each, ended by the owner's two decisions (evidence/run.md). Task 3: scored under the lock: no loops; twins: Nemotron gained trailing words on 0 of 114 and lost on 1 per arm, Whisper gained on 3; real recordings: 7 distinct passages (N2: 5 only Nemotron has, 1 only Whisper has), verdict pending the owner's labels; listening page built and checked headless (evidence/result.md). The outputs carry no word timings, so passage times are estimates. An independent reviewer (opus) is reading the scorer's logic before the page goes to the owner.
