@@ -49,7 +49,7 @@ All spike files (scripts, lists, decodes, the listening page) live in the gitign
 - **Affects:** the Mac while it runs: about 19.5 GB of memory and the GPU, so other apps may go to swap and the owner's AI cleanup may be slow or time out for about 20 minutes (the 2026-11-10 audit traced cleanup timeouts to another model on the GPU). Starts through `heavy-gate acquire nemotron-stage3 --class model --mem 21 --wait 1800`, calls `heavy-gate check` between batches and pauses on exit 10, releases at the end. Mains power only.
 - **Run size:** expected about 18 minutes of decoding (about 4,200 s of audio per arm at the 8 to 9 times real time measured in Stages 1 and 2, plus four loads); ceiling 27 minutes of decoding, gate waits not counted. The first batch (N0, German) is the timed sample: if its rate projects the whole run past 27 minutes, the run stops there and the owner is asked. Decoding is deterministic, so an aborted batch is resumed, not repeated from the start.
 - **Verify:** `stage3-run.sh` exits 0 and its last line reads `total_secs=…`; every batch line shows `rc=0 reason=ok` and `files=` equal to the input count; `sockets.log` is empty; every power sample reads `AC Power`; `stage3_score.py --check-pairing` prints `12 of 12 identical` for the re-decoded originals against Stage 2 and exits non-zero otherwise.
-- **Status:** todo
+- **Status:** done (evidence/run.md: four batches rc=0, 804 s of decoding, 12 of 12 pairing texts identical, no sockets, mains power throughout)
 - **Depends on:** task 1
 
 ### Task 3: score, the listening page, the report
@@ -57,9 +57,9 @@ All spike files (scripts, lists, decodes, the listening page) live in the gitign
 - **Files:** `stage3/result.json`, `stage3/listen.html`, `STAGE3-RESULTS.md`, `evidence/result.md`, `evidence/listen-render.png` only if the page shows no dictation text in the shot (otherwise a text note of the render check).
 - **Affects:** nothing tracked beyond the evidence; a PASS adds one planned item (the opt-in engine) for the owner to schedule, a FAIL closes spike 020 in its records.
 - **Verify:** `uv run --no-project python -I stage3_score.py` exits 0 after confirming the lock hashes and prints the counts and either `verdict: PASS`, `verdict: FAIL` or `verdict: pending N passages`; the page is rendered headless and each player's start second and button count read back; `grep -c` for any word of the decodes in `.flow/62-nemotron-stage3-pause-phantoms-spike/evidence/` is covered by the evidence files holding numbers and hashes only (checked by reading them).
-- **Status:** todo
+- **Status:** done up to the owner's labels (evidence/result.md: 7 passages, verdict pending; the listening page is built and checked headless). The verdict, the results file and the records follow the labels, at verify.
 - **Depends on:** task 2
 
 **Criteria to tasks.** 1 → task 1 (lock and scorer check), with the file-time order read in task 2's evidence. 2 → tasks 2 and 3. 3 → tasks 1 (Whisper's counts), 2 and 3. 4 `[judge]` → task 3 builds the page; the owner's answers are taken at verify. 5 → task 3. 6 → task 2 (sockets) and task 3 (evidence content).
 
-**Departures from the brief.** None. One number is refined: the run is four batches (not six loads), about 18 minutes.
+**Departures from the brief.** None at approval. One number is refined: the run is four batches (not six loads), about 18 minutes. Found in the build: (1) the Stage 3 outputs carry no word timings (the runtime could not produce them; cause not found), so a passage's time and its "at a pause" mark are estimates from an even spread of the words; the mark was never part of the verdict. (2) Criterion 3 names "per arm and language" counts; they are in `result.json` and summed in the evidence. (3) The run needed two owner decisions on the resource gate (10 % memory floor, 8 GB swap pause), both recorded in STATE.md.
