@@ -25,4 +25,16 @@ Review: REVIEW.md, two rounds, 16 findings; R12 and R14 fixed in the fix step (F
 1. **Criterion 5, the blind sample (the one judgment item).** Open `.planning/spikes/024-warp-code-prompt-replay/data/judge-sample.md` (gitignored, on this Mac only; 20 items, each the rules-cleaned text and two gated outputs labelled A and B, shuffled per item). For each item, say whether the texts are equal in quality or which is better (A, B or same). I decode with `data/judge-key.json` and record the tally. The decision this feeds: keep the category rule as shipped (default, when the code prompt is at least as good on most items), or add a per-app override for apps where it reads worse. Setup: none; the sample is a text file. The figures behind it: the code prompt cut the rejected-edit rate from 0.091 to 0.065 and the share of dictations with a rejected edit from 45.8 % to 36.5 %, shipped slightly more changes (183 vs 177) and failed closed on none (`evidence/replay-report.md`). Bias to know: both metrics count the gate's rejections, and the gate's thresholds were tuned on earlier logs, so a lower rate means fewer edits the gate disliked, not proven better text; that is what the blind sample is for.
 2. **Context for that judgment, no action required:** on this Mac 14 installed apps declare developer-tools and now get the code prompt: 1Password, balenaEtcher, Claude, Cua Spaces, Docker, Hermes, Linear, LM Studio, OrbStack, Orca, TestFlight, Visual Studio Code, Warp, Xcode (checked live with `defaults read` on each Info.plist). Linear, Hermes and Claude are prose-first apps (review finding R6). The brief's decision covers them (the 2026-08-02 A/B found the code prompt no worse on prose) and the popover's "Current resolution" label shows which context an app got; an override per app is the lever if one reads worse.
 
-Signed off: (pending)
+## The owner's answer on criterion 5 (2026-11-14)
+
+The owner wrote a verdict under each of the 20 items in the spike's `data/judge-sample.md` ("criterion 5 is updated and saved"); decoded with `data/judge-key.json`:
+
+| verdict | items | count |
+|---|---|---|
+| code prompt (C) better | 3, 4, 8, 10, 12, 13, 16, 17, 19, 20 | **10** |
+| default prompt (D) better | 1, 6, 11, 14, 15 | 5 |
+| same, or neither (an ASR error in the base text) | 2, 5, 7, 9, 18 | 5 |
+
+The code prompt's text is at least as good in 15 of 20 items and preferred in 10, so the category rule ships as built (the default named in the hand-over). Where the default won, the difference was comma or semicolon style (items 1, 6, 11, 14) or an unclear base text (15); the owner added that he does not like semicolons ("fyi"), noted for the next prompt item. Items 2, 7, 17 and 18 point at ASR errors in the base text ("you you", "yes today" for "yesterday", "the Laria" for "Ilaria"), outside this slice.
+
+Signed off: 2026-11-14, criterion 5 by the owner's verdicts above; criteria 1-4 `[check]` pass. Slice 54 ships.

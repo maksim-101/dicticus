@@ -1,12 +1,12 @@
 ---
 id: 54
 title: context-from-app-category
-status: active
+status: shipped
 size: standard
-assignee: agent
+assignee: none
 created: 2026-11-11
 waiting_until:
-shipped:
+shipped: 2026-11-14 (no tag: release batched under CHANGELOG Unreleased)
 links:
 ---
 

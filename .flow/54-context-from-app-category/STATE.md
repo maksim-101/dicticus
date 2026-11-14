@@ -1,8 +1,8 @@
 # State of 54-context-from-app-category
 Slice: 54-context-from-app-category (standard)
-Step: verify
-Next: record the owner's answer on the criterion 5 blind sample (VERIFY.md, For the owner): decode with the spike's data/judge-key.json, write the tally into VERIFY.md with the Signed off line, then flow:ship (merge to main, tag macos-v1.4.2 since users get the category rule, install via scripts/install-local.sh).
-Waiting on: the owner: judgment items (the blind sample of 20 in the spike's data/judge-sample.md)
+Step: done
+Next: nothing for this slice; the owner's two chosen follow-ups (one week of local audio retention to confirm the ASR cause of meaning changes; the deterministic pause-period fix before the LLM) open as the next item via flow:brief.
+Waiting on: nothing
 Started: 2026-11-13T14:47:16Z
 Baseline: main 3f084ce (the branch point), slice 53's runs on it: macOS scheme Dicticus 1948 tests 0 failed (7 skipped), Dicticus-Debug-Recorder 2025 tests 0 failed (8 skipped), iOS simulator 1775 tests 0 failed (10 skipped); evidence .flow/53-probe-test-isolation/evidence/live-folder-runs.md
 Base: branch point
@@ -31,3 +31,5 @@ Carried: none
 - 2026-11-13 layout: .flow/ converted to flow 0.9.0 item folders (main fb5d4dd and 8d406ff, merged into this branch as d365c8b); this file written from the old root file's branch copy, 8 History lines, Carried none.
 - 2026-11-13 54 fix: R12 and R14 done (4ecc40e): the category reader reads Contents/Info.plist, then Info.plist at the bundle root (flat iOS bundles on Apple Silicon); regression test failed on 3 assertions before the fix, 7/7 after; corrupt plist covered. Full check on 4ecc40e: macOS Dicticus 1956 tests 0 failures, Dicticus-Debug-Recorder 2035 tests 0 failures, live folder unchanged, check-running-copy OK; iOS unchanged since round 2 (macOS-only diff). Debug-Recorder build 4ecc40e installed at 19:55Z.
 - 2026-11-13 54 verify: criteria 1-4 pass with evidence (VERIFY.md; unit-tests.md, runtime-category-log.md, settings-builtin-defaults.png, replay-report.md, working-rules.md); fresh verifier true on all four, its one unproven clause (VM provenance of the screenshot) answered by the image size and the History line. Handed to the owner with one judgment item: the blind sample of 20 (criterion 5), with the list of 14 installed developer-tools apps as context.
+- 2026-11-14 54 verify: signed off by the owner through the blind sample: code prompt better in 10 of 20, default in 5, same or neither in 5 (VERIFY.md); the category rule ships as built.
+- 2026-11-14 54 ship: merged to main, no tag (the release is batched under CHANGELOG Unreleased, as 53 and the October items were; the owner releases). Deploy: Debug-Recorder build 4ecc40e, the merged code, installed on the owner's Mac at 19:55Z on 11-13, check-running-copy OK; the runtime evidence (12 of 12 dictations resolved to code) is the live check. Scorecard 2026-11-13T14:47:16Z to 2026-11-14T05:54:46Z: active agent time 3.1 h, owner inputs 9 typed + 4 slash, 1 question, 4 subagent runs. Lines added against main: .flow 262 (evidence 143 separate), code 94, tests 226, CHANGELOG 1 entry. Regression tests for the review fixes: AppCategoryReaderTests.testUnreadablePlistIsNotCached (R5), testFlatBundleIsRead (R12), testCorruptPlistIsNotCached (R14); no production bug report fixed in this slice.
