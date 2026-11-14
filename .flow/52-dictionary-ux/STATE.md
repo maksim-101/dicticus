@@ -1,10 +1,10 @@
 # State of 52-dictionary-ux
 Slice: 52-dictionary-ux (standard)
 Step: build
-Next: task 1 (group model and group operations in DictionaryService)
+Next: task 2 (grouped Manage Dictionary window); code drafted, verify after the iOS baseline rerun
 Waiting on: nothing
 Started: 2026-11-14T14:07:19Z
-Baseline: no check command yet
+Baseline: at 04395b4 in a throwaway worktree: macOS Dicticus 1960 tests 0 failures (8 skipped), Dicticus-Debug-Recorder 2042 tests 0 failures (10 skipped); iOS simulator first run "test runner hung before establishing connection" (environment), rerun pending
 Base: branch point
 Risk: none
 Carried: none
