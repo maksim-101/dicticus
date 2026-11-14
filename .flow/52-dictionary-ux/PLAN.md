@@ -67,4 +67,4 @@ Tests use invented words only (public repo; no dictation text from the logs); ev
 
 ## Departures from the brief
 
-None.
+- Criteria 4 and 8 name screenshots "in the Mac test VM". On 2026-11-14 a macOS microphone prompt blocked the app windows in mac-space and refused synthetic input; the owner chose "Render headless on this Mac": a test renders the windows off-screen on the host with invented data. These images show the real SwiftUI layout but no launched app and no click-through.

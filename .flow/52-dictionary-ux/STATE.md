@@ -1,8 +1,8 @@
 # State of 52-dictionary-ux
 Slice: 52-dictionary-ux (standard)
 Step: build
-Next: task 4 screenshots, by the route the owner picks; then build step 3 is already done (full check recorded) and review starts at diff base 5ef4db7
-Waiting on: the owner: how task 4 gets past the macOS microphone prompt in mac-space (see History 2026-11-14 evening)
+Next: task 4 by headless rendering: a test renders DictionaryView, HistoryRow with a pick and the sheet off-screen to PNGs under evidence/
+Waiting on: nothing
 Started: 2026-11-14T14:07:19Z
 Baseline: at 04395b4 in a throwaway worktree: macOS Dicticus 1960 tests 0 failures (8 skipped), Dicticus-Debug-Recorder 2042 tests 0 failures (10 skipped); iOS simulator first run "test runner hung before establishing connection" (environment), rerun 1780 tests 0 failures (11 skipped)
 Base: branch point
@@ -16,6 +16,7 @@ Carried: none
 - 2026-11-14 mockup: history-pick board, variant A (click words, shift-click to extend): "option A".
 - 2026-11-14 brief: approved by the owner ("approved").
 - 2026-11-14 plan: approved by the owner ("approve").
+- 2026-11-14 question (build, task 4): screenshots by "Render headless on this Mac" (an off-screen test renders both windows with invented data); no VM run, no answer to the VM's microphone prompt.
 
 ## History
 - 2026-11-14 52 brief: opened from ROADMAP.md; branch flow/52-dictionary-ux from main 5ef4db7.
