@@ -1,4 +1,4 @@
-# Brief: 52-dictionary-ux (draft, waiting for mockups and approval)
+# Brief: 52-dictionary-ux (draft, waiting for approval)
 
 ## Outcome
 
@@ -16,14 +16,14 @@ The owner, on the Mac, after noticing a recurring mishearing: either in the Dict
 
 ## Done criteria
 
-1. `[check]` `new` The Dictionary pane lists one row per correct spelling, with its misheard forms shown on the row. Observed: a unit test of the grouping over a fixture (several forms per spelling, case variants of one spelling, a spelling that equals another entry's key), and a count over the owner's live dictionary read without writing: 183 groups from 306 entries.
+1. `[check]` `new` The Manage Dictionary window lists one row per correct spelling, with its misheard forms shown on the row as chips (mockup `dictionary-rows`, variant A: a "Correct spelling" column and a "Heard as" column of chips, each chip with its own ×, a "+" chip to add a form, an everyday-word form outlined in the warning colour; the toolbar counts words and heard forms). Observed: a unit test of the grouping over a fixture (several forms per spelling, case variants of one spelling, a spelling that equals another entry's key), and a count over the owner's live dictionary read without writing: 183 groups from 306 entries.
 2. `[check]` `adapt` From a row the owner can add a misheard form, remove one form, change the correct spelling for the whole row, and delete the row. Each is a `DictionaryService` operation covered by a test; rules of the existing `renameEntry` hold (`createdAt` kept, an edited entry becomes `source: .user`, a clash with an existing key is refused before anything changes).
 3. `[check]` `exists` The stored format does not change: the persisted blob is still `[heard form: DictionaryMetadata]` under `customDictionaryMetadata`, decoded by the shipped decoder. Observed: a test that encodes after each group operation and decodes with `loadGuarded`; no migration code in the diff.
-4. `[check]` `new` In History, in the Raw view of a dictation, the owner picks a word or a run of words (picking mechanism decided in the mockups) and chooses "Add to Dictionary…". A sheet opens with the picked text as the misheard form; the owner types the correct spelling and saves. If that spelling already has a row, the form joins that row. Observed: a UI-level test of the sheet's save path into a test `DictionaryService`, and a screenshot of the flow in the Mac test VM.
+4. `[check]` `new` In History, in the Raw view of a dictation, the owner clicks a word to pick it, shift-clicks another to extend the pick to the run of words between them, and presses "Add to Dictionary…" under the text (mockup `history-pick`, variant A; whole words only, punctuation at the ends dropped; in the Polished view nothing is pickable and a hint says to switch to Raw). A sheet opens with the picked text as the misheard form; the owner types the correct spelling and saves. If that spelling already has a row, the form joins that row. Observed: a UI-level test of the sheet's save path into a test `DictionaryService`, and a screenshot of the flow in the Mac test VM.
 5. `[check]` `new` The sheet warns, without blocking, when the misheard form is an everyday word in the EN/DE lexicon, and when the form is already an entry pointing to a different spelling. Observed: tests with "cloud" (lexicon word) and with an existing key.
 6. `[check]` `exists` An entry added from History takes effect on the next dictation: `applyWithTrace` over the saved misheard form returns the correct spelling. Observed: a test through the same service the pipeline uses.
 7. `[check]` `exists` The macOS test suites (Dicticus and Dicticus-Debug-Recorder schemes) and the iOS simulator suite pass (the dictionary code is shared), and the owner's live dictionary blob is byte-identical before and after the test runs (checksum).
-8. `[judge]` `new` The grouped list and the add-from-History flow look and feel right, judged on screenshots of the built app in the Mac test VM with a fixture dictionary, next to the mockup the owner picked.
+8. `[judge]` `new` The grouped list and the add-from-History flow look and feel right, judged on screenshots of the built app in the Mac test VM with a fixture dictionary, next to the chosen mockups: `mockups/dictionary-rows.png` (variant A, left) and `mockups/history-pick-2-sheet-join.png` / `history-pick-4-warnings.png` (variant A, left window; the sheet is shared).
 
 ## Not in this slice
 
@@ -32,6 +32,12 @@ The owner, on the Mac, after noticing a recurring mishearing: either in the Dict
 - Suggested entries mined from the logs or from post-paste edits: item 58 and SEED-003.
 - Search in the Dictionary pane, and any change to how matching works (exact pass, fuzzy pass, guards).
 - A canonical-plus-aliases storage format.
+- Free text selection with a right-click "Add to Dictionary…" in History (mockup `history-pick` variant B, not chosen), and picking parts of a word.
+
+## Mockup choices (2026-11-14)
+
+- `mockups/dictionary-rows.html`: variant A, table with chips (B list-and-detail and C expandable rows not chosen).
+- `mockups/history-pick.html`: variant A, click words (B select and right-click not chosen).
 
 ## Constraints
 
@@ -47,5 +53,4 @@ Standard. No risk trigger: no migration and no new deletion path beyond what the
 
 ## Open
 
-- The look of the grouped row and its editing, and how a word is picked in History (clickable words or a selectable text view): decided in the mockups before approval.
 - Search in the Dictionary pane: later, if 183 rows are still too many.
