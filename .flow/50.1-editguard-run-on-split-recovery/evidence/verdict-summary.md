@@ -6,8 +6,8 @@ Recomputed by `python3 -I …/r4/verdict_check.py` (exit 0, prints `verdict chec
 
 | figure | value |
 |---|---|
-| b1 REGRESSION hunks | 9 |
-| c1 REGRESSION hunks | 1 |
+| b1 REGRESSION hunks | 15 |
+| c1 REGRESSION hunks | 7 |
 | period hunks | 33 |
 | lost periods | 61 |
 | W1 percent | 54 |
@@ -23,7 +23,7 @@ Recomputed by `python3 -I …/r4/verdict_check.py` (exit 0, prints `verdict chec
 
 | constraint | b1 | c1 |
 |---|---|---|
-| H1 / H1c: zero REGRESSION among changed hunks | **fail**: 9 stand (8 period hunks, 2 of them rated bad by both labellers, and 1 comma hunk) | **fail**: 1 stands (a comma hunk rated bad by agy, not overturned after reading the full record) |
+| H1 / H1c: zero REGRESSION among changed hunks | **fail**: 15 stand (8 period hunks, 2 of them rated bad by both labellers, and the 7 comma hunks) | **fail**: at least 7 stand (1 rated bad by agy and not overturned after reading the full record, 6 more of the same kind found by the independent review) |
 | H2: pinned tests with the hook on | pass, 21 tests 0 failures | pass, 21 tests 0 failures |
 | H3: boundary-casing hits a subset of main's | **fail**: 1 extra record (the same passage as one unanimous REGRESSION) | pass, 0 extra |
 | H4: no token from neither source | pass, 0 | pass, 0 |
@@ -37,9 +37,11 @@ Recomputed by `python3 -I …/r4/verdict_check.py` (exit 0, prints `verdict chec
 - agy ("Gemini 4 Argon (High)"; the round-1 model name no longer exists) labelled 94 items blind: all 33 period hunks (23 good, 3 neutral, 7 bad) and 61 comma hunks, 60 drawn with seed 20261114 plus the one the agent marked doubtful (28 good, 30 neutral, 3 bad).
 - Flagged bad by either labeller: 9 period hunks and 3 comma hunks. Rulings: 2 comma hunks overturned (each is one comma of a pair whose other comma ships in the same record, which agy could not see); 1 comma hunk stands (half of a pair whose other half is not released, so the output gains an unpaired comma); the period hunks stand, 3 of them without an overturn attempt because b1 fails on the 2 unanimous ones either way.
 
+- The independent review (REVIEW.md) then found 6 more comma hunks with the same defect as the standing one, outside agy's sample, all of which the agent's first pass had rated good or neutral. The agent's comma labels were too shallow; its "0 bad of 271" does not hold. The first labels are kept beside the revised ones. The review's scan is a heuristic, so 7 is a lower bound.
+
 ## Verdict, from the pre-registration's decision table
 
 - **b1** (periods and commas): an H fails, so 50.1's split recovery closes as measured and not shipped. No third round without new evidence from a different source.
-- **c1** (commas only): H1c fails on one hunk in 271, so it closes. The failure is the rule's own behaviour: it releases a lone comma without knowing that it is half of a pair.
+- **c1** (commas only): H1c fails on at least 7 hunks in 271 (2.6 %), so it closes. The failure is the rule's own behaviour: it releases a lone comma without knowing that it is half of a pair, and it happens with the opening half as well as the closing half.
 
-For the owner (criterion 8): the three comma rulings and the one agent-only period ruling, with the full dictations, are in `r4/adjudication.md`.
+For the owner (criterion 8): the two overturned comma rulings and the one agent-only period ruling, with the passages, are in `r4/adjudication.md`. Neither can change a verdict.
