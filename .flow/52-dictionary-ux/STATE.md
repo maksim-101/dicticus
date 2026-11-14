@@ -1,8 +1,8 @@
 # State of 52-dictionary-ux
 Slice: 52-dictionary-ux (standard)
 Step: plan
-Next: flow:plan: compare routes, write PLAN.md, ask for plan approval
-Waiting on: nothing
+Next: on approval, flow:build task 1
+Waiting on: the owner: approval of PLAN.md
 Started: 2026-11-14T14:07:19Z
 Baseline: no check command yet
 Base: branch point
