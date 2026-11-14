@@ -40,7 +40,7 @@ All spike files (scripts, lists, decodes, the listening page) live in the gitign
 - **Files:** new under the planning tree: `stage3/STAGE3-PREREG.md`, `stage3/stage3-thresholds.json`, `stage3/STAGE3-LOCK.sha256`, `stage3/stage3_freeze.py`, `stage3/stage3_score.py`; the sample copy in the spike's cache; `evidence/freeze.md` (counts per language and pause position, hashes of the frozen files, Whisper's twin counts).
 - **Affects:** nothing in the app or the repo's tracked code. The copy keeps recordings beyond the debug build's seven-day purge, on this Mac only; it is deleted when spike 020 closes or the engine item ends.
 - **Verify:** `shasum -a 256 -c STAGE3-LOCK.sha256` prints OK for every line; `uv run --no-project python -I stage3_score.py --self-test` prints `self-test: all passed` (synthetic strings: a loop, a three-word run in each direction, a two-word run that must not count, a gained and a lost trailing word) and exits non-zero on a failing assertion, seen failing once with the run length set to 2; `shasum -a 256 -c expected.sha256` in the cache's model folder prints OK for both files.
-- **Status:** todo
+- **Status:** done (evidence/freeze.md; the spike files are gitignored, so the task has no code commit)
 - **Depends on:** none
 
 ### Task 2: the decode run
