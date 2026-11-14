@@ -273,15 +273,19 @@ final class DebugCleanupRecordCodableTests: XCTestCase {
             emission_counter: 1,
             detected_bundle_id: "com.example.devtool",
             resolved_context: "code",
-            app_category: "public.app-category.developer-tools"
+            app_category: "public.app-category.developer-tools",
+            audio_file: "2026-11-14T06-00-00.000Z.wav"
         )
         let data = try! JSONEncoder().encode(record)
         let json = String(data: data, encoding: .utf8)!
         XCTAssertTrue(json.contains("\"app_category\":\"public.app-category.developer-tools\""),
                       "slice 54: app_category must be written under that key — got: \(json)")
+        XCTAssertTrue(json.contains("\"audio_file\":\"2026-11-14T06-00-00.000Z.wav\""),
+                      "slice 60: audio_file must be written under that key — got: \(json)")
         let decoded = try! JSONDecoder().decode(DebugCleanupRecord.self, from: data)
         XCTAssertEqual(decoded.app_category, "public.app-category.developer-tools")
         XCTAssertEqual(decoded.resolved_context, "code")
+        XCTAssertEqual(decoded.audio_file, "2026-11-14T06-00-00.000Z.wav")
     }
 
     func testDebugCleanupRecordDecode_TolerantToMissingAppCategory() {
@@ -316,6 +320,7 @@ final class DebugCleanupRecordCodableTests: XCTestCase {
         """.data(using: .utf8)!
         let decoded = try! JSONDecoder().decode(DebugCleanupRecord.self, from: json)
         XCTAssertNil(decoded.app_category, "pre-slice-54 JSONL has no app_category and must still decode")
+        XCTAssertNil(decoded.audio_file, "pre-slice-60 JSONL has no audio_file and must still decode")
         XCTAssertEqual(decoded.resolved_context, "default")
     }
 

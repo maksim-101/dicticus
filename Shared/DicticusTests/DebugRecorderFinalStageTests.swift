@@ -78,15 +78,18 @@ final class DebugRecorderFinalStageTests: XCTestCase {
         )
         matcher.liveDictionaryCanonicalProvider = nil
 
+        // Slice 60: a period followed by a lowercase word is a thinking pause and becomes a
+        // comma in the rules pass, so the fixture ends its first sentence with a question
+        // mark, which the rules pass leaves alone and the capitalizer still acts on.
         let output = await service.process(
-            text: "hello world. clawed directory is open.",
+            text: "hello world? clawed directory is open.",
             language: "en",
             mode: .aiCleanup
         )
 
         // Test 1 (unconditional, every configuration): the firing-path guard —
         // capitalization actually reached the returned/pasted text.
-        XCTAssertEqual(output, "Hello world. Clawed directory is open.",
+        XCTAssertEqual(output, "Hello world? Clawed directory is open.",
             "expected Step 3a.6 to capitalize the post-gate-reverted baseline — got: \(output)")
 
         #if DEBUG_RECORDER
@@ -96,9 +99,9 @@ final class DebugRecorderFinalStageTests: XCTestCase {
         let record = await DebugRecorder.shared.lastRecordForTests
         XCTAssertEqual(record?.steps.post_gate?.verdict, "rejected",
             "fixture must exercise the fail-closed gate-revert path (reasoningLeak)")
-        XCTAssertEqual(record?.steps.post_gate?.text, "hello world. clawed directory is open.",
+        XCTAssertEqual(record?.steps.post_gate?.text, "hello world? clawed directory is open.",
             "post_gate must record the PRE-capitalization gate-reverted baseline")
-        XCTAssertEqual(record?.steps.finalStage?.text, "Hello world. Clawed directory is open.",
+        XCTAssertEqual(record?.steps.finalStage?.text, "Hello world? Clawed directory is open.",
             "final must record the POST-capitalization text")
         XCTAssertNotEqual(record?.steps.finalStage?.text, record?.steps.post_gate?.text,
             "non-vacuity: final must differ from post_gate in this fixture, not duplicate it")

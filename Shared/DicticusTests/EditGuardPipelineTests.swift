@@ -227,22 +227,22 @@ final class EditGuardPipelineTests: XCTestCase {
 
     // MARK: - 261017-g3j: restored terminal mark keeps a lowercase continuation
 
-    /// Delete-shape fixture (invented): the LLM drops a stray mid-sentence
-    /// period and ends the utterance with one; the gate restores the stray
-    /// period, and the finishing capitalizer must leave the next word lowercase.
-    func testRestoredMarkKeepsLowercaseThroughPipeline_RED() async {
+    /// Slice 60: the pipeline-level fixture of 261017-g3j ("The chain needs oil. on both
+    /// sides…", the gate restoring a stray period the LLM dropped and the capitalizer
+    /// leaving the next word lowercase) no longer reaches the gate: a period before a
+    /// lowercase word is a thinking pause and becomes a comma in the rules pass. The gate's
+    /// restored-mark behaviour keeps its own tests in EditGuardPauseSplitMergeTests
+    /// (`testRestoredMark_*`); this test states what the pipeline does with that shape now.
+    func testPausePeriodBecomesCommaBeforeTheGate() async {
         let raw = "The chain needs oil. on both sides before the long ride"
-        let baseline = await rulesCleanedBaseline(for: raw, language: "en")
-        // The helper's output already went through the finishing capitalizer, so compare case-insensitively.
-        XCTAssertTrue(baseline.lowercased().contains("oil. on"), "rules pass must keep the stray period: \(baseline)")
-
         let mock = PipelineMockCleanupProvider()
         mock.returnValue = "The chain needs oil on both sides before the long ride."
         let service = TextProcessingService(
             dictionaryService: dictionaryService, cleanupService: mock, historyService: testHistory
         )
         let output = await service.process(text: raw, language: "en", mode: .aiCleanup)
-        XCTAssertTrue(output.contains("oil. on"), "word after the restored period must stay lowercase — got: \(output)")
+        XCTAssertFalse(output.contains("oil. on"), "the pause period must not ship — got: \(output)")
+        XCTAssertTrue(output.contains("oil, on") || output.contains("oil on"), "got: \(output)")
     }
 
     // MARK: - 261017-g3j: post-gate exact pass over the user's own entries

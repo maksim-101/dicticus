@@ -14,4 +14,7 @@ struct DicticusTranscriptionResult: Sendable {
     /// Confidence score from 0.0 to 1.0, derived from ASR engine confidence score.
     /// Higher values indicate higher confidence that speech was present.
     let confidence: Float
+    /// Slice 60: the WAV the Debug-Recorder build kept for this dictation (file name under
+    /// DebugRecordings/audio), nil in every other build and on iOS.
+    var audioFileName: String? = nil
 }
