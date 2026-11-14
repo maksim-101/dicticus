@@ -2,7 +2,7 @@
 Slice: 62-nemotron-stage3-pause-phantoms-spike (quick)
 Step: build
 Next: task 2: the decode run. `stage3/stage3-run.sh` was started in the background on 2026-11-14 about 10:45 UTC and waits at the resource gate (up to 4 hours) until memory is free; when it exits, run its Verify (watch.log batch lines, sockets.log empty, power.log all AC, `stage3_score.py --check-pairing`), then task 3. If the session ended meanwhile: check `watch.log`; with no batch line the run never started and is started again the same way.
-Waiting on: host: the other session's test VM (mac-space) ending, about 12:30 UTC, then the gate admitting a 21 GB model slot at the 10 % floor the owner allowed. The script waits for both by itself; the VM queue's coordinator holds the next VM until this run's slot is released or 13:10 UTC
+Waiting on: host: the other session's test VM (mac-space) ending, about 12:45 UTC, then the gate admitting a 21 GB model slot at the 10 % floor the owner allowed. The script (restarted about 11:35 UTC) waits for both by itself; the VM queue's coordinator holds the next VM until this run's slot is released or 13:25 UTC
 Started: 2026-11-14T09:52:09Z
 Baseline: not run: the slice changes nothing outside `.flow/` and the gitignored planning tree, so the app's test suite cannot move
 Base: branch point
