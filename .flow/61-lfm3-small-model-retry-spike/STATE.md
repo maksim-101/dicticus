@@ -1,8 +1,8 @@
 # State of 61-lfm3-small-model-retry-spike
 Slice: 61-lfm3-small-model-retry-spike (size set at brief)
 Step: brief
-Next: write BRIEF.md: the question (LFM3 with the stop string, an LFM-aware envelope and one prompt written for it, against Qwen on spike 022's 238 dictations plus its unscored holdout), the pass rule, and whether a phone is needed; then the owner's approval
-Waiting on: nothing
+Next: the owner approves BRIEF.md and chooses the pass rule (as good as Qwen, or good enough for phones that have nothing today); then flow:plan
+Waiting on: the owner: brief approval and the pass rule
 Started: 2026-11-14T09:02:41Z
 Baseline: no check command run yet
 Base: branch point
