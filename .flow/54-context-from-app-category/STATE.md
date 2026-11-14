@@ -17,6 +17,8 @@ Carried: none
 
 - 2026-11-14 question: the owner reports that this week the AI Cleanup mode restructures some sentences in a way that changes their meaning (the dictation before this report is one example, not the only one) and asks for an investigation with recommendations; the 54 verdict (blind sample) is still open. Investigation runs on the debug logs; its findings go to the owner in chat and, once scoped, to a new item.
 
+- 2026-11-14 question (restructure report): the owner chose (a) one week of local, debug-only audio retention to confirm the cause ("okay, do it"); (b) no low-confidence marking in the paste ("the paste should be clean"); (c) the deterministic pause-period fix before the LLM ("okay, do it"). (a) and (c) become a new item after 54 ships. Criterion 5: the owner answered the blind sample in the spike's data/judge-sample.md ("criterion 5 is updated and saved").
+
 ## History
 - 2026-11-13 54 brief: owner chose the app-category scope (developer-tools apps get .code, a short fallback list for terminals that declare another category, overrides on top; focused field not in this slice). BRIEF.md written, waiting on approval.
 - 2026-11-13 54 brief: approved by the owner ("approved").
