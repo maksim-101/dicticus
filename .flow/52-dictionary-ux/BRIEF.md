@@ -1,4 +1,4 @@
-# Brief: 52-dictionary-ux (draft, waiting for approval)
+# Brief: 52-dictionary-ux (approved by the owner 2026-11-14)
 
 ## Outcome
 

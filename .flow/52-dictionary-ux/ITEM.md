@@ -2,7 +2,7 @@
 id: 52
 title: dictionary-ux
 status: active
-size:
+size: standard
 assignee: none
 created: 2026-11-08
 waiting_until:
