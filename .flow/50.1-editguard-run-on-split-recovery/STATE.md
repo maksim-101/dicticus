@@ -1,16 +1,13 @@
 # State of 50.1-editguard-run-on-split-recovery
 Slice: 50.1-editguard-run-on-split-recovery (standard)
-Step: ship
-Next: flow:ship: mark 50.1 dropped (both candidates closed), remove its ROADMAP line, merge the branch (it carries the root Carried settlement), update the memory note
+Step: done
+Next: nothing for this slice. The item is dropped: measured, not shipped. The next item in ROADMAP.md is 52-dictionary-ux, briefed when the owner asks.
 Waiting on: nothing
 Started: 2026-11-14T08:01:00Z
 Baseline: not rerun: this branch changes no file outside .flow/, and main 4a6ffd6 carries slice 60's close (macOS Dicticus 1960 tests 0 failures, Debug-Recorder 2042, iOS simulator 1780; 60 STATE.md History)
 Base: branch point
 Risk: none
-Carried:
-- 50.1 plan: the GSD pre-approval of the 2026-11-09 verdict run lapsed with the migration (owner chose to migrate before the run, 2026-11-08); the run goes into the plan for the owner's approval.
-- 50.1 ship: after the owner's reading of the rulings, mark 50.1 `dropped` with the reason (both candidates closed), remove its ROADMAP line, update the memory note on the holdout round; no follow-on build item unless the owner rejects a ruling.
-- 50.1 ship: this branch carries the settlement of the root STATE.md `## Incoming` lines (first commit); it must merge even if 50.1 closes as dropped, or the lines return on main.
+Carried: none
 
 ## Decisions
 - 2026-11-14 brief: approved by the owner ("Approve, cut at 9 Nov"): the snapshot holds dictations up to the end of 2026-11-09, as pre-registered; agy (Gemini) is the blind second labeller, as in round 1.
@@ -23,3 +20,4 @@ Carried:
 - 2026-11-14 50.1 review: one fresh read-only reviewer on the untracked verdict work; no BLOCKER; R1 WARNING accepted: six more comma REGRESSION hunks of the same kind as the standing one, missed by the agent's shallow first labels, so c1 fails on at least 7 of 271 and b1 on 15; verdicts unchanged (REVIEW.md).
 - 2026-11-14 50.1 verify: criteria 1-6 pass, 7 owed at ship, 8 waits for the owner (VERIFY.md). (The two lines above and this one are newer than the line below.)
 - 2026-11-14 50.1 brief: approved with the cut-off at the end of 2026-11-09; the harness feeds the gate the logged post-rules text, so slice 60's pause rule is not replayed (BRIEF.md Constraints).
+- 2026-11-14 50.1 ship: closed as dropped (measured, not shipped) on the owner's sign-off; ITEM.md dropped, ROADMAP line removed, root file back to Slice: none, all three carried lines done (the run was approved with the plan, the item is dropped here, the Incoming settlement merges with this branch). No tag, no deploy, no smoke check: no code changed. Scorecard 2026-11-14T08:01:00Z to ship: wall-clock 1.0 h, active agent time 0.9 h, owner inputs 2 typed + 2 slash, 1 question, 1 subagent run. Lines added against 4a6ffd6: .flow 176 (evidence 74 separate), code 0, tests 0. No production bug or user report was fixed in this slice.
