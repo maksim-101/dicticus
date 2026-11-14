@@ -62,6 +62,8 @@ All spike files (scripts, lists, decodes, the listening page) live in the gitign
 
 **Criteria to tasks.** 1 → task 1 (lock and scorer check), with the file-time order read in task 2's evidence. 2 → tasks 2 and 3. 3 → tasks 1 (Whisper's counts), 2 and 3. 4 `[judge]` → task 3 builds the page; the owner's answers are taken at verify. 5 → task 3. 6 → task 2 (sockets) and task 3 (evidence content).
 
+**Departures from the brief.** None at approval; one number was refined (four batches, about 18 minutes of decoding). What the build found is listed at the end of the Verify section.
+
 ## Review
 
 One round (quick). The slice's tracked diff holds records only, so the correctness review went to the code that decides the verdict: a fresh agent (opus) read `stage3_score.py`, the pre-registration, the thresholds, the freeze script and the listening-page builder, with synthetic inputs only and the rule that no dictation text is opened. The main loop checked each finding against the code or the data.
@@ -77,4 +79,21 @@ One round (quick). The slice's tracked diff holds records only, so the correctne
 
 Found clean: the trailing rules on empty inputs, the verdict table, the numbering between page and `--apply`.
 
-**Departures from the brief.** None at approval. One number is refined: the run is four batches (not six loads), about 18 minutes. Found in the build: (1) the Stage 3 outputs carry no word timings (the runtime could not produce them; cause not found), so a passage's time and its "at a pause" mark are estimates from an even spread of the words; the mark was never part of the verdict. (2) Criterion 3 names "per arm and language" counts; they are in `result.json` and summed in the evidence. (3) The run needed two owner decisions on the resource gate (10 % memory floor, 8 GB swap pause), both recorded in STATE.md.
+## Verify
+
+Checked at the branch head of 2026-11-14 after the owner's labels. The spike's files are gitignored; the evidence files hold counts, hashes and flags.
+
+| # | Criterion | Evidence | Verdict |
+|---|---|---|---|
+| 1 | `[check]` rule frozen before any decode, scorer refuses on a changed hash | `evidence/freeze.md`: six locked files, `shasum -c` OK; self-test passed and was seen failing at run length 2. `evidence/run.md`: the lock file is older than the first decode output. The scorer's `check_lock()` ran before each scoring (it exits on a differing hash; read in the code, exercised only on unchanged files) | **pass** (the refusal branch itself was not triggered: inferred from the code) |
+| 2 | `[check]` real recordings decoded in N0 and N2 with the record's language, compared with Whisper's raw text; loops, runs in both directions, pause marks | `evidence/run.md`: four batches, every input has an output; `evidence/result.md`: per arm 0 loops, 3 and 5 Nemotron-only runs, 0 and 1 Whisper-only runs, pause marks 2 and 2 | **pass**, with one departure: the pause marks rest on estimated positions, because the outputs carry no word timings (below) |
+| 3 | `[check]` 114 twins at -50 dBFS in N0 and N2, paired with Stage 2; gained, lost, loops; Whisper's counts | `evidence/run.md`: 12 of 12 pairing texts identical; `evidence/result.md`: Nemotron gained 0 and lost 1 per arm, 0 loops; Whisper gained 3, lost 0; `evidence/freeze.md`: Whisper's counts fixed at the freeze; review R5: same 114 clips on both sides | **pass** |
+| 4 | `[judge]` every run settled by the owner's ear, at most 20 | The owner's answer line for all 7 passages (STATE.md Decisions, `evidence/result.md`). The two extra cards outside the rule were not answered | **done by the owner** |
+| 5 | `[check]` verdict computed from the frozen table and written to the evidence, the spike's results file, the memory note and the item | `evidence/result.md`: `verdict: FAIL` (N2: 1 passage labelled invented, 1 labelled lost); `STAGE3-RESULTS.md` in the planning tree; memory note and item at ship | **pass** (verdict FAIL is the criterion's result, not its failure) |
+| 6 | `[check]` no audio or text left the Mac; no dictation text in a tracked file | `evidence/run.md`: `sockets.log` 0 bytes over all four batches; the three evidence files read through: counts, hashes, flags, card numbers and labels only | **pass** |
+
+Working rules: privacy (all on-device; dictation text only in the gitignored planning tree and the spike's cache); `.flow` records written with Edit or Write, the evidence notes with Write; the run went through the resource gate on mains power, with the two limits the owner raised for it; no Spotlight; no app code touched, so the app's test suite was not run.
+
+**For the owner.** The verdict under the strict rule is FAIL, and by the brief a FAIL closes spike 020 without an engine item. Two things are true together: on four of the six deciding passages Whisper was the engine that was wrong, and the strict rule fails on a single passage where Nemotron lost or invented words, which card 7 is (three words lost in a recording that is mostly pause). Card 5 reads as a spelled name whose spoken hyphen Nemotron wrote out; the label stands, and the verdict does not depend on it. Asked with the sign-off: what happens to the copy of the 33 recordings in the spike's cache (the plan says it is deleted when the spike closes).
+
+Build notes read with the criteria: (1) the Stage 3 outputs carry no word timings (the runtime could not produce them; cause not found), so a passage's time and its "at a pause" mark are estimates from an even spread of the words; the mark was never part of the verdict. (2) Criterion 3 names "per arm and language" counts; they are in `result.json` and summed in the evidence. (3) The run needed two owner decisions on the resource gate (10 % memory floor, 8 GB swap pause), both recorded in STATE.md.
