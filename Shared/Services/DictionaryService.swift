@@ -508,6 +508,102 @@ class DictionaryService: ObservableObject {
         save()
     }
 
+    // MARK: - Groups: one row per correct spelling (slice 52)
+
+    /// All entries that share one replacement string. Storage stays one entry
+    /// per heard form; a group is only a view over it.
+    struct DictionaryGroup: Identifiable, Equatable {
+        var id: String { spelling }
+        let spelling: String
+        let forms: [String]
+        let newestCreatedAt: Date
+        let source: LexiconSource
+    }
+
+    /// Exact replacement string is the group key: "claude" and "Claude" are
+    /// different outputs, so merging them would let a rename change one silently.
+    nonisolated static func groups(of entries: [String: DictionaryMetadata]) -> [DictionaryGroup] {
+        Dictionary(grouping: entries, by: { $0.value.replacement }).map { spelling, members in
+            DictionaryGroup(
+                spelling: spelling,
+                forms: members.map(\.key).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending },
+                newestCreatedAt: members.map(\.value.createdAt).max() ?? .distantPast,
+                source: members.map(\.value.source).min { $0.sortPriority < $1.sortPriority } ?? .user
+            )
+        }
+    }
+
+    /// The key that already stands for `form`, compared case-insensitively the way
+    /// the exact pass matches by default.
+    func existingKey(for form: String) -> String? {
+        let trimmed = form.trimmingCharacters(in: .whitespacesAndNewlines)
+        if dictionary[trimmed] != nil { return trimmed }
+        return dictionary.keys.first { $0.caseInsensitiveCompare(trimmed) == .orderedSame }
+    }
+
+    /// Adds `form` as a heard form of `spelling`. A form that already exists as a key
+    /// (case-insensitively) has that entry changed, so no second key matches the same text.
+    @discardableResult
+    func addHeardForm(_ form: String, to spelling: String) -> EntryEditResult {
+        let trimmedForm = form.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedSpelling = spelling.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedForm.isEmpty else { return .invalid("Heard form cannot be empty.") }
+        guard !trimmedSpelling.isEmpty else { return .invalid("Correct spelling cannot be empty.") }
+        guard trimmedForm != trimmedSpelling else { return .invalid("Heard form and correct spelling cannot be identical.") }
+
+        let key = existingKey(for: trimmedForm) ?? trimmedForm
+        dictionary[key] = DictionaryMetadata(replacement: trimmedSpelling, createdAt: Date(), source: .user)
+        save()
+        return .saved
+    }
+
+    func removeHeardForm(_ form: String) {
+        guard dictionary[form] != nil else { return }
+        removeReplacement(for: form)
+    }
+
+    /// Gives every heard form of `oldSpelling` the new spelling. `createdAt` is kept and
+    /// `source` promoted to `.user`, as in `renameEntry`. A spelling equal to another
+    /// row's merges the two rows.
+    @discardableResult
+    func renameSpelling(from oldSpelling: String, to newSpelling: String) -> EntryEditResult {
+        let keys = dictionary.filter { $0.value.replacement == oldSpelling }.map(\.key)
+        guard !keys.isEmpty else { return .notFound }
+        let trimmed = newSpelling.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return .invalid("Correct spelling cannot be empty.") }
+        if let clash = keys.first(where: { $0 == trimmed }) {
+            return .invalid("'\(clash)' is one of this word's heard forms; remove it first.")
+        }
+        for key in keys {
+            let existing = dictionary[key]!
+            dictionary[key] = DictionaryMetadata(replacement: trimmed, createdAt: existing.createdAt, source: .user)
+        }
+        save()
+        return .saved
+    }
+
+    func removeGroup(spelling: String) {
+        let keys = dictionary.filter { $0.value.replacement == spelling }.map(\.key)
+        guard !keys.isEmpty else { return }
+        for key in keys { dictionary.removeValue(forKey: key) }
+        save()
+    }
+
+    /// True for a single word found in the same allowlist and lexicon Guard A uses:
+    /// an entry with this heard form rewrites an everyday word everywhere.
+    func isEverydayWord(_ form: String) -> Bool {
+        let trimmed = form.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.contains(where: { $0.isWhitespace }) else { return false }
+        let lowered = trimmed.lowercased().precomposedStringWithCanonicalMapping
+        return commonWords.contains(lowered) || lexiconWords.contains(lowered)
+    }
+
+    /// Restores one key to an earlier state (nil removes it); the undo of a sheet save.
+    func restoreEntry(_ key: String, to metadata: DictionaryMetadata?) {
+        dictionary[key] = metadata
+        save()
+    }
+
     func removeAll() {
         dictionary.removeAll()
         save()

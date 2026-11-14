@@ -1,0 +1,180 @@
+import XCTest
+@testable import Dicticus
+
+/// Slice 52: one row per correct spelling. Drives the real `DictionaryService.shared`
+/// on the ephemeral test suite (asserted below, as in `DictionaryEntryEditTests`).
+/// Every fixture is an invented word; this is a public repo.
+@MainActor
+final class DictionaryGroupTests: XCTestCase {
+
+    private var service: DictionaryService { DictionaryService.shared }
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        try XCTSkipUnless(
+            DicticusTestBootstrap.didBootstrap,
+            "DicticusTestBootstrap did not run — refusing to touch DictionaryService.shared, which would write to the real user dictionary"
+        )
+        service.removeAll()
+    }
+
+    override func tearDown() {
+        DictionaryService.shared.removeAll()
+        super.tearDown()
+    }
+
+    private func persisted() -> [String: DictionaryMetadata] {
+        DictionaryService.loadGuarded(from: DictionaryService.defaults, key: DictionaryService.dictionaryKey).dictionary
+    }
+
+    // MARK: - Grouping
+
+    func testGroupingCollectsFormsPerExactSpelling() {
+        let d = Date(timeIntervalSince1970: 1000)
+        let entries: [String: DictionaryMetadata] = [
+            "kwib ly": DictionaryMetadata(replacement: "Quibbly", createdAt: d, source: .imported),
+            "quibli": DictionaryMetadata(replacement: "Quibbly", createdAt: d.addingTimeInterval(60), source: .user),
+            "Kwiblee": DictionaryMetadata(replacement: "Quibbly", createdAt: d, source: .default),
+            "flor": DictionaryMetadata(replacement: "quibbly", createdAt: d, source: .user),
+            "Quibbly": DictionaryMetadata(replacement: "Zornex", createdAt: d, source: .user),
+        ]
+        let groups = DictionaryService.groups(of: entries)
+        XCTAssertEqual(groups.count, 3, "case variants of a spelling stay separate rows")
+
+        let q = groups.first { $0.spelling == "Quibbly" }!
+        XCTAssertEqual(q.forms, ["kwib ly", "Kwiblee", "quibli"])
+        XCTAssertEqual(q.newestCreatedAt, d.addingTimeInterval(60))
+        XCTAssertEqual(q.source, .user)
+        XCTAssertEqual(groups.first { $0.spelling == "quibbly" }?.forms, ["flor"])
+        XCTAssertEqual(groups.first { $0.spelling == "Zornex" }?.forms, ["Quibbly"], "a spelling that is also another entry's key stays its own row")
+        XCTAssertEqual(groups.reduce(0) { $0 + $1.forms.count }, entries.count)
+    }
+
+    /// Criterion 1's count on the owner's dictionary: runs only when TEST_RUNNER_DICT_BLOB
+    /// names a read-only copy of the blob outside the repo.
+    func testLiveDictionaryGroupCount() throws {
+        guard let path = ProcessInfo.processInfo.environment["DICT_BLOB"], !path.isEmpty else {
+            throw XCTSkip("DICT_BLOB not set")
+        }
+        let data = try Data(contentsOf: URL(fileURLWithPath: path))
+        let entries = try JSONDecoder().decode([String: DictionaryMetadata].self, from: data)
+        let groups = DictionaryService.groups(of: entries)
+        print("LIVE DICTIONARY: groups \(groups.count) entries \(entries.count)")
+        XCTAssertEqual(groups.reduce(0) { $0 + $1.forms.count }, entries.count)
+    }
+
+    // MARK: - addHeardForm
+
+    func testAddHeardFormJoinsExistingSpellingAndAppliesOnNextDictation() {
+        service.setReplacement(for: "kwib ly", with: "Quibbly")
+        XCTAssertEqual(service.addHeardForm("quibli", to: "Quibbly"), .saved)
+
+        XCTAssertEqual(DictionaryService.groups(of: service.dictionary).first?.forms, ["kwib ly", "quibli"])
+        XCTAssertEqual(service.dictionary["quibli"]?.source, .user)
+        XCTAssertEqual(service.applyWithTrace(to: "open quibli now").text, "open Quibbly now")
+        XCTAssertEqual(persisted(), service.dictionary)
+    }
+
+    func testAddHeardFormOnCaseVariantOfExistingKeyChangesThatEntry() {
+        service.setReplacement(for: "Zorn ex", with: "Zornex")
+        XCTAssertEqual(service.addHeardForm("zorn EX", to: "Quibbly"), .saved)
+
+        XCTAssertEqual(service.dictionary.count, 1, "no second key that matches the same text")
+        XCTAssertEqual(service.dictionary["Zorn ex"]?.replacement, "Quibbly")
+        XCTAssertEqual(service.existingKey(for: "ZORN EX"), "Zorn ex")
+        XCTAssertEqual(persisted(), service.dictionary)
+    }
+
+    func testAddHeardFormRefusalsLeaveDictionaryUnchanged() {
+        service.setReplacement(for: "kwib ly", with: "Quibbly")
+        let before = service.dictionary
+        XCTAssertEqual(service.addHeardForm("  ", to: "Quibbly"), .invalid("Heard form cannot be empty."))
+        XCTAssertEqual(service.addHeardForm("quibli", to: " "), .invalid("Correct spelling cannot be empty."))
+        XCTAssertEqual(service.addHeardForm("Quibbly", to: "Quibbly"), .invalid("Heard form and correct spelling cannot be identical."))
+        XCTAssertEqual(service.dictionary, before)
+        XCTAssertEqual(persisted(), before)
+    }
+
+    // MARK: - renameSpelling
+
+    func testRenameSpellingChangesEveryFormKeepsCreatedAtPromotesSource() throws {
+        _ = service.importData(Data("kwib ly,Quibbly\nquibli,Quibbly\nflor,Zornex\n".utf8), format: "csv", strategy: .incomingWins)
+        let before = service.dictionary
+
+        XCTAssertEqual(service.renameSpelling(from: "Quibbly", to: "QuibblyPro"), .saved)
+
+        for key in ["kwib ly", "quibli"] {
+            let after = try XCTUnwrap(service.dictionary[key])
+            XCTAssertEqual(after.replacement, "QuibblyPro")
+            XCTAssertEqual(after.createdAt, before[key]?.createdAt)
+            XCTAssertEqual(after.source, .user)
+        }
+        XCTAssertEqual(service.dictionary["flor"], before["flor"], "other rows untouched")
+        XCTAssertEqual(persisted(), service.dictionary)
+    }
+
+    func testRenameSpellingToAnotherRowsSpellingMergesRows() {
+        service.setReplacement(for: "kwib ly", with: "Quibbly")
+        service.setReplacement(for: "flor", with: "Zornex")
+        XCTAssertEqual(service.renameSpelling(from: "Quibbly", to: "Zornex"), .saved)
+        let groups = DictionaryService.groups(of: service.dictionary)
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(groups.first?.forms, ["flor", "kwib ly"])
+    }
+
+    func testRenameSpellingRefusalsLeaveDictionaryUnchanged() {
+        service.setReplacement(for: "kwib ly", with: "Quibbly")
+        service.setReplacement(for: "quibli", with: "Quibbly")
+        let before = service.dictionary
+        XCTAssertEqual(service.renameSpelling(from: "Quibbly", to: "  "), .invalid("Correct spelling cannot be empty."))
+        if case .invalid = service.renameSpelling(from: "Quibbly", to: "quibli") {} else { XCTFail("a spelling equal to one of its own forms must be refused") }
+        XCTAssertEqual(service.renameSpelling(from: "Nothing", to: "X"), .notFound)
+        XCTAssertEqual(service.dictionary, before)
+        XCTAssertEqual(persisted(), before)
+    }
+
+    // MARK: - Removal
+
+    func testRemoveHeardFormAndRemoveGroup() {
+        service.setReplacement(for: "kwib ly", with: "Quibbly")
+        service.setReplacement(for: "quibli", with: "Quibbly")
+        service.setReplacement(for: "flor", with: "Zornex")
+
+        service.removeHeardForm("quibli")
+        XCTAssertEqual(Set(service.dictionary.keys), ["kwib ly", "flor"])
+
+        service.removeGroup(spelling: "Quibbly")
+        XCTAssertEqual(Set(service.dictionary.keys), ["flor"])
+        XCTAssertEqual(persisted(), service.dictionary)
+
+        let before = service.dictionary
+        service.removeHeardForm("absent")
+        service.removeGroup(spelling: "Absent")
+        XCTAssertEqual(service.dictionary, before)
+    }
+
+    func testRestoreEntryUndoesAddAndChange() {
+        service.setReplacement(for: "kwib ly", with: "Quibbly")
+        let old = service.dictionary["kwib ly"]
+
+        service.addHeardForm("kwib ly", to: "Zornex")
+        service.restoreEntry("kwib ly", to: old)
+        XCTAssertEqual(service.dictionary["kwib ly"], old)
+
+        service.addHeardForm("flor", to: "Zornex")
+        service.restoreEntry("flor", to: nil)
+        XCTAssertNil(service.dictionary["flor"])
+        XCTAssertEqual(persisted(), service.dictionary)
+    }
+
+    // MARK: - Everyday words
+
+    func testEverydayWord() {
+        XCTAssertTrue(service.isEverydayWord("cloud"))
+        XCTAssertTrue(service.isEverydayWord("Cloud"))
+        XCTAssertTrue(service.isEverydayWord("Haus"))
+        XCTAssertFalse(service.isEverydayWord("Quibbly"))
+        XCTAssertFalse(service.isEverydayWord("cloud code"), "multi-word forms are not judged")
+        XCTAssertFalse(service.isEverydayWord(""))
+    }
+}
