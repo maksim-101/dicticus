@@ -165,6 +165,7 @@ struct DicticusApp: App {
         WindowGroup("History", id: "history") {
             HistoryView()
                 .environmentObject(HistoryService.shared)
+                .environmentObject(DictionaryService.shared)
         }
 
         // ⌘, Settings window — 4-pane (Hotkeys / AI Cleanup / General / About).
