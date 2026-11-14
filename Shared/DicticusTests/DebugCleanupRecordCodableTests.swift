@@ -244,6 +244,81 @@ final class DebugCleanupRecordCodableTests: XCTestCase {
                        "Missing prompt_version key must decode as 'v19c' (Phase 28 R3 decodeIfPresent default, mirrors Phase 27 WR-02 pattern)")
     }
 
+    // MARK: - Slice 54: `app_category` round-trip + backward compat
+
+    func testDebugCleanupRecordCodableRoundTrip_AppCategory() {
+        let record = DebugCleanupRecord(
+            ts: "2026-11-13T17:00:00.000Z",
+            session_id: "test-session",
+            lang: "en",
+            lang_used: "en",
+            mode: "aiCleanup",
+            model: DebugCleanupRecord.ModelInfo(name: "qwen", sha256_prefix: nil),
+            sampler: DebugCleanupRecord.SamplerInfo(temp: 0.0, top_k: 1, top_p: 1.0, max_tokens: 512, seed: nil),
+            steps: DebugCleanupRecord.Steps(
+                raw: DebugCleanupRecord.StepEntry(text: "hello", ms: 0),
+                post_dict: DebugCleanupRecord.StepEntry(text: "hello", ms: 0),
+                post_itn: DebugCleanupRecord.StepEntry(text: "hello", ms: 0),
+                post_swiss: DebugCleanupRecord.StepEntry(text: "hello", ms: 0),
+                post_rules: DebugCleanupRecord.StepEntry(text: "hello", ms: 0),
+                llm_prompt: nil,
+                llm_raw: nil,
+                post_gate: nil,
+                post_swiss_num: DebugCleanupRecord.StepEntry(text: "hello", ms: 0)
+            ),
+            dictionary_context_keys: [],
+            dictionary_replacements: [],
+            dictionary_blocked: [],
+            anomaly: DebugCleanupRecord.Anomaly(degenerate_collapse: false, very_short_output: false),
+            emission_counter: 1,
+            detected_bundle_id: "com.example.devtool",
+            resolved_context: "code",
+            app_category: "public.app-category.developer-tools"
+        )
+        let data = try! JSONEncoder().encode(record)
+        let json = String(data: data, encoding: .utf8)!
+        XCTAssertTrue(json.contains("\"app_category\":\"public.app-category.developer-tools\""),
+                      "slice 54: app_category must be written under that key — got: \(json)")
+        let decoded = try! JSONDecoder().decode(DebugCleanupRecord.self, from: data)
+        XCTAssertEqual(decoded.app_category, "public.app-category.developer-tools")
+        XCTAssertEqual(decoded.resolved_context, "code")
+    }
+
+    func testDebugCleanupRecordDecode_TolerantToMissingAppCategory() {
+        let json = """
+        {
+          "ts": "2026-11-01T04:00:00.000Z",
+          "session_id": "legacy-session",
+          "lang": "en",
+          "lang_used": "en",
+          "mode": "aiCleanup",
+          "model": { "name": "qwen", "sha256_prefix": null },
+          "sampler": { "temp": 0.0, "top_k": 1, "top_p": 1.0, "max_tokens": 512, "seed": null },
+          "steps": {
+            "raw": { "text": "test", "ms": 0 },
+            "post_dict": { "text": "test", "ms": 0 },
+            "post_itn": { "text": "test", "ms": 0 },
+            "post_swiss": { "text": "test", "ms": 0 },
+            "post_rules": { "text": "test", "ms": 0 },
+            "llm_prompt": null,
+            "llm_raw": null,
+            "post_gate": null,
+            "post_swiss_num": { "text": "test", "ms": 0 }
+          },
+          "dictionary_context_keys": [],
+          "dictionary_replacements": [],
+          "dictionary_blocked": [],
+          "anomaly": { "degenerate_collapse": false, "very_short_output": false },
+          "emission_counter": 1,
+          "detected_bundle_id": "dev.warp.Warp-Stable",
+          "resolved_context": "default"
+        }
+        """.data(using: .utf8)!
+        let decoded = try! JSONDecoder().decode(DebugCleanupRecord.self, from: json)
+        XCTAssertNil(decoded.app_category, "pre-slice-54 JSONL has no app_category and must still decode")
+        XCTAssertEqual(decoded.resolved_context, "default")
+    }
+
     // MARK: - Quick task 260901-fs1: `steps.finalStage` (JSON key `final`) round-trip + backward compat
 
     /// `finalStage` (wire key `"final"`) must round-trip like any other

@@ -74,6 +74,8 @@ class HotkeyManager: ObservableObject {
     /// `handleKeyUp` after being threaded into `TextProcessingService.process`.
     private var activeRecordingBundleID: String?
     private var activeRecordingContext: DictationContext?
+    /// Slice 54: the app's declared category, read at press time beside the bundle ID.
+    private var activeRecordingCategory: String?
 
     /// Phase 51: true when this recording started a live preview (toggle was on at press).
     private var activeRecordingHasPreview = false
@@ -307,11 +309,14 @@ class HotkeyManager: ObservableObject {
     /// the popover's live-resolution label. Not cached: called fresh every
     /// time the popover renders so it always reflects live state.
     func liveResolvedContext() -> DictationContext {
-        let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        let frontmost = NSWorkspace.shared.frontmostApplication
+        let bundleID = frontmost?.bundleIdentifier
+        let category = AppCategoryReader.shared.category(of: frontmost)
         let contextAwareEnabled = ContextResolver.isEnabled(DicticusDefaults.suite)
         let overrides = ContextResolver.loadGuarded(from: DicticusDefaults.suite, key: ContextResolver.overridesKey).overrides
         return ContextResolver.resolve(
             bundleID: bundleID,
+            category: category,
             pin: contextPin,
             disabled: !contextAwareEnabled,
             overrides: overrides
@@ -474,7 +479,10 @@ class HotkeyManager: ObservableObject {
         // to any network endpoint (consumed only by the local prompt builder
         // + local DEBUG_RECORDER file). Session pin + user override map are
         // wired in Plans 38-03/38-04; here they are nil/empty.
-        let bundleID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier
+        // Slice 54: the app's declared category is read beside the bundle ID.
+        let frontmost = NSWorkspace.shared.frontmostApplication
+        let bundleID = frontmost?.bundleIdentifier
+        let category = AppCategoryReader.shared.category(of: frontmost)
         // Plan 38-03: route both reads through ContextResolver's shared helpers
         // (single source of truth also read by the Settings row) instead of a
         // locally-duplicated absent-key-default-true check and a hard-coded
@@ -484,6 +492,7 @@ class HotkeyManager: ObservableObject {
         let overrides = ContextResolver.loadGuarded(from: DicticusDefaults.suite, key: ContextResolver.overridesKey).overrides
         let resolvedContext = ContextResolver.resolve(
             bundleID: bundleID,
+            category: category,
             pin: contextPin,
             disabled: !contextAwareEnabled,
             overrides: overrides
@@ -500,6 +509,7 @@ class HotkeyManager: ObservableObject {
             activeRecordingMode = mode
             activeRecordingBundleID = bundleID
             activeRecordingContext = resolvedContext
+            activeRecordingCategory = category
             // Phase 51 D-14: the toggle is read at press time through the test-redirected suite;
             // when off, no panel and no preview loop exist at all.
             if LivePreviewSession.isEnabled(DicticusDefaults.suite) {
@@ -572,6 +582,7 @@ class HotkeyManager: ObservableObject {
             activeRecordingMode = nil
             activeRecordingBundleID = nil
             activeRecordingContext = nil
+            activeRecordingCategory = nil
             activeRecordingHasPreview = false
             overlay.hide(reason: .earlyReturn)
             return
@@ -595,8 +606,10 @@ class HotkeyManager: ObservableObject {
         // press — never re-detected at release.
         let dictationContext = activeRecordingContext ?? .default
         let dictationBundleID = activeRecordingBundleID
+        let dictationCategory = activeRecordingCategory
         activeRecordingBundleID = nil
         activeRecordingContext = nil
+        activeRecordingCategory = nil
 
         // Phase 50 D-02: captured at RELEASE (not press) so a deliberate app switch during the
         // hold is honoured, while a switch during the ASR/LLM wait (the window that actually
@@ -662,7 +675,8 @@ class HotkeyManager: ObservableObject {
                     mode: mode,
                     confidence: Double(result.confidence),
                     context: dictationContext,
-                    detectedBundleID: dictationBundleID
+                    detectedBundleID: dictationBundleID,
+                    detectedAppCategory: dictationCategory
                 ) ?? result.text
 
                 // Phase 50 D-02: Inject final processed text into the active app; consume the

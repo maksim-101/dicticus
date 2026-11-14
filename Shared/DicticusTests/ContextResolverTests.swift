@@ -1,47 +1,60 @@
 import XCTest
 @testable import Dicticus
 
-/// Phase 38 Plan 01 (D-02/D-05/D-06, CTXFMT-01/CTXFMT-02): `ContextResolver`
-/// — pure bundle-ID → `DictationContext` resolution. Proves the 5-level
-/// precedence chain (disabled short-circuit → pin → override → curated map →
-/// default) and the curated starter map's coverage.
+/// Phase 38 Plan 01 (D-02/D-05/D-06, CTXFMT-01/CTXFMT-02), slice 54: `ContextResolver`
+/// — pure (bundle ID, declared category) → `DictationContext` resolution. Proves the
+/// 6-level precedence chain (disabled short-circuit → pin → override → developer-tools
+/// category → terminal fallback → default).
 final class ContextResolverTests: XCTestCase {
 
-    // MARK: - Curated map coverage
+    private let devTools = ContextResolver.developerToolsCategory
 
-    func testCuratedMapCodeApps() {
-        for bundleID in [
-            "com.googlecode.iterm2", "com.mitchellh.ghostty",
-            "com.apple.Terminal", "com.apple.dt.Xcode", "com.microsoft.VSCode",
-        ] {
+    // MARK: - Category rule and terminal fallback
+
+    func testDeveloperToolsCategoryResolvesToCodeForAnyBundleID() {
+        for bundleID in ["dev.warp.Warp-Stable", "com.stablyai.orca", "com.example.new-editor"] {
             XCTAssertEqual(
-                ContextResolver.resolve(bundleID: bundleID), .code,
-                "\(bundleID) must resolve to .code"
+                ContextResolver.resolve(bundleID: bundleID, category: devTools), .code,
+                "\(bundleID) declaring developer-tools must resolve to .code without a list entry"
             )
         }
     }
 
-    func testCuratedMapDefaultApps() {
-        for bundleID in ["com.apple.Safari", "com.google.Chrome", "company.thebrowser.Browser"] {
+    func testTerminalFallbackAppliesWhenCategorySaysOtherwise() {
+        XCTAssertEqual(
+            ContextResolver.resolve(bundleID: "com.apple.Terminal", category: "public.app-category.utilities"),
+            .code,
+            "Terminal declares utilities and still needs the code prompt"
+        )
+        for bundleID in ["com.googlecode.iterm2", "com.mitchellh.ghostty"] {
+            XCTAssertEqual(ContextResolver.resolve(bundleID: bundleID, category: nil), .code)
+        }
+    }
+
+    func testOtherCategoriesResolveToDefault() {
+        for category in ["public.app-category.productivity", "public.app-category.social-networking", "public.app-category.utilities"] {
             XCTAssertEqual(
-                ContextResolver.resolve(bundleID: bundleID), .default,
-                "\(bundleID) must resolve to .default"
+                ContextResolver.resolve(bundleID: "com.example.app", category: category), .default,
+                "\(category) must not select the code prompt"
             )
         }
     }
 
-    func testCuratedMapProseApps() {
-        for bundleID in ["com.apple.mail", "com.apple.MobileSMS", "com.tinyspeck.slackmacgap"] {
-            XCTAssertEqual(
-                ContextResolver.resolve(bundleID: bundleID), .prose,
-                "\(bundleID) must resolve to .prose"
-            )
-        }
-    }
-
-    func testUnknownAndNilBundleIDResolveToDefault() {
+    func testUnknownAndNilBundleIDOrCategoryResolveToDefault() {
         XCTAssertEqual(ContextResolver.resolve(bundleID: "com.example.unknown-app"), .default)
         XCTAssertEqual(ContextResolver.resolve(bundleID: nil), .default)
+        XCTAssertEqual(ContextResolver.resolve(bundleID: nil, category: nil), .default)
+    }
+
+    func testOverrideBeatsDeveloperToolsCategory() {
+        XCTAssertEqual(
+            ContextResolver.resolve(
+                bundleID: "com.anthropic.claudefordesktop", category: devTools,
+                overrides: ["com.anthropic.claudefordesktop": .default]
+            ),
+            .default,
+            "the owner's override must win over the app's declared category"
+        )
     }
 
     // MARK: - Precedence level 1: disabled short-circuit
@@ -60,7 +73,7 @@ final class ContextResolverTests: XCTestCase {
         )
     }
 
-    // MARK: - Precedence level 2: pin beats override beats curated map
+    // MARK: - Precedence level 2: pin beats override beats category and fallback
 
     func testPinBeatsOverride() {
         XCTAssertEqual(
@@ -74,18 +87,18 @@ final class ContextResolverTests: XCTestCase {
         )
     }
 
-    func testOverrideBeatsCuratedMap() {
+    func testOverrideBeatsTerminalFallback() {
         XCTAssertEqual(
             ContextResolver.resolve(
                 bundleID: "com.apple.Terminal",
                 overrides: ["com.apple.Terminal": .prose]
             ),
             .prose,
-            "a per-app override must win over the curated map (com.apple.Terminal is curated .code)"
+            "a per-app override must win over the terminal fallback (com.apple.Terminal is .code there)"
         )
     }
 
-    func testCuratedMapAppliesWhenNoPinOrOverride() {
+    func testFallbackAppliesWhenNoPinOrOverride() {
         XCTAssertEqual(
             ContextResolver.resolve(bundleID: "com.apple.Terminal", overrides: ["com.apple.Safari": .code]),
             .code,
@@ -104,25 +117,30 @@ final class ContextResolverTests: XCTestCase {
             ),
             .default
         )
-        // pin beats override beats curated map
+        // pin beats override beats category
         XCTAssertEqual(
             ContextResolver.resolve(
-                bundleID: "com.apple.Terminal", pin: .prose, disabled: false,
-                overrides: ["com.apple.Terminal": .default]
+                bundleID: "dev.warp.Warp-Stable", category: devTools, pin: .prose, disabled: false,
+                overrides: ["dev.warp.Warp-Stable": .default]
             ),
             .prose
         )
-        // override beats curated map
+        // override beats category
         XCTAssertEqual(
             ContextResolver.resolve(
-                bundleID: "com.apple.Terminal", pin: nil, disabled: false,
-                overrides: ["com.apple.Terminal": .default]
+                bundleID: "dev.warp.Warp-Stable", category: devTools, pin: nil, disabled: false,
+                overrides: ["dev.warp.Warp-Stable": .default]
             ),
             .default
         )
-        // curated map beats the .default fallback
+        // category beats the terminal fallback's absence
         XCTAssertEqual(
-            ContextResolver.resolve(bundleID: "com.apple.Terminal", pin: nil, disabled: false, overrides: [:]),
+            ContextResolver.resolve(bundleID: "dev.warp.Warp-Stable", category: devTools, pin: nil, disabled: false, overrides: [:]),
+            .code
+        )
+        // terminal fallback beats the .default fallback
+        XCTAssertEqual(
+            ContextResolver.resolve(bundleID: "com.apple.Terminal", category: "public.app-category.utilities", pin: nil, disabled: false, overrides: [:]),
             .code
         )
         // nothing matches -> .default
