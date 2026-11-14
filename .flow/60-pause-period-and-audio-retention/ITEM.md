@@ -1,12 +1,12 @@
 ---
 id: 60
 title: pause-period-and-audio-retention
-status: active
+status: shipped
 size: quick
-assignee: agent
+assignee: none
 created: 2026-11-14
 waiting_until:
-shipped:
+shipped: 2026-11-14 (no tag: release batched under CHANGELOG Unreleased; the Debug-Recorder build of 46348f5 is installed on the owner's Mac)
 links:
 ---
 
