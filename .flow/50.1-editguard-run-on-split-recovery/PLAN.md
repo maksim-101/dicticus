@@ -30,7 +30,7 @@ Runs: three harness replays over about 1300 records, one test run of two test cl
 - **Files:** `r4/h2-{b1,c1}.log`, `r4/h34.py` (copy of the round-1 script, path changed), `r4/synth-{b1,c1}*.json`; `evidence/hard-constraints.md`.
 - **Affects:** the test host runs from the worktree's own `macOS/build` (`-derivedDataPath build`); `scripts/check-running-copy.sh` must print OK afterwards.
 - **Verify:** in the worktree's `macOS/`, for each of `b1`, `c1`: `TEST_RUNNER_SPIKE017=<c> nice -n 10 xcodebuild -project Dicticus.xcodeproj -scheme Dicticus -destination 'platform=macOS,arch=arm64' -derivedDataPath build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" -only-testing:DicticusTests/EditGuardCoupledRevertTests -only-testing:DicticusTests/EditGuardGrammarRegressionTests test` ends `** TEST SUCCEEDED **` with 0 failures; `python3 -I …/r4/h34.py b1 c1` exits 0 (subset holds, 0 neither-source tokens); `cmp` of each synthetic output against its frozen file exits 0.
-- **Status:** todo
+- **Status:** done: H2 pass for both (21 tests, 0 failures each), H4 0, synthetic outputs byte-identical; H3 fails for b1 with 1 extra record, which is a measured result and not a build failure (the Verify line wrongly expected exit 0); evidence/verdict-summary.md
 - **Depends on:** 1
 
 ### 3. The agent's labels
@@ -38,7 +38,7 @@ Runs: three harness replays over about 1300 records, one test run of two test cl
 - **Files:** `r4/hunks-{b1,c1}.json`, `r4/my-labels.json`; `evidence/labels.md` (counts per candidate, kind, language and label).
 - **Affects:** nothing.
 - **Verify:** `python3 -I …/r4/labels_check.py` exits 0 and prints the counts: every hunk id of both hunk files has exactly one label from the allowed set, and the comma hunk sets of `b1` and `c1` are identical.
-- **Status:** todo
+- **Status:** done: 304 hunks labelled before agy ran; evidence/verdict-summary.md, Labels
 - **Depends on:** 1
 
 ### 4. agy blind pass and adjudication
@@ -46,7 +46,7 @@ Runs: three harness replays over about 1300 records, one test run of two test cl
 - **Files:** `r4/agy-sample.jsonl`, `r4/agy-key.json`, `r4/agy-prompt.md`, `r4/agy-labels.md`, `r4/adjudication.md`; `evidence/labels.md` extended with agy's counts and the number of disagreements.
 - **Affects:** dictation passages go to agy (Gemini), approved with the brief.
 - **Verify:** `python3 -I …/r4/agy_check.py` exits 0: one agy row per sample item, every period hunk in the sample, 60 seeded comma hunks present, and every item where either label is BAD or the two differ between BAD and not-BAD has an entry in `adjudication.md`.
-- **Status:** todo
+- **Status:** done: 94 items, agy model "Gemini 4 Argon (High)"; 12 flagged hunks ruled on; evidence/verdict-summary.md
 - **Depends on:** 3
 
 ### 5. Worth figures, verdict, items
@@ -54,7 +54,7 @@ Runs: three harness replays over about 1300 records, one test run of two test cl
 - **Files:** `ROUND2-VERDICT.md`; `evidence/verdict-summary.md` (counts and verdicts, no dictation text); `.flow/ROADMAP.md` and a new `.flow/NN-<slug>/ITEM.md` per passing candidate, or 50.1's ITEM.md.
 - **Affects:** ROADMAP order; the memory note on the holdout round.
 - **Verify:** `python3 -I …/r4/verdict_check.py` exits 0: it recomputes W1, W2, the comma floor and W1c from `r4/live-*.json`, reads the final REGRESSION counts from `adjudication.md` and `my-labels.json`, derives the verdicts from the decision table and asserts they equal the ones stated in `evidence/verdict-summary.md`; `git status --short` shows nothing outside `.flow/`; `git worktree list` shows one line.
-- **Status:** todo
+- **Status:** done: both candidates closed by the decision table; `verdict_check.py` (which also covers the labels and agy checks) exits 0; worktree removed. The item status change waits for the owner's reading of the rulings (criterion 8)
 - **Depends on:** 2, 4
 
 ## Criteria to tasks
