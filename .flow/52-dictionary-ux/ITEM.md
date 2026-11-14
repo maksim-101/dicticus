@@ -1,7 +1,7 @@
 ---
 id: 52
 title: dictionary-ux
-status: planned
+status: active
 size:
 assignee: none
 created: 2026-11-08
