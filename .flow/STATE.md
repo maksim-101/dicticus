@@ -1,5 +1,5 @@
 # State
-Slice: none
+Slice: 60-pause-period-and-audio-retention
 Carried: none
 
 ## Incoming
