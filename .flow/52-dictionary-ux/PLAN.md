@@ -29,7 +29,7 @@
 - **Files:** `macOS/Dicticus/Views/DictionaryView.swift`; new `macOS/Dicticus/Views/DictionaryGroupRow.swift` (row and chip views).
 - **Affects:** the window only. The menu-bar popover's `DictionaryPane` shows the entry count and an add form; unchanged. Import/Export, Starter Packs, Spoken Punctuation and Voice Commands sections unchanged.
 - **Verify:** the macOS build and the dictionary tests: `cd macOS && xcodegen generate >/dev/null && xcodebuild -project Dicticus.xcodeproj -scheme Dicticus -derivedDataPath build -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' -only-testing:DicticusTests/DictionaryGroupTests test` prints `TEST SUCCEEDED`. The on-screen check is task 4.
-- **Status:** todo
+- **Status:** done fd640b6 (plus `macOS/Dicticus/Views/WrappingLayout.swift`, shared with task 3)
 - **Depends on:** task 1
 
 ### Task 3: pick words in History and add them from a sheet (mockup `history-pick`, variant A)
@@ -37,7 +37,7 @@
 - **Files:** new `Shared/Utilities/WordPick.swift` (tokens of a raw text, text of a pick with end punctuation trimmed); new `Shared/DicticusTests/WordPickTests.swift`; new `macOS/Dicticus/Views/AddToDictionarySheet.swift` (sheet and its small model: note, warnings, save, undo); new `macOS/DicticusTests/AddToDictionarySheetModelTests.swift`; `macOS/Dicticus/Views/HistoryView.swift` (Raw view, wrapping layout, button, sheet).
 - **Affects:** `HistoryRow` only; the Copy buttons, search highlight and Polished view keep their behaviour. The History window gets `DictionaryService.shared` as an environment object where it is created (`macOS/Dicticus/DicticusApp.swift`). Popover `HistoryPane` unchanged.
 - **Verify:** `cd macOS && xcodegen generate >/dev/null && xcodebuild -project Dicticus.xcodeproj -scheme Dicticus -derivedDataPath build -destination 'platform=macOS,arch=arm64' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' -only-testing:DicticusTests/WordPickTests -only-testing:DicticusTests/AddToDictionarySheetModelTests -only-testing:DicticusTests/DictionaryGroupTests test` prints `TEST SUCCEEDED`. The tests cover: picks of one word, a shift-extended run, a reversed run, end punctuation trimmed and inner punctuation kept, German umlauts; the model's note for a joining and a new spelling; both warnings ("cloud" as everyday word, an existing key with a different spelling) and no warning for an invented word; save through `DictionaryService.shared` (isolated suite) makes `applyWithTrace` rewrite the form (criterion 6); Undo of a new key removes it and Undo of a changed key restores its old spelling.
-- **Status:** todo
+- **Status:** done 6ab10f1
 - **Depends on:** task 1
 
 ### Task 4: on-screen check in the Mac test VM
