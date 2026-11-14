@@ -2,7 +2,7 @@
 Slice: 52-dictionary-ux (standard)
 Step: build
 Next: task 4 (on-screen check in mac-space), once the read-aloud session frees the VM
-Waiting on: host: mac-space VM. Released to this slice at 19:27 CET 2026-11-14 by the read-aloud-extension session, but the guest does not answer (ping 0/3, ssh port 22 timeout, cua exec timeout); that session holds it and was asked whether to restart it. Task 4 runs when `cua sb exec local:mac-space true` succeeds.
+Waiting on: host: mac-space VM is broken (read-aloud-extension session, 2026-11-14 evening: two fresh boots reach the network but never open ssh or cua-spacesd; stopped; it asked the owner whether to reset it from mac-space-base). Task 4 runs when `cua sb exec local:mac-space true` succeeds; `.flow/52-dictionary-ux/evidence/vm-seed.sh` is written and uncommitted until then.
 Started: 2026-11-14T14:07:19Z
 Baseline: at 04395b4 in a throwaway worktree: macOS Dicticus 1960 tests 0 failures (8 skipped), Dicticus-Debug-Recorder 2042 tests 0 failures (10 skipped); iOS simulator first run "test runner hung before establishing connection" (environment), rerun 1780 tests 0 failures (11 skipped)
 Base: branch point
