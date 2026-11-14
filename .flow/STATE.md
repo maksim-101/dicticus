@@ -7,3 +7,4 @@ Carried:
 - unscheduled follow-up: README.md lines 14, 33 and 91 still say "Parakeet TDT v3" and "~1.2 GB" (iOS runs Parakeet Ultra, ~630 MB); iOS/Dicticus/Services/IOSModelWarmupService.swift line 10 says AI cleanup is excluded on iOS
 - unscheduled follow-up: HistoryServiceTests.testAppGroupAvailableFlagDefaultsTrue always skips in the simulator
 - unscheduled follow-up: check the r9g macOS download prompt and Settings rows on screen in the mac-space VM
+- unscheduled follow-up: the macOS test host (com.dicticus.app.xctest) aborts at exit in llama.cpp's Metal teardown (ggml_abort in ggml_metal_rsets_free), so local test runs can put a "Dicticus quit unexpectedly" dialog on the owner's screen; reports since at least 2026-11-13 (6 that day, several on 2026-11-14 including the slice 52 baseline at 15:35)

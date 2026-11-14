@@ -45,7 +45,7 @@
 - **Files:** new `.flow/52-dictionary-ux/evidence/vm-seed.sh` (writes a fixture dictionary of invented words into the guest's `com.dicticus.app` defaults and three fixture dictations into the guest's `History.sqlite` after a first launch has created it), screenshots under `.flow/52-dictionary-ux/evidence/`.
 - **Affects:** the guest only. `mac-space` was running on 2026-11-14 at plan time, probably for another session: before use, check with `ListAgents` that no session holds it, and stop it afterwards only if this slice started it.
 - **Verify:** in the guest, the app built with the Dicticus scheme (Debug, unsigned, `-derivedDataPath build`), seeded, launched; screenshots: the Manage Dictionary window with grouped rows and an everyday-word chip; History with a picked two-word run; the sheet joining an existing spelling; the sheet with both warnings; the confirmation line. Then `defaults read com.dicticus.app customDictionaryMetadata` in the guest decodes to the fixture plus exactly the one added form. The script exits non-zero if the seed or the read-back fails.
-- **Status:** todo
+- **Status:** done 2e48ccf by headless rendering on the host (owner's choice; see Departures); the VM part stopped at the microphone prompt after seeding (b84f04b)
 - **Depends on:** tasks 2 and 3
 
 ## Coverage of the done criteria
