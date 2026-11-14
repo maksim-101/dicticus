@@ -1,8 +1,8 @@
 # State of 50.1-editguard-run-on-split-recovery
 Slice: 50.1-editguard-run-on-split-recovery (standard)
-Step: verify
-Next: on the owner's sign-off, flow:ship: mark 50.1 dropped (both candidates closed), remove its ROADMAP line, merge the branch (it carries the root Carried settlement), update the memory note
-Waiting on: the owner: accept the verdict and the rulings (criterion 8), or name a ruling to reopen
+Step: ship
+Next: flow:ship: mark 50.1 dropped (both candidates closed), remove its ROADMAP line, merge the branch (it carries the root Carried settlement), update the memory note
+Waiting on: nothing
 Started: 2026-11-14T08:01:00Z
 Baseline: not rerun: this branch changes no file outside .flow/, and main 4a6ffd6 carries slice 60's close (macOS Dicticus 1960 tests 0 failures, Debug-Recorder 2042, iOS simulator 1780; 60 STATE.md History)
 Base: branch point
@@ -15,6 +15,7 @@ Carried:
 ## Decisions
 - 2026-11-14 brief: approved by the owner ("Approve, cut at 9 Nov"): the snapshot holds dictations up to the end of 2026-11-09, as pre-registered; agy (Gemini) is the blind second labeller, as in round 1.
 - 2026-11-14 plan: approved by the owner ("approved"); the approval is the go for the verdict run up to 60 minutes of compute.
+- 2026-11-14 verify: the owner signed off ("signing off on the verdict"): both candidates closed, 50.1 measured and not shipped; no ruling reopened.
 
 ## History
 - 2026-11-14 50.1 brief: branch flow/50.1-editguard-run-on-split-recovery from main 4a6ffd6. Root `## Incoming` (three GSD handover lines, each checked still open) settled into root `Carried:`. Found: the verdict run due 2026-11-09 never ran. Cleanup logs of 2026-11-02 to 11-14 (320 lines, 191 of them up to 11-09) copied unread to `.planning/spikes/017-runon-split-recovery/holdout-logs-2026-11-14/` before the 14-day retention deletes them from 2026-11-16. The gate code (Shared/Utilities/EditGuard.swift) has no commit since the 11-02 recount. The item's other two carried-in lines became BRIEF.md criteria 6 and 7 and its Constraints. BRIEF.md written, waiting for approval.
