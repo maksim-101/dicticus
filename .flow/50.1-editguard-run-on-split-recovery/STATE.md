@@ -1,8 +1,8 @@
 # State of 50.1-editguard-run-on-split-recovery
 Slice: 50.1-editguard-run-on-split-recovery (standard)
 Step: plan
-Next: flow:plan writes PLAN.md for the verdict run (cut-off 2026-11-09T23:59:59Z) and asks the owner's approval
-Waiting on: nothing
+Next: the owner approves PLAN.md (five tasks; the approval is the go for the verdict run); then flow:build, task 1
+Waiting on: the owner: plan approval
 Started: 2026-11-14T08:01:00Z
 Baseline: no check command run yet for this slice; main 4a6ffd6 carries slice 60's close (macOS Dicticus 1960 tests 0 failures, Debug-Recorder 2042, iOS simulator 1780; 60 STATE.md History)
 Base: branch point
