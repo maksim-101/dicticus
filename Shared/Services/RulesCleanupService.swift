@@ -48,6 +48,44 @@ public final class RulesCleanupService {
         return head
     }
 
+    // Slice 60: a period Whisper writes at a thinking pause, continued in lowercase
+    // ("some of my sentences. in a bad way"), is a pause mark, not a sentence end. The
+    // period becomes a comma so the LLM gets one utterance and a rejected LLM output no
+    // longer ships the false break. The token before the period must be an ordinary word:
+    // no abbreviation, no digit, no trailing dot (an ellipsis), at least two letters.
+    private static let pausePeriodRegex = try! NSRegularExpression(
+        pattern: #"(\S+)\. (?=\p{Ll})"#, options: [])
+
+    private static let abbreviations: Set<String> = [
+        "bzw", "etc", "usw", "ca", "vs", "z.b", "e.g", "i.e", "d.h", "evtl", "ggf", "inkl",
+        "nr", "dr", "bspw", "max", "min", "resp", "vgl", "sog", "u.a", "o.ä", "st", "mr", "mrs",
+    ]
+
+    static func joinPausePeriods(_ s: String) -> String {
+        let r = NSRange(s.startIndex..<s.endIndex, in: s)
+        let matches = pausePeriodRegex.matches(in: s, options: [], range: r)
+        guard !matches.isEmpty else { return s }
+        var out = ""
+        var cursor = s.startIndex
+        for m in matches {
+            guard let whole = Range(m.range, in: s), let tokenRange = Range(m.range(at: 1), in: s) else { continue }
+            let token = String(s[tokenRange])
+            let letters = token.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count
+            let plain = token.trimmingCharacters(in: CharacterSet(charactersIn: "(\"'“”‘’[")).lowercased()
+            let isWord = letters >= 2
+                && !token.contains(where: \.isNumber)
+                && !token.hasSuffix(".")
+                && !Self.abbreviations.contains(plain)
+            guard isWord else { continue }
+            // Replace ". " with ", " and keep the token.
+            out += s[cursor..<tokenRange.upperBound]
+            out += ", "
+            cursor = whole.upperBound
+        }
+        out += s[cursor...]
+        return out
+    }
+
     /// Run the rules-first cleanup pipeline.
     ///
     /// - Parameters:
@@ -67,6 +105,9 @@ public final class RulesCleanupService {
         if !skipSelfCorrection {
             result = SelfCorrectionResolver.resolve(result, language: language)
         }
+        // Slice 60: after the self-correction resolver (which anchors on commas) and before
+        // the LLM sees the text.
+        result = Self.joinPausePeriods(result)
         // Currency-fold is gated on `de` (Swiss/German speakers say
         // "Franken Rappen" / "Euro Cent"). The en-mode contract is that
         // German-flavored input passes through untouched — see

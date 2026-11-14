@@ -36,6 +36,46 @@ final class RulesCleanupServiceTests: XCTestCase {
             "Phase 36.1: artifact strip — interior yeah must be preserved, only terminal artifacts stripped")
     }
 
+    // MARK: - Slice 60: a pause period becomes a comma
+
+    func testPausePeriod_lowercaseContinuation_becomesComma() {
+        let service = RulesCleanupService()
+        XCTAssertEqual(
+            service.clean("The tool is rewriting some of my notes. in a way that changes them.", language: "en"),
+            "The tool is rewriting some of my notes, in a way that changes them.")
+        XCTAssertEqual(
+            service.clean("Und wie wir das abbilden wollen. in unserer eigenen Karte.", language: "de"),
+            "Und wie wir das abbilden wollen, in unserer eigenen Karte.")
+    }
+
+    func testPausePeriod_capitalisedContinuation_stays() {
+        let service = RulesCleanupService()
+        let input = "The tool is rewriting some of my notes. In a way that changes them."
+        XCTAssertEqual(service.clean(input, language: "en"), input)
+    }
+
+    func testPausePeriod_abbreviationsNumbersAndEllipsesStay() {
+        let service = RulesCleanupService()
+        for input in [
+            "Das Element wächst bzw. das andere beginnt.",
+            "Take the files, logs, etc. and move them.",
+            "Use a checker, e.g. the system one, first.",
+            "Am 3. und 4. des Monats läuft es.",
+            "Otherwise... tests like these are shaky.",
+            "What about the next one? maybe later.",
+        ] {
+            XCTAssertEqual(service.clean(input, language: input.contains("Das") || input.contains("Am ") ? "de" : "en"), input,
+                           "must stay unchanged: \(input)")
+        }
+    }
+
+    func testPausePeriod_isIdempotent() {
+        let service = RulesCleanupService()
+        let once = service.clean("First part of the thought. then the second part. and a third.", language: "en")
+        XCTAssertEqual(once, "First part of the thought, then the second part, and a third.")
+        XCTAssertEqual(service.clean(once, language: "en"), once)
+    }
+
     // MARK: - Scratch phrases are dictated content
 
     // "scratch that" and "streich das" are not voice commands: the rules
