@@ -63,6 +63,8 @@ final class RulesCleanupServiceTests: XCTestCase {
             "Am 3. und 4. des Monats läuft es.",
             "Otherwise... tests like these are shaky.",
             "What about the next one? maybe later.",
+            "They left the U.S.A. in the spring.",
+            "We meet at 9 a.m. in the lobby.",
         ] {
             XCTAssertEqual(service.clean(input, language: input.contains("Das") || input.contains("Am ") ? "de" : "en"), input,
                            "must stay unchanged: \(input)")

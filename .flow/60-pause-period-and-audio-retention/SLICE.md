@@ -41,3 +41,14 @@
 - **Depends on:** none (disjoint files from task 1).
 
 **End-of-build gates:** full macOS check on both schemes with the live DebugRecordings snapshot unchanged, iOS simulator suite, `scripts/check-running-copy.sh` OK, install of the Debug-Recorder build.
+
+## Review
+
+One round (quick): `code-review` at low on `3ddc4de..HEAD`, code files only, with the data rule (no dictation text from the logs or the planning tree). Working rules checked by the main loop: no Spotlight; audio and text stay on this Mac; the probe is `#if DEBUG_RECORDER` like every probe; tests use synthetic sentences; every xcodebuild used `-derivedDataPath build`.
+
+| id | severity | finding | disposition |
+|---|---|---|---|
+| R1 | WARNING | The abbreviation exclusion was list-only, so a dotted token outside the list ("U.S.A. in", "a.m. in") would have shipped as "U.S.A, in". Claim checked: the regex captures `U.S.A` as the token and the old conditions let it through. | **fix**: a token that contains a dot is never joined (covers every dotted abbreviation and the ellipsis); two cases added to `testPausePeriod_abbreviationsNumbersAndEllipsesStay`; RulesCleanupServiceTests 11 tests 0 failures. |
+| R2 | NIT | Two dictations in the same timestamp would share a WAV name and the second write would replace the first. | **won't fix**: `DebugRecorder.iso8601Timestamp` formats with `.withFractionalSeconds` (millisecond), and dictations are sequential on one hotkey; two cannot end in the same millisecond. |
+
+No open BLOCKER or WARNING after the round.

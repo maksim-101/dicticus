@@ -72,9 +72,11 @@ public final class RulesCleanupService {
             let token = String(s[tokenRange])
             let letters = token.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count
             let plain = token.trimmingCharacters(in: CharacterSet(charactersIn: "(\"'“”‘’[")).lowercased()
+            // A token with a dot of its own ("U.S.A", "a.m", "z.B", "bit..") is an
+            // abbreviation or an ellipsis, whatever the list says.
             let isWord = letters >= 2
                 && !token.contains(where: \.isNumber)
-                && !token.hasSuffix(".")
+                && !token.contains(".")
                 && !Self.abbreviations.contains(plain)
             guard isWord else { continue }
             // Replace ". " with ", " and keep the token.
