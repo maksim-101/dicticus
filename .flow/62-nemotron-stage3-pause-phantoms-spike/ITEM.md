@@ -2,7 +2,7 @@
 id: 62
 title: nemotron-stage3-pause-phantoms-spike
 status: active
-size:
+size: quick
 assignee: none
 created: 2026-11-14
 waiting_until:
