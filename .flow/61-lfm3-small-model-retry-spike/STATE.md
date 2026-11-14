@@ -1,8 +1,8 @@
 # State of 61-lfm3-small-model-retry-spike
 Slice: 61-lfm3-small-model-retry-spike (size set at brief)
 Step: build
-Next: flow:build, task 2: when the background LFM3 decodes of the dev set finish (L1, L2v1, L2v2 into .planning/spikes/025-lfm3-retry/data/out-dev-*.jsonl; the decode script resumes where a file stops), gate them, run metrics.py dev Q L1 and early_signal.py; then task 3
-Waiting on: nothing
+Next: on the owner's answer: either task 3 with up to three more prompt variants (aimed at LFM3 answering the dictation; servers are stopped, start with serve.sh L) and then the holdout, or stop here and close the item with the dev result
+Waiting on: the owner: the early signal failed (evidence/dev-envelope.md): continue with three more prompts and the holdout, go straight to the holdout with L2v1, or stop
 Started: 2026-11-14T09:02:41Z
 Baseline: no check command run yet
 Base: branch point
@@ -19,3 +19,4 @@ Carried: none
 - 2026-11-14 61 brief: opened from the owner's two answers; branch flow/61-lfm3-small-model-retry-spike from main. Item 62 created as planned. The two question lines left the root Carried list. Checked: the `</corrected_text>` stop string is in CleanupService.swift since 2026-10-31; `modelWantsReasoningPreclose` still matches qwen3 only; spike 022's scripts, data and gate build are on disk.
 - 2026-11-14 61 brief: approved with the 60 % rule. 61 plan: PLAN.md written from spike 022's protocol and scripts; holdout pool counted from the frozen logs of 2026-10-30 to 11-12: English 300, German 59, none in the dev set; the LFM3 file is no longer on disk. Waiting for plan approval.
 - 2026-11-14 61 build: task 1 done: harness copied to spike 025 with the app's nine stop strings, gate rebuilt from main, both model hashes equal spike 022's protocol (LFM3 still on disk, no download), Qwen deterministic and equal to spike 022 on 238 of 238 dev outputs, gate fidelity 237 of 238 (evidence/setup.md). Qwen's 238 decodes took 432 s. LFM3 dev decodes started in the background.
+- 2026-11-14 61 build: task 2: early signal failed. With the stop string LFM3 still fails closed on 44 of 238 dev items (bound 20) and ships a change on 38 (bound 50); the discarded outputs are LFM3 answering or obeying the dictation, not commentary after the tag. L2v1 and L2v2 were decoded in the same run: fewer discards (27, 22) and far fewer rejected edits, but shipped changes of 11/32 and 7/15 (German/English) against Qwen's 31/63 (evidence/dev-envelope.md). Both servers stopped; about 21 minutes of GPU time used. Put to the owner before more prompt work, as the plan says.
