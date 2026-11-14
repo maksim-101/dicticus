@@ -2,7 +2,7 @@
 Slice: 62-nemotron-stage3-pause-phantoms-spike (quick)
 Step: build
 Next: task 2: the decode run. `stage3/stage3-run.sh` was started in the background on 2026-11-14 about 10:45 UTC and waits at the resource gate (up to 4 hours) until memory is free; when it exits, run its Verify (watch.log batch lines, sockets.log empty, power.log all AC, `stage3_score.py --check-pairing`), then task 3. If the session ended meanwhile: check `watch.log`; with no batch line the run never started and is started again the same way.
-Waiting on: host: free memory for a 21 GB model slot. The gate refused at 10:44 UTC: memory pressure level 2, projected free -6 % (needs 30 %), swap 10.6 of 12 GB; a 9 GB resident model service and another session's 8 GB test VM hold memory. Met when the gate admits the slot (the VM ending or apps being closed)
+Waiting on: host: the other session's test VM (mac-space) ending, about 12:30 UTC, then the gate admitting a 21 GB model slot at the 10 % floor the owner allowed. The script waits for both by itself; the VM queue's coordinator holds the next VM until this run's slot is released or 13:10 UTC
 Started: 2026-11-14T09:52:09Z
 Baseline: not run: the slice changes nothing outside `.flow/` and the gitignored planning tree, so the app's test suite cannot move
 Base: branch point
@@ -13,6 +13,7 @@ Carried: none
 - 2026-11-14 question (before the slice): the owner on spike 020 Stage 3: "the NemoTron spike could also go ahead".
 - 2026-11-14 brief: approved by the owner. Pass rule "Strict": PASS only with zero confirmed invented passages and zero confirmed lost passages (three or more words) on the real dictations, no runaway output, and no more trouble on the padded clips than Whisper has; a PASS only creates a planned engine item, a FAIL closes spike 020. Sample "What exists now": every recording kept at the moment the rule is frozen; the owner listens to at most 20 disputed passages.
 - 2026-11-14 plan: approved by the owner, "Approve, run now": the go for about 18 minutes of GPU decoding, ceiling 27 minutes, on mains power through the resource gate; more than 20 disputed passages stops the slice before any listening.
+- 2026-11-14 question (build, the resource gate refused the 21 GB slot under its 30 % rule for 40 minutes): the owner chose "Yes, 10 % floor after the VM ends": this one run may be admitted with the gate's documented `--min-free 10`, once the other session's test VM is gone (about 13:30 CET) and memory pressure is normal; the run's own watchdog stays.
 
 ## History
 - 2026-11-14 62 brief: opened by the owner's /flow:next; branch flow/62-nemotron-stage3-pause-phantoms-spike from main.
