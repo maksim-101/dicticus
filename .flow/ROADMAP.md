@@ -1,6 +1,5 @@
 # Open items in working order, one folder per line; each item's status and outcome are in its ITEM.md
 
-50.1-editguard-run-on-split-recovery
 52-dictionary-ux
 55-llm-timeout-fallback
 56-cleanup-preselection-spike
