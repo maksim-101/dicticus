@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>History pick and add</title>
+<style>
+:root{
+  --accent:#2D6D4E; --warning:#F5A524; --warn-bg:#FFF7E8; --warn-text:#7A4C00;
+  --text:#0B0F0D; --text2:#5C6C64; --bg:#FFFFFF; --surface:#F4F6F4;
+  --line:#E2E6E3; --chrome:#ECEEEC; --pick:#CFE6D9;
+}
+*{box-sizing:border-box}
+body{margin:0;background:#C9D1CC;font:13px -apple-system,"SF Pro Text",system-ui,sans-serif;color:var(--text);padding:24px}
+.intro,.coverage{max-width:1400px;margin:0 auto 16px;background:var(--bg);border-radius:10px;padding:16px 24px}
+.intro h1{font-size:17px;margin:0 0 8px}
+.intro p,.coverage{color:var(--text2);line-height:1.45;margin:4px 0}
+.coverage{margin-top:16px;font-size:12px}
+.new{display:inline-block;background:#FFF1D6;color:#7A4C00;border-radius:4px;padding:0 6px;font-size:11px;font-weight:600}
+.boards{display:grid;grid-template-columns:1fr 1fr;gap:16px;max-width:1400px;margin:0 auto}
+.label{font-weight:700;font-size:14px;margin:0 0 4px}
+.diff{color:var(--text2);margin:0 0 8px;font-size:12px;line-height:1.4;min-height:34px}
+.win{background:var(--bg);border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.25);overflow:hidden;height:600px;display:flex;flex-direction:column;position:relative}
+.titlebar{height:28px;background:var(--chrome);display:flex;align-items:center;padding:0 8px;gap:6px;border-bottom:1px solid var(--line);flex:none}
+.dot{width:12px;height:12px;border-radius:50%}
+.titlebar .t{flex:1;text-align:center;font-weight:600;font-size:12px;margin-right:50px}
+.search{margin:8px 16px;border:1px solid #CDD3CF;border-radius:6px;padding:4px 8px;color:var(--text2);flex:none}
+.rows{flex:1;overflow:hidden}
+.row{padding:8px 16px;border-bottom:1px solid #F0F2F0}
+.meta{display:flex;justify-content:space-between;color:var(--text2);font-size:11px;font-weight:500;margin-bottom:4px}
+.tag{display:inline-block;border-radius:4px;padding:0 4px;font-size:10px;font-weight:600;margin-left:4px}
+.tag.l{background:rgba(0,122,255,.12);color:#0057B8}.tag.m{background:rgba(120,120,120,.15);color:#555}
+.polished{line-height:1.4}
+.exp{margin:8px 0 0 24px}
+.seg{display:flex;border:1px solid #CDD3CF;border-radius:6px;overflow:hidden;font-size:11px;width:100%}
+.seg button{flex:1;border:0;background:#F2F3F2;padding:3px;font:inherit;cursor:pointer}
+.seg button.on{background:#fff;font-weight:600}
+.raw{margin-top:8px;font-size:12px;line-height:1.7;background:var(--surface);border-radius:6px;padding:8px}
+.raw.disabled{color:var(--text2)}
+.w{border-radius:3px;cursor:pointer;padding:0 1px}
+.w:hover{background:#E3EFE8;box-shadow:inset 0 -1px 0 var(--accent)}
+.w.on{background:var(--pick)}
+.addbtn{margin-top:8px;display:none;gap:8px;align-items:center}
+.addbtn.show{display:flex}
+.btn{border:1px solid #CDD3CF;background:#fff;border-radius:6px;padding:3px 10px;font:12px inherit;cursor:pointer;white-space:nowrap}
+.btn.prim{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn:disabled{opacity:.45;cursor:default}
+.hint{color:var(--text2);font-size:11px;margin-top:4px}
+.ctx{position:absolute;background:rgba(246,246,246,.98);border:1px solid #CFCFCF;border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,.2);padding:4px;min-width:200px;display:none;z-index:5;font-size:13px}
+.ctx div{padding:2px 12px;border-radius:4px;cursor:default}
+.ctx div.act{cursor:pointer}
+.ctx div.act:hover{background:#2D6D4E;color:#fff}
+.ctx div.dim{color:#999}
+.ctx hr{border:0;border-top:1px solid #DDD;margin:4px 0}
+.sheetwrap{position:absolute;inset:28px 0 0 0;background:rgba(0,0,0,.12);display:none;justify-content:center;align-items:flex-start;z-index:6}
+.sheetwrap.show{display:flex}
+.sheet{width:380px;background:#fff;border-radius:0 0 10px 10px;box-shadow:0 10px 30px rgba(0,0,0,.3);padding:16px 24px}
+.sheet h2{font-size:13px;margin:0 0 12px}
+.sheet label{display:block;font-size:11px;color:var(--text2);font-weight:600;margin:8px 0 2px}
+.sheet input{width:100%;border:1px solid #CDD3CF;border-radius:6px;padding:4px 8px;font:13px inherit}
+.sheet .note{font-size:11px;color:var(--text2);margin-top:4px;min-height:15px}
+.warn{background:var(--warn-bg);border:1px solid var(--warning);color:var(--warn-text);border-radius:6px;padding:6px 8px;font-size:11px;line-height:1.4;margin-top:8px}
+.sheet .actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+.done{margin-top:8px;font-size:11px;color:#1E6B45;display:none}
+.done.show{display:block}
+.fake{position:absolute;right:8px;bottom:8px;font-size:10px;color:var(--text2);background:#fff;border:1px solid var(--line);border-radius:4px;padding:2px 6px}
+.reset{font-size:11px;color:var(--accent);cursor:pointer;text-decoration:underline;margin-left:8px}
+</style>
+</head>
+<body>
+<div class="intro">
+  <h1>Board 2 of 2 — picking a misheard word in History and adding it to the dictionary (clickable)</h1>
+  <p><b>Direction:</b> the existing History window (macOS <code>HistoryView</code>): rows with date, language and mode tags, a chevron that opens the Raw / Polished picker and the full text. Only the way a word is picked differs between A and B; both open the same sheet. <span class="new">NEW</span> marks what the app does not have today.</p>
+  <p><b>Try it:</b> in each window the first dictation is opened on Raw. Pick "Molly do" and add it as <i>Moleido</i> (a word that already has three heard forms, so it joins that row). Then pick "cloud" in the second dictation to see both warnings. The dictations are invented; the dictionary behind the sheet is a small fake one.</p>
+  <p><b>Rules common to both:</b> picking works only in the Raw view, since the recognizer's own output is what the dictionary matches against; Polished text has already been changed by the dictionary and the AI step. Punctuation at the ends of a pick is dropped. The new entry applies from the next dictation on; past dictations stay as they were.</p>
+</div>
+
+<div class="boards">
+  <div>
+    <p class="label">A — click words</p>
+    <p class="diff">Words in the Raw text highlight on hover; click one to pick it, shift-click another to extend the pick to a run of words. An "Add to Dictionary…" button appears under the text. Built from plain SwiftUI word views.</p>
+    <div class="win" id="winA"></div>
+  </div>
+  <div>
+    <p class="label">B — select and right-click</p>
+    <p class="diff">The Raw text selects like any Mac text: drag across words, then right-click and choose "Add to Dictionary…" from the usual menu. Needs an AppKit text view in place of today's SwiftUI text, so the app can read the selection.</p>
+    <div class="win" id="winB"></div>
+  </div>
+</div>
+
+<div class="coverage"><b>What this board covers and leaves out:</b> the pick and the sheet, in the full History window. Not drawn: the menu-bar popover's History tab (it shows only the polished text of recent dictations, so it gets no picking); a keyboard shortcut for the sheet; editing a past dictation's text. The sheet's suggestions list only shows spellings already in the dictionary.</div>
+
+<template id="tpl">
+  <div class="titlebar"><span class="dot" style="background:#FF5F57"></span><span class="dot" style="background:#FEBC2E"></span><span class="dot" style="background:#28C840"></span><span class="t">History</span></div>
+  <div class="search">🔍 Search transcriptions</div>
+  <div class="rows">
+    <div class="row" data-i="0">
+      <div class="meta"><span>Today, 14:02</span><span><span class="tag l">EN</span><span class="tag m">Cleanup</span></span></div>
+      <div class="polished">Can you check whether Molly do imports the timeline from the Antigravity export correctly?</div>
+      <div class="exp">
+        <div class="seg"><button class="on" data-v="raw">Raw</button><button data-v="pol">Polished</button></div>
+        <div class="raw"></div>
+        <div class="addbtn"><button class="btn prim add">Add to Dictionary…</button><span class="picked hint"></span></div>
+        <div class="hint pickhint"></div>
+        <div class="done"></div>
+      </div>
+    </div>
+    <div class="row" data-i="1">
+      <div class="meta"><span>Today, 13:47</span><span><span class="tag l">EN</span><span class="tag m">Plain</span></span></div>
+      <div class="polished">Send the Claude logs to the dev channel before lunch.</div>
+      <div class="exp">
+        <div class="seg"><button class="on" data-v="raw">Raw</button><button data-v="pol">Polished</button></div>
+        <div class="raw"></div>
+        <div class="addbtn"><button class="btn prim add">Add to Dictionary…</button><span class="picked hint"></span></div>
+        <div class="hint pickhint"></div>
+        <div class="done"></div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="meta"><span>Today, 11:15</span><span><span class="tag l">DE</span><span class="tag m">Plain</span></span></div>
+      <div class="polished">Ich schicke dir die Rechnung von Hetzner heute Abend noch.</div>
+    </div>
+    <div class="row">
+      <div class="meta"><span>Yesterday, 18:30</span><span><span class="tag l">EN</span><span class="tag m">Cleanup</span></span></div>
+      <div class="polished">Remind me to renew the Tailscale key on Friday.</div>
+    </div>
+  </div>
+  <div class="ctx">
+    <div class="dim">Look Up</div><div class="dim">Translate</div><hr>
+    <div class="dim">Copy</div><hr>
+    <div class="act addctx">Add to Dictionary… <span class="new">NEW</span></div>
+  </div>
+  <div class="sheetwrap"><div class="sheet">
+    <h2>Add to Dictionary <span class="new">NEW</span></h2>
+    <label>Heard as</label><input class="heard">
+    <label>Correct spelling</label><input class="correct" list="spellings" placeholder="Type how it should be written">
+    <div class="note"></div>
+    <div class="warns"></div>
+    <div class="actions"><button class="btn cancel">Cancel</button><button class="btn prim save" disabled>Add</button></div>
+  </div></div>
+  <span class="fake">prototype · fake dictionary</span>
+</template>
+<datalist id="spellings"></datalist>
+
+<script>
+const RAW = [
+  "can you check whether Molly do imports the timeline from the gravity export correctly?",
+  "send the cloud logs to the dev channel before lunch."
+];
+const POL = [
+  "Can you check whether Molly do imports the timeline from the Antigravity export correctly?",
+  "Send the Claude logs to the dev channel before lunch."
+];
+// fake dictionary: heard form -> spelling
+const DICT = {"moleydo":"Moleido","molly doe":"Moleido","mole ido":"Moleido","cloud":"Claude","clawed":"Claude",
+  "the gravity":"Antigravity","tailscele":"Tailscale","tail scale":"Tailscale","hetsner":"Hetzner"};
+// stand-in for the bundled EN+DE lexicon
+const LEXICON = new Set(["cloud","the","set","send","logs","dev","channel","before","lunch","can","you","check","whether","imports","timeline","from","gravity","export","correctly","molly","do"]);
+const spellings = [...new Set(Object.values(DICT))].sort();
+document.getElementById("spellings").innerHTML = spellings.map(s=>`<option value="${s}">`).join("");
+
+function clean(s){return s.trim().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu,"");}
+
+function setup(win, mode){
+  win.appendChild(document.getElementById("tpl").content.cloneNode(true));
+  const ctx = win.querySelector(".ctx"), wrap = win.querySelector(".sheetwrap");
+  const heard = win.querySelector(".heard"), correct = win.querySelector(".correct");
+  const note = win.querySelector(".note"), warns = win.querySelector(".warns"), save = win.querySelector(".save");
+  let activeRow = null;
+
+  win.querySelectorAll(".row[data-i]").forEach(row=>{
+    const i = +row.dataset.i, raw = row.querySelector(".raw"), addbox = row.querySelector(".addbtn");
+    const picked = row.querySelector(".picked"), pickhint = row.querySelector(".pickhint");
+    let anchor=null, sel=[];
+    function renderRaw(){
+      if(mode==="A"){
+        raw.innerHTML = RAW[i].split(" ").map((w,k)=>`<span class="w" data-k="${k}">${w}</span>`).join(" ");
+        raw.querySelectorAll(".w").forEach(s=>s.addEventListener("click",e=>{
+          const k=+s.dataset.k;
+          if(e.shiftKey && anchor!==null){const a=Math.min(anchor,k),b=Math.max(anchor,k);sel=[];for(let x=a;x<=b;x++)sel.push(x);}
+          else {anchor=k; sel=[k];}
+          raw.querySelectorAll(".w").forEach(t=>t.classList.toggle("on",sel.includes(+t.dataset.k)));
+          const text=clean(sel.map(x=>RAW[i].split(" ")[x]).join(" "));
+          addbox.classList.add("show"); picked.textContent=`“${text}”`;
+          row._pick=text;
+        }));
+        pickhint.textContent="Click a word; shift-click to extend the pick.";
+      } else {
+        raw.textContent = RAW[i];
+        raw.style.userSelect="text";
+        pickhint.textContent="Drag to select, then right-click.";
+        raw.addEventListener("contextmenu",e=>{
+          e.preventDefault();
+          const t=clean(String(window.getSelection()));
+          row._pick=t; activeRow=row;
+          const r=win.getBoundingClientRect();
+          ctx.style.left=(e.clientX-r.left)+"px"; ctx.style.top=(e.clientY-r.top)+"px";
+          ctx.querySelector(".addctx").classList.toggle("dim",!t);
+          ctx.querySelector(".addctx").classList.toggle("act",!!t);
+          ctx.style.display="block";
+        });
+      }
+    }
+    renderRaw();
+    row.querySelectorAll(".seg button").forEach(b=>b.addEventListener("click",()=>{
+      row.querySelectorAll(".seg button").forEach(x=>x.classList.toggle("on",x===b));
+      if(b.dataset.v==="raw"){raw.classList.remove("disabled");renderRaw();}
+      else {raw.classList.add("disabled");raw.textContent=POL[i];addbox.classList.remove("show");
+        pickhint.textContent="Switch to Raw to pick a word: Polished text has already been changed by the dictionary and the AI step.";}
+    }));
+    row.querySelector(".add").addEventListener("click",()=>{activeRow=row;openSheet(row._pick);});
+  });
+
+  document.addEventListener("click",e=>{ if(!ctx.contains(e.target)) ctx.style.display="none"; });
+  ctx.querySelector(".addctx").addEventListener("click",()=>{
+    if(!activeRow||!activeRow._pick) return; ctx.style.display="none"; openSheet(activeRow._pick);
+  });
+
+  function openSheet(text){ heard.value=text; correct.value=""; update(); wrap.classList.add("show"); correct.focus(); }
+  function update(){
+    const h=clean(heard.value), c=correct.value.trim(), hl=h.toLowerCase();
+    let w=[];
+    if(h.split(/\s+/).length===1 && LEXICON.has(hl))
+      w.push(`“${h}” is an everyday word. This entry would change every “${h}” you dictate, also where you mean ${h}.`);
+    if(DICT[hl] && DICT[hl]!==c)
+      w.push(`“${h}” is already in the dictionary and becomes “${DICT[hl]}”. Adding it here changes that entry to “${c||"…"}”.`);
+    warns.innerHTML=w.map(x=>`<div class="warn">⚠ ${x}</div>`).join("");
+    const n=Object.values(DICT).filter(v=>v===c).length;
+    note.textContent = !c ? "" : n ? `Joins “${c}”, which has ${n} heard form${n>1?"s":""}.` : `New word in the dictionary.`;
+    save.disabled = !h || !c || h===c;
+  }
+  heard.addEventListener("input",update); correct.addEventListener("input",update);
+  win.querySelector(".cancel").addEventListener("click",()=>wrap.classList.remove("show"));
+  save.addEventListener("click",()=>{
+    const h=clean(heard.value), c=correct.value.trim();
+    DICT[h.toLowerCase()]=c; wrap.classList.remove("show");
+    const d=activeRow.querySelector(".done");
+    d.innerHTML=`✓ Added: “${h}” → “${c}”. Applies from your next dictation. <span class="reset">Undo</span>`;
+    d.classList.add("show");
+    d.querySelector(".reset").addEventListener("click",()=>{delete DICT[h.toLowerCase()];d.classList.remove("show");});
+  });
+}
+setup(document.getElementById("winA"),"A");
+setup(document.getElementById("winB"),"B");
+</script>
+</body>
+</html>

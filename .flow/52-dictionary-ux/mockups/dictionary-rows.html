@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grouped dictionary rows</title>
+<style>
+:root{
+  --accent:#2D6D4E; --accent-soft:rgba(45,109,78,.12); --warning:#F5A524;
+  --text:#0B0F0D; --text2:#5C6C64; --bg:#FFFFFF; --surface:#F4F6F4;
+  --line:#E2E6E3; --chrome:#ECEEEC; --sel:#DCEBE2; --destructive:#D70015;
+}
+*{box-sizing:border-box}
+body{margin:0;background:#C9D1CC;font:13px -apple-system,"SF Pro Text",system-ui,sans-serif;color:var(--text);padding:24px}
+.intro{max-width:1500px;margin:0 auto 16px;background:var(--bg);border-radius:10px;padding:16px 24px}
+.intro h1{font-size:17px;margin:0 0 8px}
+.intro p{margin:4px 0;color:var(--text2);line-height:1.45}
+.intro .new{display:inline-block;background:#FFF1D6;color:#7A4C00;border-radius:4px;padding:0 6px;font-size:11px;font-weight:600}
+.boards{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;max-width:1500px;margin:0 auto}
+.label{font-weight:700;font-size:14px;margin:0 0 4px}
+.diff{color:var(--text2);margin:0 0 8px;font-size:12px;line-height:1.4;min-height:50px}
+.win{background:var(--bg);border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.25);overflow:hidden;height:560px;display:flex;flex-direction:column}
+.titlebar{height:28px;background:var(--chrome);display:flex;align-items:center;padding:0 8px;gap:6px;border-bottom:1px solid var(--line);flex:none}
+.dot{width:12px;height:12px;border-radius:50%}
+.titlebar .t{flex:1;text-align:center;font-weight:600;font-size:12px;margin-right:50px}
+.toolbar{height:44px;display:flex;align-items:center;padding:0 16px;gap:8px;border-bottom:1px solid var(--line);background:#F7F8F7;flex:none}
+.toolbar .count{flex:1;text-align:center;color:var(--text2);font-size:12px}
+.seg{display:flex;border:1px solid #CDD3CF;border-radius:6px;overflow:hidden;font-size:11px}
+.seg span{padding:2px 8px}.seg span.on{background:#fff;font-weight:600}
+.switch{width:26px;height:15px;border-radius:8px;background:#CDD3CF;position:relative}
+.switch:after{content:"";position:absolute;left:2px;top:2px;width:11px;height:11px;border-radius:50%;background:#fff}
+.body{flex:1;overflow:hidden;position:relative}
+.footer{height:48px;border-top:1px solid var(--line);display:flex;align-items:center;gap:8px;padding:0 16px;background:#F7F8F7;flex:none}
+.btn{border:1px solid #CDD3CF;background:#fff;border-radius:6px;padding:2px 10px;font-size:12px;white-space:nowrap}
+.btn.prim{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn.red{color:var(--destructive)}
+.sp{flex:1}
+/* table */
+.th{display:grid;padding:4px 16px;font-size:11px;color:var(--text2);font-weight:600;border-bottom:1px solid var(--line)}
+.tr{display:grid;padding:6px 16px;align-items:start;border-bottom:1px solid #F0F2F0}
+.tr:nth-child(even){background:#FAFBFA}
+.tr.sel{background:var(--sel)}
+.chip{display:inline-flex;align-items:center;gap:4px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:0 4px 0 8px;margin:1px 4px 1px 0;font-size:12px;line-height:18px}
+.chip .x{color:var(--text2);font-size:10px;width:14px;text-align:center}
+.chip.add{border-style:dashed;color:var(--accent);padding:0 8px}
+.chip.warn{border-color:var(--warning);background:#FFF7E8}
+.spell{font-weight:600}
+.n{color:var(--text2);font-size:11px;font-weight:400}
+/* split */
+.split{display:grid;grid-template-columns:200px 1fr;height:100%}
+.list{border-right:1px solid var(--line);overflow:hidden}
+.li{padding:6px 16px;display:flex;justify-content:space-between;border-bottom:1px solid #F0F2F0}
+.li.sel{background:var(--accent);color:#fff}.li.sel .n{color:#E6F2EB}
+.detail{padding:16px 24px}
+.detail h3{margin:0 0 4px;font-size:12px;color:var(--text2);font-weight:600;text-transform:uppercase;letter-spacing:.03em}
+.field{border:1px solid #CDD3CF;border-radius:6px;padding:4px 8px;margin-bottom:16px;background:#fff}
+.form{display:flex;align-items:center;justify-content:space-between;padding:6px 8px;border-bottom:1px solid #F0F2F0}
+.minus{width:18px;height:18px;border-radius:50%;border:1px solid #CDD3CF;text-align:center;line-height:16px;color:var(--text2);font-size:12px}
+.meta{color:var(--text2);font-size:11px}
+.hint{color:var(--text2);font-size:11px;margin-top:8px;line-height:1.4}
+/* disclosure */
+.dr{padding:6px 16px;border-bottom:1px solid #F0F2F0;display:flex;align-items:center;gap:8px}
+.chev{width:12px;color:var(--text2);font-size:10px}
+.sub{padding:0 16px 8px 36px;background:#FAFBFA;border-bottom:1px solid #F0F2F0}
+.sub .form{padding:4px 0}
+.coverage{max-width:1500px;margin:16px auto 0;background:var(--bg);border-radius:10px;padding:12px 24px;color:var(--text2);font-size:12px;line-height:1.5}
+</style>
+</head>
+<body>
+<div class="intro">
+  <h1>Board 1 of 2 — how one correct spelling and its misheard forms look in the Manage Dictionary window</h1>
+  <p><b>Direction:</b> the existing Manage Dictionary window (macOS <code>DictionaryView</code>): native inset table, 13 pt system text, ultra-thin toolbar and footer, accent green only for the primary button and the selection. Signature element: the misheard forms shown <i>on</i> the row of the spelling they belong to. Only the list area differs between the variants; toolbar, Starter Packs and Spoken Punctuation sections below the footer stay as they are (not drawn).</p>
+  <p><b>The data:</b> invented example words; the header counts are your dictionary's real ones (306 entries, 183 correct spellings). Anything the app does not have today is marked <span class="new">NEW</span>. Toolbar labels, the sort picker (Recent / A–Z) and the footer buttons are the app's own; the footer keeps Delete Selected, Remove All, Export and Import.</p>
+  <p><b>Common to all three:</b> the row shows the correct spelling once; adding a misheard form, removing one, changing the spelling (for all its forms at once) and deleting the row are available. A misheard form that is an everyday word is outlined orange, because it rewrites that word everywhere (here: "cloud").</p>
+</div>
+
+<div class="boards">
+
+<!-- A -->
+<div>
+  <p class="label">A — table with chips</p>
+  <p class="diff">Two columns, spelling first. Misheard forms are small chips on the row, each with its own ×; a dashed "+" chip adds one. Double-click the spelling to rename it. Closest to today's table.</p>
+  <div class="win">
+    <div class="titlebar"><span class="dot" style="background:#FF5F57"></span><span class="dot" style="background:#FEBC2E"></span><span class="dot" style="background:#28C840"></span><span class="t">Manage Dictionary</span></div>
+    <div class="toolbar"><span>Case Sensitive</span><span class="switch"></span><span class="count">183 words · 306 heard forms</span><span class="seg"><span class="on">Recent</span><span>A–Z</span></span></div>
+    <div class="body">
+      <div class="th" style="grid-template-columns:150px 1fr"><span>Correct spelling</span><span>Heard as <span class="new">NEW</span></span></div>
+      <div>
+        <div class="tr sel" style="grid-template-columns:150px 1fr"><span class="spell">Claude Code</span><span><span class="chip">cloud code<span class="x">✕</span></span><span class="chip">clod code<span class="x">✕</span></span><span class="chip">claw code<span class="x">✕</span></span><span class="chip add">+ add</span></span></div>
+        <div class="tr" style="grid-template-columns:150px 1fr"><span class="spell">Claude</span><span><span class="chip warn">cloud<span class="x">✕</span></span><span class="chip">clawed<span class="x">✕</span></span><span class="chip add">+</span></span></div>
+        <div class="tr" style="grid-template-columns:150px 1fr"><span class="spell">Tailscale</span><span><span class="chip">Tailscele<span class="x">✕</span></span><span class="chip">tail scale<span class="x">✕</span></span><span class="chip">Telescale<span class="x">✕</span></span><span class="chip">tailscail<span class="x">✕</span></span><span class="chip add">+</span></span></div>
+        <div class="tr" style="grid-template-columns:150px 1fr"><span class="spell">AdGuard Home</span><span><span class="chip">ad card home<span class="x">✕</span></span><span class="chip">ad guard home<span class="x">✕</span></span><span class="chip add">+</span></span></div>
+        <div class="tr" style="grid-template-columns:150px 1fr"><span class="spell">Vercel</span><span><span class="chip">vercel<span class="x">✕</span></span><span class="chip">versel<span class="x">✕</span></span><span class="chip add">+</span></span></div>
+        <div class="tr" style="grid-template-columns:150px 1fr"><span class="spell">Zed</span><span><span class="chip">the set.<span class="x">✕</span></span><span class="chip add">+</span></span></div>
+        <div class="tr" style="grid-template-columns:150px 1fr"><span class="spell">Gemini</span><span><span class="chip">Gemeni<span class="x">✕</span></span><span class="chip">Jemini<span class="x">✕</span></span><span class="chip">gemeny<span class="x">✕</span></span><span class="chip">Jiminy<span class="x">✕</span></span><span class="chip">gem in i<span class="x">✕</span></span><span class="chip add">+</span></span></div>
+        <div class="tr" style="grid-template-columns:150px 1fr"><span class="spell">Obsidian</span><span><span class="chip">obsidien<span class="x">✕</span></span><span class="chip add">+</span></span></div>
+        <div class="tr" style="grid-template-columns:150px 1fr"><span class="spell">SwiftBar</span><span><span class="chip">Swift bar<span class="x">✕</span></span><span class="chip">swift bar<span class="x">✕</span></span><span class="chip add">+</span></span></div>
+        <div class="tr" style="grid-template-columns:150px 1fr"><span class="spell">Hetzner</span><span><span class="chip">Hetsner<span class="x">✕</span></span><span class="chip">hats now<span class="x">✕</span></span><span class="chip add">+</span></span></div>
+      </div>
+    </div>
+    <div class="footer"><span class="btn">＋ Add Entry</span><span class="btn">Edit</span><span class="sp"></span><span class="btn">Delete Selected</span><span class="btn red">Remove All</span></div>
+  </div>
+</div>
+
+<!-- B -->
+<div>
+  <p class="label">B — list and detail</p>
+  <p class="diff">Spellings on the left with a count; the selected one opens on the right with a spelling field and the full list of its misheard forms. Most room for editing, one word at a time.</p>
+  <div class="win">
+    <div class="titlebar"><span class="dot" style="background:#FF5F57"></span><span class="dot" style="background:#FEBC2E"></span><span class="dot" style="background:#28C840"></span><span class="t">Manage Dictionary</span></div>
+    <div class="toolbar"><span>Case Sensitive</span><span class="switch"></span><span class="count">183 words · 306 heard forms</span><span class="seg"><span class="on">Recent</span><span>A–Z</span></span></div>
+    <div class="body"><div class="split">
+      <div class="list">
+        <div class="li sel"><span>Claude Code</span><span class="n">3</span></div>
+        <div class="li"><span>Claude</span><span class="n">2</span></div>
+        <div class="li"><span>Tailscale</span><span class="n">4</span></div>
+        <div class="li"><span>AdGuard Home</span><span class="n">2</span></div>
+        <div class="li"><span>Vercel</span><span class="n">2</span></div>
+        <div class="li"><span>Zed</span><span class="n">1</span></div>
+        <div class="li"><span>Gemini</span><span class="n">5</span></div>
+        <div class="li"><span>Obsidian</span><span class="n">1</span></div>
+        <div class="li"><span>SwiftBar</span><span class="n">2</span></div>
+        <div class="li"><span>Hetzner</span><span class="n">2</span></div>
+        <div class="li"><span>Moleido</span><span class="n">3</span></div>
+        <div class="li"><span>Sonnet</span><span class="n">2</span></div>
+      </div>
+      <div class="detail">
+        <h3>Correct spelling</h3>
+        <div class="field">Claude Code</div>
+        <h3>Heard as <span class="new">NEW</span></h3>
+        <div class="form"><span>cloud code</span><span class="minus">−</span></div>
+        <div class="form"><span>clod code</span><span class="minus">−</span></div>
+        <div class="form"><span>claw code</span><span class="minus">−</span></div>
+        <div style="margin-top:8px"><span class="btn">＋ Add heard form</span></div>
+        <p class="hint">Changing the spelling changes it for all three heard forms. Added from History on 12 Nov · your entry.</p>
+      </div>
+    </div></div>
+    <div class="footer"><span class="btn">＋ Add Word</span><span class="sp"></span><span class="btn">Delete Word</span><span class="btn red">Remove All</span></div>
+  </div>
+</div>
+
+<!-- C -->
+<div>
+  <p class="label">C — expandable rows</p>
+  <p class="diff">One line per spelling with a count of its forms; a chevron opens the forms underneath, editable in place. The most compact list for scanning 183 words; editing needs one more click.</p>
+  <div class="win">
+    <div class="titlebar"><span class="dot" style="background:#FF5F57"></span><span class="dot" style="background:#FEBC2E"></span><span class="dot" style="background:#28C840"></span><span class="t">Manage Dictionary</span></div>
+    <div class="toolbar"><span>Case Sensitive</span><span class="switch"></span><span class="count">183 words · 306 heard forms</span><span class="seg"><span class="on">Recent</span><span>A–Z</span></span></div>
+    <div class="body">
+      <div class="dr" style="background:var(--sel)"><span class="chev">▼</span><span class="spell">Claude Code</span><span class="n">3 heard forms</span></div>
+      <div class="sub" style="background:#EEF5F1">
+        <div class="form"><span>cloud code</span><span class="minus">−</span></div>
+        <div class="form"><span>clod code</span><span class="minus">−</span></div>
+        <div class="form"><span>claw code</span><span class="minus">−</span></div>
+        <div style="padding-top:4px"><span class="chip add">+ add heard form</span> <span class="chip add">Rename…</span></div>
+      </div>
+      <div class="dr"><span class="chev">▶</span><span class="spell">Claude</span><span class="n">2 heard forms · <span style="color:#A86A00">1 everyday word</span></span></div>
+      <div class="dr"><span class="chev">▶</span><span class="spell">Tailscale</span><span class="n">4 heard forms</span></div>
+      <div class="dr"><span class="chev">▶</span><span class="spell">AdGuard Home</span><span class="n">2 heard forms</span></div>
+      <div class="dr"><span class="chev">▶</span><span class="spell">Vercel</span><span class="n">2 heard forms</span></div>
+      <div class="dr"><span class="chev">▶</span><span class="spell">Zed</span><span class="n">the set.</span></div>
+      <div class="dr"><span class="chev">▶</span><span class="spell">Gemini</span><span class="n">5 heard forms</span></div>
+      <div class="dr"><span class="chev">▶</span><span class="spell">Obsidian</span><span class="n">obsidien</span></div>
+      <div class="dr"><span class="chev">▶</span><span class="spell">SwiftBar</span><span class="n">2 heard forms</span></div>
+      <div class="dr"><span class="chev">▶</span><span class="spell">Hetzner</span><span class="n">2 heard forms</span></div>
+      <div class="dr"><span class="chev">▶</span><span class="spell">Moleido</span><span class="n">3 heard forms</span></div>
+      <div class="dr"><span class="chev">▶</span><span class="spell">Sonnet</span><span class="n">2 heard forms</span></div>
+      <div class="dr"><span class="chev">▶</span><span class="spell">Antigravity</span><span class="n">the gravity</span></div>
+    </div>
+    <div class="footer"><span class="btn">＋ Add Entry</span><span class="sp"></span><span class="btn">Delete Selected</span><span class="btn red">Remove All</span></div>
+  </div>
+</div>
+
+</div>
+<div class="coverage"><b>What this board covers and leaves out:</b> three layouts for the list area of the Manage Dictionary window. Not drawn: the menu-bar popover's Dictionary tab, which shows only a count and an add form today and stays as it is; the Starter Packs and Spoken Punctuation sections below the footer, which do not change. A fourth option, a plain table with a "group by spelling" toggle, was left out because it keeps the scattered rows as the default view.</div>
+</body>
+</html>

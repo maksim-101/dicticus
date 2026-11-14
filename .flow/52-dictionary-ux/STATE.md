@@ -1,8 +1,8 @@
 # State of 52-dictionary-ux
 Slice: 52-dictionary-ux (size set at brief)
-Step: brief
-Next: flow:mockup for the grouped row and the History pick-and-add flow, then the brief approval
-Waiting on: nothing
+Step: mockup
+Next: record the owner's choice per board in BRIEF.md, then ask for the brief approval
+Waiting on: the owner: choice per board (dictionary-rows A/B/C, history-pick A/B)
 Started: 2026-11-14T14:07:19Z
 Baseline: no check command yet
 Base: branch point
