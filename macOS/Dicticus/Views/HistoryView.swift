@@ -169,6 +169,18 @@ struct HistoryRow: View {
     @State private var lastModel: AddToDictionaryModel? = nil
     @State private var confirmation: String? = nil
 
+    /// `expanded`, `pick` and `confirmation` set the starting state; the off-screen
+    /// render test of slice 52 uses them, the History list does not.
+    init(entry: TranscriptionEntry, formatter: DateFormatter, searchTerm: String,
+         expanded: Bool = false, pick: WordRange? = nil, confirmation: String? = nil) {
+        self.entry = entry
+        self.formatter = formatter
+        self.searchTerm = searchTerm
+        _isExpanded = State(initialValue: expanded)
+        _pick = State(initialValue: pick)
+        _confirmation = State(initialValue: confirmation)
+    }
+
     private var rawTokens: [String] {
         WordPick.tokens(of: entry.rawText.isEmpty ? entry.text : entry.rawText)
     }

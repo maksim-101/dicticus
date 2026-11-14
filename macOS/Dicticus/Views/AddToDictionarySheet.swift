@@ -92,6 +92,7 @@ struct AddToDictionarySheet: View {
                     Image(systemName: "chevron.down")
                 }
                 .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
                 .fixedSize()
                 .disabled(model.spellings.isEmpty)
                 .help("Pick a spelling already in the dictionary")
