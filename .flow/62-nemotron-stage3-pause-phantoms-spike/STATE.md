@@ -18,6 +18,7 @@ Carried: none
 - 2026-11-14 verify (remark, not yet the labels): the owner on the listening page: "I don't get your NemoTron pause test, but overall, based on what you're showing me, NemoTron performs significantly better than Whisper." No answer line was given; the agent explained the test and asked whether Nemotron's words were what was said on every card.
 - 2026-11-14 verify (finding on the page, partial judgment): the owner did not look at every card, because it was unclear what to look at and where in the audio ("what's the duration and position"); "of those that I looked at, NemoTron was always better and/or right". Not a full set of labels. The page was rebuilt: ten words of context around the marked words, the recording's length and the passage's clock position, three plain instructions.
 - 2026-11-14 question (another session asked for disk space; free disk 42 GB): the owner: "keep nemotron". The 20 GB of model files in the spike's cache stay.
+- 2026-11-14 verify (the owner's labels from the rebuilt listening page): `1=c 2=c 3=c 4=c 5=a 6=c 7=b` (a = Nemotron invented this, b = Nemotron lost speech here, c = Whisper was wrong). The extra cards x1 and x2 were not answered.
 
 ## History
 - 2026-11-14 62 brief: opened by the owner's /flow:next; branch flow/62-nemotron-stage3-pause-phantoms-spike from main.
