@@ -41,6 +41,8 @@ The owner, deciding whether a small-model build for 6 GB phones is worth a slice
 ## Size and risk
 Standard: six tasks at most, no shipped code, no risk trigger. External: Hugging Face for the model file, agy for labels.
 
+## Pass rule (the owner, 2026-11-14)
+Per language on the holdout: LFM3's better arm passes with at least 60 % of Qwen's good edits (shipped texts labelled better) and no more harmful ones (mixed or worse) than Qwen. A pass leads to a build that offers LFM3 only on devices that cannot run Qwen; 8 GB devices and the Mac keep Qwen.
+
 ## Open
-- Which pass rule (asked at approval).
 - Whether German AI cleanup is worth offering at all (Qwen: 17 good, 7 harmful of 119) stays open from spike 021.
