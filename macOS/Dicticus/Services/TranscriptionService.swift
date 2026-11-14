@@ -1145,6 +1145,8 @@ class TranscriptionService: ObservableObject {
         #endif
 
         #if DEBUG_RECORDER
+        // Slice 60: keep the dictation's audio for seven days (debug build only).
+        let retainedAudioFileName: String? = await AudioRetentionProbe.shared.retain(samples16k: resampledSamples)
         // Spike 008's Fix A/B distinction was Parakeet-specific (tail-drop vs capture-cut).
         // Kept for ongoing monitoring of genuine capture-cuts (audio severed mid-word) —
         // no second transcribe is needed.
@@ -1157,6 +1159,8 @@ class TranscriptionService: ObservableObject {
                 paddedText: nil
             )
         }
+        #else
+        let retainedAudioFileName: String? = nil
         #endif
 
         let trimmedText = combinedText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1211,7 +1215,8 @@ class TranscriptionService: ObservableObject {
         let transcriptionResult = DicticusTranscriptionResult(
             text: trimmedText,
             language: detectedLanguage,
-            confidence: confidence
+            confidence: confidence,
+            audioFileName: retainedAudioFileName
         )
 
         #if DEBUG_RECORDER

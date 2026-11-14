@@ -676,7 +676,8 @@ class HotkeyManager: ObservableObject {
                     confidence: Double(result.confidence),
                     context: dictationContext,
                     detectedBundleID: dictationBundleID,
-                    detectedAppCategory: dictationCategory
+                    detectedAppCategory: dictationCategory,
+                    audioFile: result.audioFileName
                 ) ?? result.text
 
                 // Phase 50 D-02: Inject final processed text into the active app; consume the

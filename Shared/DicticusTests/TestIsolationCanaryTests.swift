@@ -100,6 +100,11 @@ final class TestIsolationCanaryTests: XCTestCase {
         XCTAssertEqual(PostEditProbe.shared.directoryURL.standardizedFileURL, expected, "PostEditProbe")
         XCTAssertEqual(LlmLifecycleProbe.shared.directoryURL.standardizedFileURL, expected, "LlmLifecycleProbe")
         XCTAssertEqual(
+            AudioRetentionProbe.shared.directoryURL.deletingLastPathComponent().standardizedFileURL,
+            expected,
+            "AudioRetentionProbe (slice 60) writes under the test directory's audio/ folder"
+        )
+        XCTAssertEqual(
             PreviewFlagRecorder.shared.directoryURL.deletingLastPathComponent().standardizedFileURL,
             expected,
             "PreviewFlagRecorder"
