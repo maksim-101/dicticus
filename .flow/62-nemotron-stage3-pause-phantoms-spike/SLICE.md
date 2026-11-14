@@ -62,4 +62,19 @@ All spike files (scripts, lists, decodes, the listening page) live in the gitign
 
 **Criteria to tasks.** 1 → task 1 (lock and scorer check), with the file-time order read in task 2's evidence. 2 → tasks 2 and 3. 3 → tasks 1 (Whisper's counts), 2 and 3. 4 `[judge]` → task 3 builds the page; the owner's answers are taken at verify. 5 → task 3. 6 → task 2 (sockets) and task 3 (evidence content).
 
+## Review
+
+One round (quick). The slice's tracked diff holds records only, so the correctness review went to the code that decides the verdict: a fresh agent (opus) read `stage3_score.py`, the pre-registration, the thresholds, the freeze script and the listening-page builder, with synthetic inputs only and the rule that no dictation text is opened. The main loop checked each finding against the code or the data.
+
+| # | Severity | Finding | Disposition |
+|---|---|---|---|
+| R1 | WARNING | A surplus of three or more words is missed when one matching word splits it, and a stretch where Nemotron swaps words one for one has no surplus at all. The scorer follows the frozen rule's wording, so this is a gap in the rule. | **Disclosed, covered outside the verdict.** Checked on the data with a looser detector (stretches joined across one or two matching words; stretches of six or more differing words without a surplus): 2 further passages beyond the 7. The listening page shows them as extra cards `x1`, `x2`, marked as not counted by the rule; their labels go to a separate file and are reported beside the verdict. |
+| R2 | WARNING | The same passage can get two keys when one arm also mishears a neighbouring word, and two runs at the same start merge. | **Accepted.** With 7 passages the limit of 20 is not near. Three cards lie in one 71 s recording and may cover the same stretch; the page says so. Labels are per card, so nothing is mislabelled. |
+| R3 | WARNING | `score()` does not read the pairing check. | **Covered by the run's Verify:** `--check-pairing` printed 12 of 12 identical (evidence/run.md). |
+| R4 | WARNING | `--apply` accepted `0=`, duplicates and partial answers. | **Fixed** in the page builder (not a locked file): range, duplicate and code are checked, and nothing is written unless every rule passage has an answer. Seen rejecting `0=a` with no file written. |
+| R5 | NIT | Nothing asserted that Whisper's and Nemotron's twin sets are the same clips. | **Checked:** both are the same 114 ids. |
+| R6 | NIT | A trailing phantom that replaces the last words one for one is invisible to the gained/lost rule. | **Accepted:** the rule is the same for both engines. |
+
+Found clean: the trailing rules on empty inputs, the verdict table, the numbering between page and `--apply`.
+
 **Departures from the brief.** None at approval. One number is refined: the run is four batches (not six loads), about 18 minutes. Found in the build: (1) the Stage 3 outputs carry no word timings (the runtime could not produce them; cause not found), so a passage's time and its "at a pause" mark are estimates from an even spread of the words; the mark was never part of the verdict. (2) Criterion 3 names "per arm and language" counts; they are in `result.json` and summed in the evidence. (3) The run needed two owner decisions on the resource gate (10 % memory floor, 8 GB swap pause), both recorded in STATE.md.
