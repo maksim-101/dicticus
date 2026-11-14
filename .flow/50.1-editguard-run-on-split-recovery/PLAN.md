@@ -22,7 +22,7 @@ Runs: three harness replays over about 1300 records, one test run of two test cl
 - **Files:** `r4/holdout-input/` (the 23 files of `r3/holdout-input/` plus `cleanup-2026-11-02..09` from `holdout-logs-2026-11-14/`, de-duplicated by `ts`), `r4/live-{w0,b1,c1}.json`, `r4/tally4.py`, `r4/hunks4.py` (copies of the r3 scripts with the path changed), `r4/repro.py`, `ROUND2-VERDICT.md` header; `evidence/snapshot-counts.md`.
 - **Affects:** nothing shipped. The worktree `../dicticus-50.1-replay` (detached at main) gets the patch and a copy of the gitignored `Shared/Services/PersonalLexicon.swift`; the main checkout is untouched.
 - **Verify:** `python3 -I .planning/spikes/017-runon-split-recovery/r4/repro.py` exits 0 and prints `repro ok: dot 27, lost-dot 47, comma 227, unexpected 0` (it filters the r4 outputs to ts ≤ the last ts of `r3/live-w0.json`, asserts those numbers and that no input record is later than the cut-off or earlier than 2026-10-10T23:59Z); `shasum -a 256 …/017-hook-b1c1.diff` starts with `8bc83812a0f2e1bf`.
-- **Status:** todo
+- **Status:** done (evidence/snapshot-counts.md; no code commit, the work files are gitignored)
 - **Depends on:** none
 
 ### 2. Hard constraints that need no labelling: H2, H3, H4, synthetic outputs

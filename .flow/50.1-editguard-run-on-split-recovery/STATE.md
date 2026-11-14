@@ -1,10 +1,10 @@
 # State of 50.1-editguard-run-on-split-recovery
 Slice: 50.1-editguard-run-on-split-recovery (standard)
 Step: build
-Next: flow:build, task 1 (snapshot input, replay, reproduction check)
+Next: flow:build, task 2 (pinned tests with the hook on, casing and token checks, synthetic byte-identity), then task 3 (labels)
 Waiting on: nothing
 Started: 2026-11-14T08:01:00Z
-Baseline: no check command run yet for this slice; main 4a6ffd6 carries slice 60's close (macOS Dicticus 1960 tests 0 failures, Debug-Recorder 2042, iOS simulator 1780; 60 STATE.md History)
+Baseline: not rerun: this branch changes no file outside .flow/, and main 4a6ffd6 carries slice 60's close (macOS Dicticus 1960 tests 0 failures, Debug-Recorder 2042, iOS simulator 1780; 60 STATE.md History)
 Base: branch point
 Risk: none
 Carried:
