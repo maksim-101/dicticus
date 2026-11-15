@@ -1,7 +1,7 @@
 # State of 52-dictionary-ux
 Slice: 52-dictionary-ux (standard)
 Step: build
-Next: build step 3 again: rerun the macOS Dicticus and Dicticus-Debug-Recorder suites on 2e48ccf (task 4 changed HistoryView and the sheet after the recorded full check; Shared and iOS unchanged since), then review from diff base 5ef4db7
+Next: build step 3 again: rerun the macOS Dicticus and Dicticus-Debug-Recorder suites on the branch head (task 4 changed HistoryView and the sheet after the recorded full check; Shared unchanged since, iOS only by one doc comment from the 2026-11-15 adoption merge), then review from diff base d8f6410 (main after the adoption, merged into this branch), so the review diff holds the slice's own changes only
 Waiting on: the owner: run the two macOS suites now (the test host's exit crash may put one or two "quit unexpectedly" dialogs on the owner's screen) or later when the owner is away
 Started: 2026-11-14T14:07:19Z
 Baseline: at 04395b4 in a throwaway worktree: macOS Dicticus 1960 tests 0 failures (8 skipped), Dicticus-Debug-Recorder 2042 tests 0 failures (10 skipped); iOS simulator first run "test runner hung before establishing connection" (environment), rerun 1780 tests 0 failures (11 skipped)
@@ -26,6 +26,7 @@ Running: nothing. Relay stopped and cua switched back to local:mac-space (observ
 - 2026-11-14 question (build, task 4): screenshots by "Render headless on this Mac" (an off-screen test renders both windows with invented data); no VM run, no answer to the VM's microphone prompt.
 
 ## History
+- 2026-11-15 52 build (paused): main merged in after the flow 0.10.5 adoption of the GSD backlog (d8f6410; today's adoption commits were rewritten into this one on the owner's word, to keep private notes out of the public history); the root `Carried:` line about the test-host exit crash became idea 126; item 65 kept in ROADMAP.md. Next unchanged.
 - 2026-11-14 52 brief: opened from ROADMAP.md; branch flow/52-dictionary-ux from main 5ef4db7.
 - 2026-11-14 52 mockup: two boards (dictionary-rows, history-pick) rendered headless without overflow; the owner chose A on both; folded into BRIEF.md.
 - 2026-11-14 52 brief: approved by the owner; size standard, no risk trigger.

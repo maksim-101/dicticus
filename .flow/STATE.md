@@ -1,10 +1,8 @@
 # State
 Slice: 52-dictionary-ux
 Carried:
-- owner checks on TestFlight build 18 (still the current build on 2026-11-14), none blocking: the 9c7 device checks (phone call, Siri, AirPods out/in mid-dictation, stop right after start, AI-cleanup model download and relaunch; built, not verified on a device)
-- owner: a tester with an iPhone 11-14 (Parakeet speed on A13-A15 unmeasured) and ideally an 8 GB iPhone 15 Pro/16 (confirm the AI Cleanup gate admits it)
-- unscheduled follow-up: "Delete model" for 6 GB iOS devices that downloaded the 2.7 GB model under build 17 or earlier
-- unscheduled follow-up: README.md lines 14, 33 and 91 still say "Parakeet TDT v3" and "~1.2 GB" (iOS runs Parakeet Ultra, ~630 MB); iOS/Dicticus/Services/IOSModelWarmupService.swift line 10 says AI cleanup is excluded on iOS
-- unscheduled follow-up: HistoryServiceTests.testAppGroupAvailableFlagDefaultsTrue always skips in the simulator
-- unscheduled follow-up: check the r9g macOS download prompt and Settings rows on screen in the mac-space VM
-- unscheduled follow-up: the macOS test host (com.dicticus.app.xctest) aborts at exit in llama.cpp's Metal teardown (ggml_abort in ggml_metal_rsets_free), so local test runs can put a "Dicticus quit unexpectedly" dialog on the owner's screen; reports since at least 2026-11-13 (6 that day, several on 2026-11-14 including the slice 52 baseline at 15:35)
+- 66 owner: checks on TestFlight build 18 (still the current build on 2026-11-14), none blocking: the 9c7 device checks (phone call, Siri, AirPods out/in mid-dictation, stop right after start, AI-cleanup model download and relaunch; built, not verified on a device)
+- 66 owner: a tester with an iPhone 11-14 (Parakeet speed on A13-A15 unmeasured) and ideally an 8 GB iPhone 15 Pro/16 (confirm the AI Cleanup gate admits it)
+- 66 host: check the r9g macOS download prompt and Settings rows on screen in the mac-space VM
+- 51 owner: the overlay on a second display, over a full-screen app and under the three accessibility settings, and the first AI-cleanup dictation after 5+ idle minutes (never judged at phase 51's verification, 2026-10-16)
+- 37 owner: optional: revoke the old App Manager API key in App Store Connect, replaced by the Admin key in 37-04; the Admin key that TestFlight uploads use stays
