@@ -1,0 +1,56 @@
+#!/bin/bash
+# Runs the test suites of every platform the pushed commits touch, on a clean checkout
+# of the pushed commit. Pushes that change only .flow/ records or docs skip the check.
+# Install once: ln -sf ../../scripts/pre-push .git/hooks/pre-push
+# Skip once: git push --no-verify. Print the plan without running: PRE_PUSH_DRY_RUN=1
+set -euo pipefail
+
+ZERO=0000000000000000000000000000000000000000
+remote="${1:-origin}"
+mac=0; ios=0; head=""
+
+while read -r _ local_sha _ remote_sha; do
+  [ "$local_sha" = "$ZERO" ] && continue
+  if [ "$remote_sha" = "$ZERO" ]; then
+    files=$(git log --format= --name-only "$local_sha" --not "--remotes=$remote")
+  else
+    files=$(git diff --name-only "$remote_sha" "$local_sha")
+  fi
+  code=$(printf '%s\n' "$files" | grep -v -E '^(\.flow/|.*\.md$)' || true)
+  [ -z "$code" ] && continue
+  head="$local_sha"
+  grep -q -E '^(macOS/|Shared/)' <<<"$code" && mac=1
+  grep -q -E '^(iOS/|Shared/)' <<<"$code" && ios=1
+  grep -q -v -E '^(macOS/|iOS/|Shared/)' <<<"$code" && mac=1
+done
+
+if [ -z "$head" ]; then
+  echo "pre-push: records or docs only, no tests run"
+  exit 0
+fi
+
+flags=(CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="")
+mac_cmd="cd macOS && xcodegen generate >/dev/null && xcodebuild -project Dicticus.xcodeproj -scheme Dicticus -derivedDataPath build -destination 'platform=macOS,arch=arm64' ${flags[*]} -quiet test"
+ios_cmd="cd iOS && xcodegen generate >/dev/null && xcodebuild -project Dicticus.xcodeproj -scheme Dicticus -derivedDataPath build/DerivedData -destination 'platform=iOS Simulator,name=iPhone 18 Pro' ${flags[*]} -quiet test"
+
+if [ "${PRE_PUSH_DRY_RUN:-0}" = 1 ]; then
+  echo "pre-push (dry run) on ${head:0:7}: macOS=$mac iOS=$ios"
+  [ $mac = 1 ] && echo "  $mac_cmd"
+  [ $ios = 1 ] && echo "  $ios_cmd"
+  exit 0
+fi
+
+repo=$(git rev-parse --show-toplevel)
+wt=$(mktemp -d "${TMPDIR:-/tmp}/dicticus-prepush.XXXXXX")
+cleanup() {
+  git -C "$repo" worktree remove --force "$wt" >/dev/null 2>&1 || true
+  [ $ios = 1 ] && xcrun simctl shutdown all >/dev/null 2>&1 || true
+  "$repo/scripts/check-running-copy.sh" --fix >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+git -C "$repo" worktree add --detach "$wt" "$head" >/dev/null
+
+echo "pre-push: testing ${head:0:7} (macOS=$mac iOS=$ios); skip once with --no-verify"
+[ $mac = 1 ] && (cd "$wt" && eval "$mac_cmd")
+[ $ios = 1 ] && (cd "$wt" && eval "$ios_cmd")
+echo "pre-push: tests passed"

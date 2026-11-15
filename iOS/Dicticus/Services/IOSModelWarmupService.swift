@@ -7,8 +7,7 @@ import os.log
 /// engine swap — replaces WhisperKit large-v3-turbo; Ultra replaced Parakeet v3 in 261017-qlv), via the shared bounded-retry
 /// `AsrModelLoader` (parity with macOS `ModelWarmupService`, WHISP-02).
 ///
-/// iOS v2.0 focuses on plain dictation; AI cleanup (LLM) is excluded to reduce memory pressure
-/// and binary footprint on mobile hardware (D- تصمیم taken in STATE.md).
+/// AI cleanup (LLM) is opt-in on iOS and needs a device with 8 GB of memory (threshold 6.5 GiB).
 @MainActor
 class IOSModelWarmupService: ObservableObject {
 

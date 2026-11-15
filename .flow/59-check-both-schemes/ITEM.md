@@ -11,3 +11,5 @@ links:
 ---
 
 # one check command runs both macOS test schemes, so diagnostics code and its isolation canary are tested on every check
+
+Merged at the adoption of 2026-11-15: review finding R3 of `.flow/53-probe-test-isolation/SLICE.md`.

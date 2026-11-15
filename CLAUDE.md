@@ -40,9 +40,13 @@ Keep from `.flow/STATE.md` and the open slice's `.flow/NN-<slug>/STATE.md`: slic
 - Avoid `$(…)` command substitution in diagnostic commands.
 - Allowlisted: `git log/diff/status`, `head`, `tail`, `grep`, `cat`, `printf`, `sleep`, `strings`, `cut`, `tr`, `uniq`, `comm`, `column`.
 
+### Pre-push check
+- `scripts/pre-push` runs the macOS and/or iOS test suites on a clean checkout of the pushed commit whenever the push touches code; `.flow/` and docs-only pushes skip it. Install once per clone: `ln -sf ../../scripts/pre-push .git/hooks/pre-push` (the global pre-push hook calls it after the personal-data scan). Skip once with `git push --no-verify`; `PRE_PUSH_DRY_RUN=1` prints the plan. Until item 126 is fixed, a macOS run can leave a "Dicticus quit unexpectedly" dialog.
+
 ### History and research (read-only)
 - GSD history up to 2026-11-08 (phases, decisions, UAT, milestone archives) stays in `.planning/`, gitignored. A slice worktree doesn't have it; read it from the main checkout. `.flow/ARCHIVE.md` lists every GSD phase under its old number.
-- Spikes (`.planning/spikes/`), seeds (`.planning/seeds/`), todos (`.planning/todos/`), backlog (`.planning/backlog/`, plus 999.x items in `.planning/ROADMAP.md`) and debug-log audits (`.planning/debug/`) stay there; one becomes a `.flow/` item only when the owner schedules it.
+- Spikes (`.planning/spikes/`) and debug-log audits (`.planning/debug/`) stay there as history. The old seeds, todos, backlog and 999.x items moved into `.flow/` as `idea` items on 2026-11-15 (inventory in `.flow/ARCHIVE.md`); those lists are read-only history, and `.flow/` is the only backlog.
+- Debug-log audits count unmarked self-corrections every time, and read dictation text as often being about other projects, never as feedback on Dicticus by default.
 - Spike findings (implementation patterns, constraints, gotchas): `Skill("spike-findings-dicticus")`.
 
 ## Multi-Platform Strategy

@@ -6,8 +6,3 @@
 57-cleanup-edit-list-spike
 58-learn-from-corrections-spike
 59-check-both-schemes
-
-## Ideas
-
-63-whisper-missing-speech
-64-nemotron-optional-engine
