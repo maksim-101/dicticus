@@ -312,15 +312,21 @@ struct HistoryRow: View {
                     }
                     if let confirmation {
                         HStack(spacing: 8) {
-                            Label(confirmation, systemImage: "checkmark")
+                            Label(confirmation, systemImage: lastModel == nil ? "exclamationmark.circle" : "checkmark")
                                 .font(.system(size: 11))
-                                .foregroundStyle(.green)
-                            Button("Undo") {
-                                lastModel?.undo()
-                                self.confirmation = nil
+                                .foregroundStyle(lastModel == nil ? .orange : .green)
+                            if lastModel != nil {
+                                Button("Undo") {
+                                    if lastModel?.undo() == true {
+                                        self.confirmation = nil
+                                    } else {
+                                        self.confirmation = "Not undone: the entry was changed since."
+                                    }
+                                    lastModel = nil
+                                }
+                                .buttonStyle(.link)
+                                .font(.system(size: 11))
                             }
-                            .buttonStyle(.link)
-                            .font(.system(size: 11))
                         }
                     }
 

@@ -533,12 +533,24 @@ class DictionaryService: ObservableObject {
         }
     }
 
-    /// The key that already stands for `form`, compared case-insensitively the way
-    /// the exact pass matches by default.
+    /// The key that already stands for `form`, compared the way the exact pass matches:
+    /// case-insensitively, except a key the pass matches case-sensitively.
     func existingKey(for form: String) -> String? {
         let trimmed = form.trimmingCharacters(in: .whitespacesAndNewlines)
         if dictionary[trimmed] != nil { return trimmed }
-        return dictionary.keys.first { $0.caseInsensitiveCompare(trimmed) == .orderedSame }
+        return dictionary.keys.first { key in
+            let caseSensitive = isCaseSensitive ||
+                (!key.contains(where: { $0.isWhitespace }) && key.allSatisfy { $0.isUppercase })
+            return !caseSensitive && key.caseInsensitiveCompare(trimmed) == .orderedSame
+        }
+    }
+
+    /// The refusal when `spelling` is itself a heard form of another entry; `allowed`
+    /// are the keys that may hold that spelling (the forms being renamed or added).
+    func spellingClashReason(_ spelling: String, allowed: Set<String>) -> String? {
+        guard let key = existingKey(for: spelling), !allowed.contains(key),
+              let owner = dictionary[key]?.replacement else { return nil }
+        return "“\(spelling)” is itself a heard form of “\(owner)”; choose another spelling."
     }
 
     /// Adds `form` as a heard form of `spelling`. A form that already exists as a key
@@ -552,6 +564,7 @@ class DictionaryService: ObservableObject {
         guard trimmedForm != trimmedSpelling else { return .invalid("Heard form and correct spelling cannot be identical.") }
 
         let key = existingKey(for: trimmedForm) ?? trimmedForm
+        if let reason = spellingClashReason(trimmedSpelling, allowed: [key]) { return .invalid(reason) }
         dictionary[key] = DictionaryMetadata(replacement: trimmedSpelling, createdAt: Date(), source: .user)
         save()
         return .saved
@@ -571,9 +584,11 @@ class DictionaryService: ObservableObject {
         guard !keys.isEmpty else { return .notFound }
         let trimmed = newSpelling.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return .invalid("Correct spelling cannot be empty.") }
-        if let clash = keys.first(where: { $0 == trimmed }) {
+        if trimmed == oldSpelling { return .saved }
+        if let clash = keys.first(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) {
             return .invalid("'\(clash)' is one of this word's heard forms; remove it first.")
         }
+        if let reason = spellingClashReason(trimmed, allowed: Set(keys)) { return .invalid(reason) }
         for key in keys {
             let existing = dictionary[key]!
             dictionary[key] = DictionaryMetadata(replacement: trimmed, createdAt: existing.createdAt, source: .user)

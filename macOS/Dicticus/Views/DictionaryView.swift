@@ -120,8 +120,7 @@ struct DictionaryView: View {
                 }
                 .disabled(items.count != 1)
                 Button("Delete") {
-                    for spelling in items { dictionaryService.removeGroup(spelling: spelling) }
-                    selection.subtract(items)
+                    deleteGroups(items)
                 }
                 .disabled(items.isEmpty)
             }
@@ -169,7 +168,7 @@ struct DictionaryView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.regular)
-                        .disabled(newOriginal.isEmpty || duplicateWarning != nil)
+                        .disabled(newOriginal.isEmpty || trimmedNewReplacement.isEmpty || trimmedNewReplacement == trimmedNewOriginal || duplicateWarning != nil)
 
                         Button("Cancel") {
                             cancelAdd()
@@ -179,6 +178,7 @@ struct DictionaryView: View {
                     }
                 } else {
                     Button(action: {
+                        duplicateWarning = nil
                         withAnimation(.spring(response: 0.3)) {
                             isShowingAddRow = true
                         }
@@ -488,6 +488,9 @@ struct DictionaryView: View {
         return lines.joined(separator: " ")
     }
 
+    private var trimmedNewOriginal: String { newOriginal.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var trimmedNewReplacement: String { newReplacement.trimmingCharacters(in: .whitespacesAndNewlines) }
+
     private func refreshEntries() {
         let mapped = DictionaryService.groups(of: dictionaryService.dictionary)
 
@@ -536,10 +539,14 @@ struct DictionaryView: View {
     }
 
     private func deleteSelected() {
-        for spelling in selection {
+        deleteGroups(selection)
+    }
+
+    private func deleteGroups(_ spellings: Set<String>) {
+        for spelling in spellings {
             dictionaryService.removeGroup(spelling: spelling)
         }
-        selection.removeAll()
+        selection.subtract(spellings)
         refreshEntries()
     }
 

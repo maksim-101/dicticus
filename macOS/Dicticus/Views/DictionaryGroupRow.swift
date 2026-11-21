@@ -71,7 +71,7 @@ struct DictionaryGroupRow: View {
                 .font(.system(size: 13, weight: .semibold))
                 .focused($renameFocused)
                 .onSubmit(rename)
-                .onExitCommand { renamingSpelling = nil }
+                .onExitCommand { renamingSpelling = nil; onMessage(nil) }
         } else {
             Text(group.spelling)
                 .font(.system(size: 13, weight: .semibold))

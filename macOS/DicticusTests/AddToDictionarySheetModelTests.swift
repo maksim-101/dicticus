@@ -25,7 +25,7 @@ final class AddToDictionarySheetModelTests: XCTestCase {
     func testJoiningSpellingNoteAndSaveAppliesOnNextDictation() {
         service.setReplacement(for: "kwib ly", with: "Quibbly")
         service.setReplacement(for: "quibli", with: "Quibbly")
-        let model = AddToDictionaryModel(heard: "kwibbel,", service: service)
+        let model = AddToDictionaryModel(heard: "kwibbel", service: service)
         model.correct = "Quibbly"
 
         XCTAssertEqual(model.note, "Joins “Quibbly”, which has 2 heard forms.")
@@ -80,5 +80,34 @@ final class AddToDictionarySheetModelTests: XCTestCase {
         changed.undo()
         XCTAssertEqual(service.dictionary["Flor"], old)
         XCTAssertEqual(service.dictionary.count, 1)
+    }
+
+    func testTypedHeardFormIsSavedAsTyped() {
+        let model = AddToDictionaryModel(heard: " C# ", service: service)
+        model.correct = "Csharp"
+        XCTAssertNotNil(model.save())
+        XCTAssertEqual(service.dictionary["C#"]?.replacement, "Csharp")
+        XCTAssertNil(service.dictionary["C"])
+    }
+
+    func testSpellingThatIsAnotherHeardFormWarnsAndBlocksAdd() {
+        service.setReplacement(for: "flor", with: "Zornex")
+        let model = AddToDictionaryModel(heard: "zib", service: service)
+        model.correct = "flor"
+        XCTAssertFalse(model.canAdd)
+        XCTAssertTrue(model.warnings.contains { $0.contains("is itself a heard form of “Zornex”") })
+        XCTAssertNil(model.save())
+        XCTAssertNil(service.dictionary["zib"])
+    }
+
+    func testUndoDoesNotRevertAnEntryChangedAfterTheSave() {
+        let model = AddToDictionaryModel(heard: "quibli", service: service)
+        model.correct = "Quibbly"
+        XCTAssertNotNil(model.save())
+        XCTAssertEqual(service.renameSpelling(from: "Quibbly", to: "QuibblyPro"), .saved)
+
+        XCTAssertFalse(model.undo())
+        XCTAssertEqual(service.dictionary["quibli"]?.replacement, "QuibblyPro")
+        XCTAssertNil(model.undoState)
     }
 }

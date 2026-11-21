@@ -8,15 +8,15 @@ final class AddToDictionaryModel: ObservableObject, Identifiable {
     @Published var correct: String = ""
     let service: DictionaryService
 
-    /// The key and its state before the last save, for Undo.
-    private(set) var undoState: (key: String, previous: DictionaryMetadata?)? = nil
+    /// The key, its state before the last save and what the save wrote, for Undo.
+    private(set) var undoState: (key: String, previous: DictionaryMetadata?, written: DictionaryMetadata?)? = nil
 
     init(heard: String, service: DictionaryService) {
         self.heard = heard
         self.service = service
     }
 
-    private var trimmedHeard: String { WordPick.trimmed(heard) }
+    private var trimmedHeard: String { heard.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var trimmedCorrect: String { correct.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var note: String {
@@ -36,11 +36,19 @@ final class AddToDictionaryModel: ObservableObject, Identifiable {
         if let key = service.existingKey(for: h), let current = service.dictionary[key]?.replacement, current != trimmedCorrect {
             result.append("“\(key)” is already in the dictionary and becomes “\(current)”. Adding it here changes that entry to “\(trimmedCorrect.isEmpty ? "…" : trimmedCorrect)”.")
         }
+        if let reason = spellingClashReason {
+            result.append(reason)
+        }
         return result
     }
 
+    private var spellingClashReason: String? {
+        guard !trimmedCorrect.isEmpty else { return nil }
+        return service.spellingClashReason(trimmedCorrect, allowed: [service.existingKey(for: trimmedHeard) ?? trimmedHeard])
+    }
+
     var canAdd: Bool {
-        !trimmedHeard.isEmpty && !trimmedCorrect.isEmpty && trimmedHeard != trimmedCorrect
+        !trimmedHeard.isEmpty && !trimmedCorrect.isEmpty && trimmedHeard != trimmedCorrect && spellingClashReason == nil
     }
 
     var spellings: [String] {
@@ -54,14 +62,17 @@ final class AddToDictionaryModel: ObservableObject, Identifiable {
         let key = service.existingKey(for: h) ?? h
         let previous = service.dictionary[key]
         guard service.addHeardForm(h, to: c) == .saved else { return nil }
-        undoState = (key, previous)
+        undoState = (key, previous, service.dictionary[key])
         return "Added: “\(h)” → “\(c)”. Applies from your next dictation."
     }
 
-    func undo() {
-        guard let state = undoState else { return }
-        service.restoreEntry(state.key, to: state.previous)
+    @discardableResult
+    func undo() -> Bool {
+        guard let state = undoState else { return false }
         undoState = nil
+        guard service.dictionary[state.key] == state.written else { return false }
+        service.restoreEntry(state.key, to: state.previous)
+        return true
     }
 }
 

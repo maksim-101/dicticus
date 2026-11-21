@@ -17,12 +17,18 @@ struct WrappingLayout: Layout {
         for row in arrange(width: bounds.width, subviews: subviews) {
             var x = bounds.minX
             for index in row.indices {
-                let size = subviews[index].sizeThatFits(.unspecified)
+                let size = Self.fittedSize(subviews[index], width: bounds.width)
                 subviews[index].place(at: CGPoint(x: x, y: y + (row.height - size.height) / 2), proposal: ProposedViewSize(size))
                 x += size.width + spacing
             }
             y += row.height + lineSpacing
         }
+    }
+
+    private static func fittedSize(_ subview: LayoutSubview, width: CGFloat) -> CGSize {
+        let natural = subview.sizeThatFits(.unspecified)
+        guard natural.width > width else { return natural }
+        return subview.sizeThatFits(ProposedViewSize(width: width, height: nil))
     }
 
     private struct Row { var indices: [Int] = []; var width: CGFloat = 0; var height: CGFloat = 0 }
@@ -31,7 +37,7 @@ struct WrappingLayout: Layout {
         var rows: [Row] = []
         var current = Row()
         for (index, subview) in subviews.enumerated() {
-            let size = subview.sizeThatFits(.unspecified)
+            let size = Self.fittedSize(subview, width: width)
             let needed = current.indices.isEmpty ? size.width : current.width + spacing + size.width
             if needed > width, !current.indices.isEmpty {
                 rows.append(current)

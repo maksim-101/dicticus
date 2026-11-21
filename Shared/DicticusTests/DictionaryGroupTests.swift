@@ -95,6 +95,29 @@ final class DictionaryGroupTests: XCTestCase {
         XCTAssertEqual(persisted(), before)
     }
 
+    func testAddHeardFormDoesNotTouchCaseSensitiveUppercaseKey() {
+        service.setReplacement(for: "QUIB", with: "Quib Tool")
+        XCTAssertEqual(service.addHeardForm("quib", to: "Kwib"), .saved)
+
+        XCTAssertEqual(service.dictionary["QUIB"]?.replacement, "Quib Tool")
+        XCTAssertEqual(service.dictionary["quib"]?.replacement, "Kwib")
+        XCTAssertEqual(service.dictionary.count, 2)
+    }
+
+    func testSpellingThatIsAnotherEntrysHeardFormIsRefused() {
+        service.setReplacement(for: "kwib ly", with: "Quibbly")
+        service.setReplacement(for: "flor", with: "Zornex")
+        let before = service.dictionary
+
+        XCTAssertEqual(service.renameSpelling(from: "Quibbly", to: "flor"),
+                       .invalid("“flor” is itself a heard form of “Zornex”; choose another spelling."))
+        XCTAssertEqual(service.addHeardForm("zib", to: "flor"),
+                       .invalid("“flor” is itself a heard form of “Zornex”; choose another spelling."))
+        if case .invalid = service.renameSpelling(from: "Quibbly", to: "KWIB LY") {} else { XCTFail("a spelling equal to one of its own forms, in any case, must be refused") }
+        XCTAssertEqual(service.dictionary, before)
+        XCTAssertEqual(persisted(), before)
+    }
+
     // MARK: - renameSpelling
 
     func testRenameSpellingChangesEveryFormKeepsCreatedAtPromotesSource() throws {
@@ -131,6 +154,14 @@ final class DictionaryGroupTests: XCTestCase {
         XCTAssertEqual(service.renameSpelling(from: "Nothing", to: "X"), .notFound)
         XCTAssertEqual(service.dictionary, before)
         XCTAssertEqual(persisted(), before)
+    }
+
+    func testRenameSpellingToSameSpellingWritesNothing() throws {
+        _ = service.importData(Data("kwib ly,Quibbly\n".utf8), format: "csv", strategy: .incomingWins)
+        XCTAssertEqual(service.dictionary["kwib ly"]?.source, .imported)
+
+        XCTAssertEqual(service.renameSpelling(from: "Quibbly", to: " Quibbly "), .saved)
+        XCTAssertEqual(service.dictionary["kwib ly"]?.source, .imported)
     }
 
     // MARK: - Removal
