@@ -37,9 +37,9 @@ seed)
   "$VM" ssh "defaults write $BID customDictionaryMetadata -data $HEX"
   "$VM" ssh "sqlite3 $DB \"DELETE FROM transcriptionEntry;
     INSERT INTO transcriptionEntry(uuid,text,rawText,language,mode,createdAt,confidence) VALUES
-    ('52-a','Can you check whether mirror cove imports the timeline from the FlorDex export correctly?','can you check whether mirror cove imports the timeline from the flor dex export correctly?','en','aiCleanup',datetime('now','-5 minutes'),0.9),
-    ('52-b','Send the Zornex logs to the dev channel before lunch.','send the cloud logs to the dev channel before lunch.','en','plain',datetime('now','-20 minutes'),0.9),
-    ('52-c','Ich schicke dir die Rechnung von Vantelli heute Abend noch.','ich schicke dir die Rechnung von vantel heute Abend noch.','de','plain',datetime('now','-3 hours'),0.9);\""
+    ('5200000A-0000-4000-8000-00000000000A','Can you check whether mirror cove imports the timeline from the FlorDex export correctly?','can you check whether mirror cove imports the timeline from the flor dex export correctly?','en','aiCleanup',datetime('now','-5 minutes'),0.9),
+    ('5200000B-0000-4000-8000-00000000000B','Send the Zornex logs to the dev channel before lunch.','send the cloud logs to the dev channel before lunch.','en','plain',datetime('now','-20 minutes'),0.9),
+    ('5200000C-0000-4000-8000-00000000000C','Ich schicke dir die Rechnung von Vantelli heute Abend noch.','ich schicke dir die Rechnung von vantel heute Abend noch.','de','plain',datetime('now','-3 hours'),0.9);\""
   "$VM" ssh "open $APP"
   echo "seeded: 12 fixture entries, 3 fixture dictations"
   ;;
