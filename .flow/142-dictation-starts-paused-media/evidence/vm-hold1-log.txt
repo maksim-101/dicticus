@@ -1,0 +1,8 @@
+postAccess=true
+down at 2026-11-21T12:58:20Z
+up after 6.06 s
+{"called":true,"did_mute_output_before":false,"event":"resume","tier2b_resume_toggle_attempted":false,"ts":"2026-11-21T12:57:44.839Z","unmute_attempted":false}
+{"dispatched":true,"event":"dispatch","pause_media_during_dictation":true,"ts":"2026-11-21T12:58:20.950Z"}
+{"called":true,"did_mute_output":false,"did_toggle_media_remote":true,"event":"pause","mute_attempted":false,"output_device_name":"Apple Virtual Sound Device","players":[{"name":"Music","pause_attempted":false,"paused":false,"running":false},{"name":"Spotify","pause_attempted":false,"paused":false,"running":false}],"tier2_reached":false,"tier2b_dlsym_degrade":false,"tier2b_guard_result":true,"tier2b_rms":0.017733065020607557,"tier2b_tap_status":"sampled","tier2b_toggle_attempted":true,"tier2b_toggle_sent":true,"ts":"2026-11-21T12:58:20.951Z"}
+{"did_mute_output":true,"event":"tier2b_verify","is_output_muted_result":false,"tier2b_fallback_mute_attempted":true,"tier2b_fallback_mute_result":true,"tier2b_press_rms":0.017733065020607557,"tier2b_undo_toggle_sent":false,"tier2b_verify_outcome":"still_playing","tier2b_verify_rms":0.07490573370356754,"tier2b_verify_tap_status":"sampled","ts":"2026-11-21T12:58:21.472Z"}
+{"called":true,"did_mute_output_before":true,"event":"resume","tier2b_resume_toggle_attempted":false,"ts":"2026-11-21T12:58:26.817Z","unmute_attempted":true,"unmute_result":true}

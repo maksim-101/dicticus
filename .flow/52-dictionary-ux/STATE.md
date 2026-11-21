@@ -1,8 +1,8 @@
 # State of 52-dictionary-ux
 Slice: 52-dictionary-ux (standard)
 Step: fix
-Next: F1 (FIX.md): map every route into the dictionary from the code, walk it in the mac-space VM on seeded invented entries, then sort and fix the friction points; then verify criterion 8 again
-Waiting on: nothing for the build (Amendment 1 approved; tasks 5-10 next, in a fresh session); VM tests wait for the mac-space turn (after read-aloud-extension)
+Next: build PLAN.md Amendment 1 tasks 5-10 (task 5 first: F1a, F1b, F1e, F1f, F1g), then review of the amendment's diff, then verify criteria 4, 5, 8-13
+Waiting on: nothing (Amendment 1 approved; build tasks 5-10 next, in a fresh session)
 Started: 2026-11-14T14:07:19Z
 Baseline: at 04395b4 in a throwaway worktree: macOS Dicticus 1960 tests 0 failures (8 skipped), Dicticus-Debug-Recorder 2042 tests 0 failures (10 skipped); iOS simulator first run "test runner hung before establishing connection" (environment), rerun 1780 tests 0 failures (11 skipped)
 Base: branch point
@@ -29,6 +29,7 @@ Carried: none
 - 2026-11-21 Amendment 1 (BRIEF.md criteria 9-13, PLAN.md tasks 5-10): approved by the owner ("Approve as written"), including the History window losing its Raw pick and sheet in favour of "Fix a word…" into the new window.
 
 ## History
+- 2026-11-21 52 fix: mac-space turn after two other sessions: F1j reproduced (layout overflow, not a hang), F1g reproduced a third time (cause inferred: double-tap gesture inside the selectable List); item 142 reproduced with a held key (short sound ending before the verify, PLAY at release). VM shut down, relay stopped, guest apps quit.
 - 2026-11-21 52 fix F1: the owner ran the VM microphone grant; walkthrough in mac-space done (FIX.md F1a-F1i, screenshots evidence/vm-f1-*); the History seed had invalid UUIDs (fixed in evidence/vm-seed.sh). Same VM run reproduced item 142 (its ITEM.md). VM handed to another session, which shuts it down.
 - 2026-11-21 52 fix F1 started: route map from the code (gitignored `.planning/debug/audit-2026-11-21/dictionary-entry-points.md`): no pointer to the dictionary after a misheard dictation outside History's collapsed rows, no search in the window, "heard form"/"spelling" never explained, four add forms with four sets of labels, rename hidden, deletes without undo, popover and window counts disagree. mac-space: Release and Debug-Recorder builds of 1d0a773's code built in the guest, invented 249-entry dictionary (173 spellings) seeded, media-pause setting on, a 228 s spoken test file made; the app was not launched, because the microphone prompt blocks the guest and granting it in the guest's TCC database is the owner's step (`vm-grant-mic.sh` in the same folder). VM stopped.
 - 2026-11-21 item 142 investigated (cause located, fix direction written) and made planned; placed behind 52 and ahead of 58 because it disturbs daily use and the fix is small; the owner may reorder.
