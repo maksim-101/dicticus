@@ -2,7 +2,7 @@
 Slice: 52-dictionary-ux (standard)
 Step: build
 Next: build PLAN.md Amendment 1 task 10 (mac-space walkthrough with screenshots for criteria 4, 5, 8-13 and task 5's F1b/F1e/F1g, then the three suites and the dictionary checksum), then review of the amendment's diff, then verify criteria 4, 5, 8-13
-Waiting on: nothing
+Waiting on: the owner: rerun the guest microphone grant (`! zsh .planning/debug/audit-2026-11-21/vm-grant-mic.sh`, in the main checkout; it starts mac-space and rewrites the two grant rows); the suites of task 10 run meanwhile
 Started: 2026-11-14T14:07:19Z
 Baseline: at 04395b4 in a throwaway worktree: macOS Dicticus 1960 tests 0 failures (8 skipped), Dicticus-Debug-Recorder 2042 tests 0 failures (10 skipped); iOS simulator first run "test runner hung before establishing connection" (environment), rerun 1780 tests 0 failures (11 skipped)
 Baseline (Amendment 1 build): the run recorded at 1d0a773 stands in (`git diff --stat 1d0a773 HEAD -- . ':!.flow'` shows only DESIGN.md, one line): Dicticus 1992 tests 0 failures, Recorder 2074 tests 1 failure (TextInjectorTests clipboard test outside the slice, item 68), iOS 1802 tests 0 failures at 807ebb9
@@ -30,6 +30,7 @@ Carried:
 - 2026-11-21 Amendment 1 (BRIEF.md criteria 9-13, PLAN.md tasks 5-10): approved by the owner ("Approve as written"), including the History window losing its Raw pick and sheet in favour of "Fix a word…" into the new window.
 
 ## History
+- 2026-11-21 52 build task 10: mac-space turn after read-aloud-extension; Release build of d3640fd built and seeded in the guest, then macOS asked for microphone access again. The guest's grant rows for com.dicticus.app exist but now carry a code requirement (csreq) taken from the earlier build, and an unsigned rebuild has a different one, so every rebuild prompts; the prompt refuses synthetic clicks. Dicticus quit, relay stopped, VM shut down. Rerunning the owner's grant script rewrites the rows without csreq.
 - 2026-11-21 52 build: tasks 5-8 done (7f42bac, d7a2ab4, a927763, e46d01d). The full macOS run after task 5 found five matching tests failing: the new empty-spelling guard also refused identical pairs, which anchor the fuzzy pass; narrowed in d7a2ab4, the five pass. The pre-push check then failed on testK7_DoesNotOverrideUserCustomization, which needs the gitignored personal lexicon and so fails on every clean checkout (likely also the lost-output failure of 807ebb9); fixed as an adjacent bug in 1f04f9d, passing in a clean worktree.
 - 2026-11-21 52 fix: mac-space turn after two other sessions: F1j reproduced (layout overflow, not a hang), F1g reproduced a third time (cause inferred: double-tap gesture inside the selectable List); item 142 reproduced with a held key (short sound ending before the verify, PLAY at release). VM shut down, relay stopped, guest apps quit.
 - 2026-11-21 52 fix F1: the owner ran the VM microphone grant; walkthrough in mac-space done (FIX.md F1a-F1i, screenshots evidence/vm-f1-*); the History seed had invalid UUIDs (fixed in evidence/vm-seed.sh). Same VM run reproduced item 142 (its ITEM.md). VM handed to another session, which shuts it down.
