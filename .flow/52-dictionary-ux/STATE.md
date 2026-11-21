@@ -2,7 +2,7 @@
 Slice: 52-dictionary-ux (standard)
 Step: fix
 Next: F1 (FIX.md): map every route into the dictionary from the code, walk it in the mac-space VM on seeded invented entries, then sort and fix the friction points; then verify criterion 8 again
-Waiting on: nothing (next: fix F1a-F1g; mockups for F1h search and F1i pointer from the last dictation before building them)
+Waiting on: the owner: choice per board (mockups/pointer.html, mockups/dictionary-window.html); the VM key-hold grant (vm-grant-keyhold.sh); mac-space turn after two other sessions
 Started: 2026-11-14T14:07:19Z
 Baseline: at 04395b4 in a throwaway worktree: macOS Dicticus 1960 tests 0 failures (8 skipped), Dicticus-Debug-Recorder 2042 tests 0 failures (10 skipped); iOS simulator first run "test runner hung before establishing connection" (environment), rerun 1780 tests 0 failures (11 skipped)
 Base: branch point
@@ -21,6 +21,8 @@ Carried: none
 - 2026-11-21 owner (beyond this slice, recorded here because it is the open slice): the miner spike (item 58) goes ahead; the audit's proposals become flow items; the iOS keyboard re-test with Full Access is approved; the two-repository setup comes after the current review and optimisation work; before acting on these, research open- and closed-source competitors; the product name is "Grok Bot"; on iOS 27 a lock-screen Live Activity stop after switching apps works without error, while the Live Activity's expanded view looks off (buttons out of place, could be more compact).
 
 - 2026-11-21 owner (verify, criterion 8): "a really good start, and the UI looks mostly clean", but it "could be a little bit more straightforward in guiding the user"; the open question is "how easy is it to get into the dictionary, add dictionary entries, change them, look it up", which "needs some further investigation from your end and, of course, also testing". Finding F1 in FIX.md. R4 not answered; its default (accept) stands until the owner says otherwise. The owner asks for Dicticus testing in the mac-space VM, including the media bug (item 142).
+
+- 2026-11-21 owner (after the VM findings): "go ahead with the VM tests once it's free"; new finding F1j: the dictionary window "is not quite responsive. If I open the group spoken punctuations, it's not reactive anymore"; F1h approved: "adding a search field to the dictionary window is definitely something I'd like"; F1i: "I had to first see that before I could make a decision" (mockup board pointer.html).
 
 ## History
 - 2026-11-21 52 fix F1: the owner ran the VM microphone grant; walkthrough in mac-space done (FIX.md F1a-F1i, screenshots evidence/vm-f1-*); the History seed had invalid UUIDs (fixed in evidence/vm-seed.sh). Same VM run reproduced item 142 (its ITEM.md). VM handed to another session, which shuts it down.
