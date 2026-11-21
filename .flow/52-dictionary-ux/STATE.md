@@ -1,8 +1,8 @@
 # State of 52-dictionary-ux
 Slice: 52-dictionary-ux (standard)
-Step: verify
-Next: full re-verify (the fixes touched Shared/Services/DictionaryService.swift): criteria against the evidence, then the owner's judgment items (criterion 8 look and feel on the refreshed renders) and the R4 question (Raw text no longer drag-selectable)
-Waiting on: the owner: judgment items in VERIFY.md (criterion 8 on evidence/c8-compare.png; R4 question)
+Step: fix
+Next: F1 (FIX.md): map every route into the dictionary from the code, walk it in the mac-space VM on seeded invented entries, then sort and fix the friction points; then verify criterion 8 again
+Waiting on: the owner: run the VM microphone grant (one command), then the VM walkthrough and the media test run
 Started: 2026-11-14T14:07:19Z
 Baseline: at 04395b4 in a throwaway worktree: macOS Dicticus 1960 tests 0 failures (8 skipped), Dicticus-Debug-Recorder 2042 tests 0 failures (10 skipped); iOS simulator first run "test runner hung before establishing connection" (environment), rerun 1780 tests 0 failures (11 skipped)
 Base: branch point
@@ -20,7 +20,10 @@ Carried: none
 - 2026-11-21 owner: run the two macOS suites now ("you can run it now"); also analyse the dictionary's contents for patterns the pipeline should handle.
 - 2026-11-21 owner (beyond this slice, recorded here because it is the open slice): the miner spike (item 58) goes ahead; the audit's proposals become flow items; the iOS keyboard re-test with Full Access is approved; the two-repository setup comes after the current review and optimisation work; before acting on these, research open- and closed-source competitors; the product name is "Grok Bot"; on iOS 27 a lock-screen Live Activity stop after switching apps works without error, while the Live Activity's expanded view looks off (buttons out of place, could be more compact).
 
+- 2026-11-21 owner (verify, criterion 8): "a really good start, and the UI looks mostly clean", but it "could be a little bit more straightforward in guiding the user"; the open question is "how easy is it to get into the dictionary, add dictionary entries, change them, look it up", which "needs some further investigation from your end and, of course, also testing". Finding F1 in FIX.md. R4 not answered; its default (accept) stands until the owner says otherwise. The owner asks for Dicticus testing in the mac-space VM, including the media bug (item 142).
+
 ## History
+- 2026-11-21 52 fix F1 started: route map from the code (gitignored `.planning/debug/audit-2026-11-21/dictionary-entry-points.md`): no pointer to the dictionary after a misheard dictation outside History's collapsed rows, no search in the window, "heard form"/"spelling" never explained, four add forms with four sets of labels, rename hidden, deletes without undo, popover and window counts disagree. mac-space: Release and Debug-Recorder builds of 1d0a773's code built in the guest, invented 249-entry dictionary (173 spellings) seeded, media-pause setting on, a 228 s spoken test file made; the app was not launched, because the microphone prompt blocks the guest and granting it in the guest's TCC database is the owner's step (`vm-grant-mic.sh` in the same folder). VM stopped.
 - 2026-11-21 item 142 investigated (cause located, fix direction written) and made planned; placed behind 52 and ahead of 58 because it disturbs daily use and the fix is small; the owner may reorder.
 - 2026-11-21 52 verify: criteria 1-7 pass (VERIFY.md; fresh verifier 6 true, 1 inconclusive, settled by a checksum run on 1d0a773 with the dictionary blob identical before and after); comparison page evidence/c8-compare.png; handed to the owner. The owner also reported a media bug (dictation starts paused playback): idea 142, investigation running.
 - 2026-11-21 52 fix: R14-R18 done in ac93cfe (FIX.md); fixes under 50 code lines and no risk trigger, so no extra review pass. Full check on 807ebb9 (owner chose "Now"): macOS Dicticus 1992 tests 0 failures (10 skipped), Recorder 2074 tests 0 failures (11 skipped), iOS 1802 tests 0 failures (11 skipped) on the rerun after "test runner hung before establishing connection"; simulator shut down; check-running-copy OK. The owner reported microphone prompts from test hosts during the runs (idea 141). Pushed with --no-verify on the evidence of this full check (the earlier pre-push run failed with its output lost).

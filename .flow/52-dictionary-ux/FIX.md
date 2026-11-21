@@ -11,3 +11,7 @@ Status 2026-11-21 (mechanical-edit agent, sonnet; slice tests 47 executed, 0 fai
 - 4 done, 5 done (view one-liners, compiled, not exercised on screen).
 
 5. R18 NIT, fix: a whitespace-only footer original enables Add. Cause: `DictionaryView.swift:171` checks the untrimmed `newOriginal.isEmpty` (read in code).
+
+# Fix of 52-dictionary-ux (owner's findings at verify, 2026-11-21)
+
+6. F1 (owner, criterion 8): the dictionary should guide the user more plainly; how easy is it to reach the dictionary, add an entry, change one and look one up. To be investigated (a map of every route with click counts and labels, from the code) and tested in the mac-space VM on seeded invented entries; the fix items follow from that map. Sorting (fix within the brief, or scope) waits on the map.
