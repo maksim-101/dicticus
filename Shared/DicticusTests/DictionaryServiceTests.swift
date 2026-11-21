@@ -580,9 +580,13 @@ final class DictionaryServiceK7AddsTests: XCTestCase {
             "WR-04: prepopulateWithDefaults must not overwrite user customizations (D-12 idempotent merge).")
 
         // Sanity: prepopulate did populate other default keys (proving the
-        // loop ran, not that it short-circuited on a re-entry guard).
+        // loop ran, not that it short-circuited on a re-entry guard). "Dicticos"
+        // comes from the gitignored personal lexicon, absent on a clean checkout
+        // such as the pre-push run's.
+        #if PERSONAL_LEXICON
         XCTAssertNotNil(s.dictionary["Dicticos"],
             "Sanity: prepopulate must seed non-conflicting defaults on this run.")
+        #endif
 
         // 4. apply() must use the user's value, not the default.
         let out = s.apply(to: "trying clawed code now")
