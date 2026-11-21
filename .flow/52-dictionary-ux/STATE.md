@@ -1,20 +1,13 @@
 # State of 52-dictionary-ux
 Slice: 52-dictionary-ux (standard)
-Step: build
-Next: build step 3 again: rerun the macOS Dicticus and Dicticus-Debug-Recorder suites on the branch head (task 4 changed HistoryView and the sheet after the recorded full check; Shared unchanged since, iOS only by one doc comment from the 2026-11-15 adoption merge), then review from diff base d8f6410 (main after the adoption, merged into this branch), so the review diff holds the slice's own changes only
-Waiting on: the owner: run the two macOS suites now (the test host's exit crash may put one or two "quit unexpectedly" dialogs on the owner's screen) or later when the owner is away
+Step: review
+Next: review from diff base d8f6410 (main after the adoption, merged into this branch), so the review diff holds the slice's own changes only
+Waiting on: nothing
 Started: 2026-11-14T14:07:19Z
 Baseline: at 04395b4 in a throwaway worktree: macOS Dicticus 1960 tests 0 failures (8 skipped), Dicticus-Debug-Recorder 2042 tests 0 failures (10 skipped); iOS simulator first run "test runner hung before establishing connection" (environment), rerun 1780 tests 0 failures (11 skipped)
 Base: branch point
 Risk: none
 Carried: none
-
-## In progress
-Doing: build step 3 again. All four tasks are done (task 4 at 2e48ccf); task 4 changed macOS/Dicticus/Views/HistoryView.swift and AddToDictionarySheet.swift after the recorded full check on 356c690. Shared/ and iOS/ are unchanged since then, so the iOS result stands.
-Tried: full check on 356c690, all green (observed 2026-11-14, History line); slice tests and render test on 2e48ccf, TEST SUCCEEDED (observed 2026-11-14 20:41).
-Hypothesis: none open. Each local test run may end with the test host's llama Metal teardown abort (root Carried list), observed in the 15:35, 17:51, 20:40 and 20:41 reports.
-Next: on the owner's go, run the macOS Dicticus and Dicticus-Debug-Recorder suites on HEAD with `-derivedDataPath build` (the scratchpad fullcheck.sh is gone with the session; the commands are in PLAN.md's coverage table, row 7), shasum ~/Library/Preferences/com.dicticus.app.plist before and after, run scripts/check-running-copy.sh, record the result in History, then set Step: review with diff base 5ef4db7.
-Running: nothing. Relay stopped and cua switched back to local:mac-space (observed 2026-11-14 ~20:50); mac-space is held by the mac-automations session, and this slice no longer needs it.
 
 ## Decisions
 - 2026-11-14 question: teaching route is "Fix from history" only (select a misheard word in a past dictation, type the correct spelling); the "say it again" panel and a spoken command were not chosen.
@@ -28,6 +21,7 @@ Running: nothing. Relay stopped and cua switched back to local:mac-space (observ
 - 2026-11-21 owner (beyond this slice, recorded here because it is the open slice): the miner spike (item 58) goes ahead; the audit's proposals become flow items; the iOS keyboard re-test with Full Access is approved; the two-repository setup comes after the current review and optimisation work; before acting on these, research open- and closed-source competitors; the product name is "Grok Bot"; on iOS 27 a lock-screen Live Activity stop after switching apps works without error, while the Live Activity's expanded view looks off (buttons out of place, could be more compact).
 
 ## History
+- 2026-11-21 52 build step 3 done on 7db1c9c (code unchanged since 2e48ccf) on the owner's go: macOS Dicticus 1982 tests, 1 failure (10 skipped); Dicticus-Debug-Recorder 2064 tests, 3 failures in one test (11 skipped). Both failing tests touch no slice code and passed when rerun alone (2 tests, 0 failures): EditGuardCompoundRepairTests.testR0_checkerSignalsOnThisMac (the Mac's German spell checker did not list "Komma" among its own completions; environment) and DebugRecorderFinalStageTests.testFinalStageCapturesPostCapitalizationMutation (lastRecordForTests returned another test's record after its 150 ms sleep; an ordering race); both noted in item 68. The plist checksum changed (af03e71f to 89b2ab25) because the owner dictated in Orca during the run (live rows 06:42-06:46Z with audio files, plist written 07:46:18 local); the dictionary is unchanged at 311 entries with the same newest createdAt. check-running-copy OK.
 - 2026-11-15 52 build (paused): main merged in after the flow 0.10.5 adoption of the GSD backlog (d8f6410; today's adoption commits were rewritten into this one on the owner's word, to keep private notes out of the public history); the root `Carried:` line about the test-host exit crash became idea 126; item 65 kept in ROADMAP.md. Next unchanged.
 - 2026-11-14 52 brief: opened from ROADMAP.md; branch flow/52-dictionary-ux from main 5ef4db7.
 - 2026-11-14 52 mockup: two boards (dictionary-rows, history-pick) rendered headless without overflow; the owner chose A on both; folded into BRIEF.md.
