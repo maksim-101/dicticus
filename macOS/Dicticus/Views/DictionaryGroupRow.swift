@@ -123,6 +123,7 @@ struct DictionaryGroupRow: View {
         isAdding = false
         newForm = ""
         pendingMove = nil
+        onMessage(nil)
     }
 
     private func rename() {

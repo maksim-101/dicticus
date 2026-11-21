@@ -168,7 +168,7 @@ struct DictionaryView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.regular)
-                        .disabled(newOriginal.isEmpty || trimmedNewReplacement.isEmpty || trimmedNewReplacement == trimmedNewOriginal || duplicateWarning != nil)
+                        .disabled(trimmedNewOriginal.isEmpty || trimmedNewReplacement.isEmpty || trimmedNewReplacement == trimmedNewOriginal || duplicateWarning != nil)
 
                         Button("Cancel") {
                             cancelAdd()

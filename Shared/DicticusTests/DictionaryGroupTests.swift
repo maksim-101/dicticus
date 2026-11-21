@@ -113,9 +113,29 @@ final class DictionaryGroupTests: XCTestCase {
                        .invalid("“flor” is itself a heard form of “Zornex”; choose another spelling."))
         XCTAssertEqual(service.addHeardForm("zib", to: "flor"),
                        .invalid("“flor” is itself a heard form of “Zornex”; choose another spelling."))
-        if case .invalid = service.renameSpelling(from: "Quibbly", to: "KWIB LY") {} else { XCTFail("a spelling equal to one of its own forms, in any case, must be refused") }
+        if case .invalid = service.renameSpelling(from: "Quibbly", to: "kwib ly") {} else { XCTFail("a spelling exactly equal to one of its own forms must be refused") }
         XCTAssertEqual(service.dictionary, before)
         XCTAssertEqual(persisted(), before)
+    }
+
+    func testAddHeardFormToSpellingThatACaseVariantKeyAlreadyMapsToIsSaved() {
+        service.setReplacement(for: "gitlo", with: "GitLo")
+        XCTAssertEqual(service.addHeardForm("git lo", to: "GitLo"), .saved)
+        XCTAssertEqual(service.dictionary["git lo"]?.replacement, "GitLo")
+    }
+
+    func testRenameSpellingMergingIntoSpellingACaseVariantKeyMapsToIsSaved() {
+        service.setReplacement(for: "gitlo", with: "GitLo")
+        service.setReplacement(for: "git low", with: "Git Low")
+        XCTAssertEqual(service.renameSpelling(from: "Git Low", to: "GitLo"), .saved)
+        XCTAssertEqual(service.dictionary["gitlo"]?.replacement, "GitLo")
+        XCTAssertEqual(service.dictionary["git low"]?.replacement, "GitLo")
+    }
+
+    func testRenameSpellingEqualToAFormUpToCaseIsSaved() {
+        service.setReplacement(for: "kloudo", with: "Cloudo")
+        XCTAssertEqual(service.renameSpelling(from: "Cloudo", to: "Kloudo"), .saved)
+        XCTAssertEqual(service.dictionary["kloudo"]?.replacement, "Kloudo")
     }
 
     // MARK: - renameSpelling

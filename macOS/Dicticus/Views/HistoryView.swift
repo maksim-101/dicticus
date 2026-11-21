@@ -168,6 +168,7 @@ struct HistoryRow: View {
     @State private var sheetModel: AddToDictionaryModel? = nil
     @State private var lastModel: AddToDictionaryModel? = nil
     @State private var confirmation: String? = nil
+    @State private var undoFailed = false
 
     /// `expanded`, `pick` and `confirmation` set the starting state; the off-screen
     /// render test of slice 52 uses them, the History list does not.
@@ -312,15 +313,16 @@ struct HistoryRow: View {
                     }
                     if let confirmation {
                         HStack(spacing: 8) {
-                            Label(confirmation, systemImage: lastModel == nil ? "exclamationmark.circle" : "checkmark")
+                            Label(confirmation, systemImage: undoFailed ? "exclamationmark.circle" : "checkmark")
                                 .font(.system(size: 11))
-                                .foregroundStyle(lastModel == nil ? .orange : .green)
-                            if lastModel != nil {
+                                .foregroundStyle(undoFailed ? .orange : .green)
+                            if lastModel != nil, !undoFailed {
                                 Button("Undo") {
                                     if lastModel?.undo() == true {
                                         self.confirmation = nil
                                     } else {
                                         self.confirmation = "Not undone: the entry was changed since."
+                                        undoFailed = true
                                     }
                                     lastModel = nil
                                 }
@@ -357,6 +359,7 @@ struct HistoryRow: View {
             AddToDictionarySheet(model: model) { result in
                 if let result {
                     confirmation = result
+                    undoFailed = false
                     lastModel = model
                     pick = nil
                 }

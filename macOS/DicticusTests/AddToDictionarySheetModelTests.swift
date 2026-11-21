@@ -90,6 +90,14 @@ final class AddToDictionarySheetModelTests: XCTestCase {
         XCTAssertNil(service.dictionary["C"])
     }
 
+    func testSpellingACaseVariantKeyAlreadyMapsToDoesNotWarnOrBlockAdd() {
+        service.setReplacement(for: "gitlo", with: "GitLo")
+        let model = AddToDictionaryModel(heard: "git lo", service: service)
+        model.correct = "GitLo"
+        XCTAssertTrue(model.canAdd)
+        XCTAssertFalse(model.warnings.contains { $0.contains("is itself a heard form") })
+    }
+
     func testSpellingThatIsAnotherHeardFormWarnsAndBlocksAdd() {
         service.setReplacement(for: "flor", with: "Zornex")
         let model = AddToDictionaryModel(heard: "zib", service: service)

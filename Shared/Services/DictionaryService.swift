@@ -549,7 +549,7 @@ class DictionaryService: ObservableObject {
     /// are the keys that may hold that spelling (the forms being renamed or added).
     func spellingClashReason(_ spelling: String, allowed: Set<String>) -> String? {
         guard let key = existingKey(for: spelling), !allowed.contains(key),
-              let owner = dictionary[key]?.replacement else { return nil }
+              let owner = dictionary[key]?.replacement, owner != spelling else { return nil }
         return "“\(spelling)” is itself a heard form of “\(owner)”; choose another spelling."
     }
 
@@ -585,7 +585,7 @@ class DictionaryService: ObservableObject {
         let trimmed = newSpelling.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return .invalid("Correct spelling cannot be empty.") }
         if trimmed == oldSpelling { return .saved }
-        if let clash = keys.first(where: { $0.caseInsensitiveCompare(trimmed) == .orderedSame }) {
+        if let clash = keys.first(where: { $0 == trimmed }) {
             return .invalid("'\(clash)' is one of this word's heard forms; remove it first.")
         }
         if let reason = spellingClashReason(trimmed, allowed: Set(keys)) { return .invalid(reason) }
