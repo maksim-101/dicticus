@@ -168,6 +168,13 @@ struct DicticusApp: App {
                 .environmentObject(DictionaryService.shared)
         }
 
+        // "Fix a word" window: mark a misheard word in a recent dictation (slice 52).
+        Window("Fix a word", id: "fix-word") {
+            FixWordWindow()
+                .environmentObject(HistoryService.shared)
+                .environmentObject(DictionaryService.shared)
+        }
+
         // ⌘, Settings window — 4-pane (Hotkeys / AI Cleanup / General / About).
         // The Settings scene auto-registers ⌘, as the keyboard shortcut (no manual .keyboardShortcut needed).
         // Coexists cleanly with the dictionary/history WindowGroups (spike-verified, Q-03).

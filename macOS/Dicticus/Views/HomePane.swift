@@ -24,6 +24,7 @@ struct HomePane: View {
     // Used by the hotkey-registration-failed branch to open the Settings window (Hotkeys pane).
     @Environment(\.openSettings) private var openSettings
     @Environment(\.closePopover) private var closePopover
+    @Environment(\.openWindow) private var openWindow
 
     // Re-render the subline whenever a standard hotkey binding changes.
     @State private var shortcutChangeToken: AnyObject? = nil
@@ -231,8 +232,16 @@ struct HomePane: View {
                 FixWordView(text: entry.text)
                     .environmentObject(DictionaryService.shared)
 
-                CopyToClipboardButton(text: entry.text)
-                    .controlSize(.small)
+                HStack(spacing: 8) {
+                    CopyToClipboardButton(text: entry.text)
+                    Button("Fix a word…") {
+                        FixWordRequest.open(entry, with: openWindow)
+                        closePopover()
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Open the dictation in a larger window to mark a misheard word")
+                }
+                .controlSize(.small)
             }
             .padding(10)
             .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 1))

@@ -26,12 +26,21 @@ struct HistoryPane: View {
                 Spacer()
             } else {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text("RECENT")
+                    HStack {
+                        Text("RECENT")
+                            .font(.caption)
+                            .foregroundStyle(Color.secondary)
+                        Spacer()
+                        Button("Fix a word…") {
+                            FixWordRequest.open(nil, with: openWindow)
+                            closePopover()
+                        }
+                        .buttonStyle(.link)
                         .font(.caption)
-                        .foregroundStyle(Color.secondary)
-                        .padding(.horizontal, 16)
-                        .padding(.top, 12)
-                        .padding(.bottom, 6)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, 6)
 
                     let recentEntries = Array(historyService.entries.prefix(4))
                     ForEach(Array(recentEntries.enumerated()), id: \.element.uuid) { index, entry in

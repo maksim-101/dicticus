@@ -4,8 +4,8 @@ import AppKit
 @testable import Dicticus
 
 /// Slice 52, task 4 (the owner's choice 2026-11-14: render headless on this Mac): draws the
-/// grouped Manage Dictionary window, a History row with a picked run of words, and the
-/// "Add to Dictionary" sheet into PNGs, off-screen (the window is never ordered front).
+/// Manage Dictionary window, a History row, and the fix-a-word component in its states
+/// (Amendment 1) into PNGs, off-screen (the window is never ordered front).
 /// Runs only when TEST_RUNNER_RENDER_DIR names an output folder. Invented words only.
 @MainActor
 final class Slice52RenderTests: XCTestCase {
@@ -68,29 +68,24 @@ final class Slice52RenderTests: XCTestCase {
         try render(DictionaryView(), size: CGSize(width: 720, height: 900), name: "render-dictionary-window.png")
     }
 
-    func testRenderHistoryPickAndSheets() throws {
+    func testRenderHistoryRowAndFixWord() throws {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
+        let text = "Can you check whether mirror cove imports the timeline from the FlorDex export correctly?"
         let entry = TranscriptionEntry(
-            text: "Can you check whether mirror cove imports the timeline from the FlorDex export correctly?",
+            text: text,
             rawText: "can you check whether mirror cove imports the timeline from the flor dex export correctly?",
             language: "en", mode: "aiCleanup", confidence: 0.9)
-        let row = HistoryRow(entry: entry, formatter: formatter, searchTerm: "",
-                             expanded: true, pick: WordRange(anchor: 4, index: 5))
-        try render(row.padding(16).frame(width: 640, alignment: .topLeading), size: CGSize(width: 640, height: 300), name: "render-history-pick.png")
+        let row = HistoryRow(entry: entry, formatter: formatter, searchTerm: "", expanded: true)
+        try render(row.padding(16).frame(width: 640, alignment: .topLeading), size: CGSize(width: 640, height: 260), name: "render-history-row.png")
 
-        let done = HistoryRow(entry: entry, formatter: formatter, searchTerm: "", expanded: true,
-                              confirmation: "Added: “mirror cove” → “Miracove”. Applies from your next dictation.")
-        try render(done.padding(16).frame(width: 640, alignment: .topLeading), size: CGSize(width: 640, height: 300), name: "render-history-confirmation.png")
-
-        let joining = AddToDictionaryModel(heard: "mirror cove", service: DictionaryService.shared)
-        joining.correct = "Miracove"
-        try render(AddToDictionarySheet(model: joining) { _ in }, size: CGSize(width: 380, height: 300), name: "render-sheet-join.png")
-
-        let warned = AddToDictionaryModel(heard: "cloud", service: DictionaryService.shared)
-        warned.correct = "FlorDex"
-        XCTAssertEqual(warned.warnings.count, 2)
-        try render(AddToDictionarySheet(model: warned) { _ in }, size: CGSize(width: 380, height: 380), name: "render-sheet-warnings.png")
+        func card(_ view: FixWordView, _ name: String, height: CGFloat) throws {
+            try render(view.padding(20).frame(width: 420, alignment: .topLeading), size: CGSize(width: 420, height: height), name: name)
+        }
+        try card(FixWordView(text: text, fontSize: 17), "render-fixword-1-start.png", height: 160)
+        try card(FixWordView(text: text, fontSize: 17, pick: WordRange(anchor: 4, index: 5), correct: "Miracove"), "render-fixword-2-marked.png", height: 240)
+        try card(FixWordView(text: "the cloud sync is slow", fontSize: 17, pick: WordRange(anchor: 1, index: 1), correct: "FlorDex"), "render-fixword-warnings.png", height: 300)
+        try card(FixWordView(text: text, fontSize: 17, confirmation: "Added: “mirror cove” → “Miracove”. Applies from your next dictation."), "render-fixword-3-added.png", height: 180)
     }
 }

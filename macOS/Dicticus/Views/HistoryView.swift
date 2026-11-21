@@ -9,6 +9,7 @@ struct HistoryView: View {
     @State private var searchText = ""
     @State private var selection: Set<UUID> = []
     @State private var isShowingClearConfirmation = false
+    @Environment(\.openWindow) private var openWindow
     @FocusState private var isSearchFieldFocused: Bool
 
     private let dateFormatter: DateFormatter = {
@@ -61,6 +62,9 @@ struct HistoryView: View {
                     .contextMenu {
                         Button("Copy Text") {
                             copyToClipboard(entry.text)
+                        }
+                        Button("Fix a word…") {
+                            FixWordRequest.open(entry, with: openWindow)
                         }
                         Button("Delete", role: .destructive) {
                             if let id = entry.id {
@@ -163,32 +167,14 @@ struct HistoryRow: View {
     @State private var showCopied = false
     @State private var isExpanded: Bool = false
     @State private var selectedVariant: CleanupCopyMode = .raw
-    @EnvironmentObject private var dictionaryService: DictionaryService
-    @State private var pick: WordRange? = nil
-    @State private var sheetModel: AddToDictionaryModel? = nil
-    @State private var lastModel: AddToDictionaryModel? = nil
-    @State private var confirmation: String? = nil
-    @State private var undoFailed = false
+    @Environment(\.openWindow) private var openWindow
 
-    /// `expanded`, `pick` and `confirmation` set the starting state; the off-screen
-    /// render test of slice 52 uses them, the History list does not.
-    init(entry: TranscriptionEntry, formatter: DateFormatter, searchTerm: String,
-         expanded: Bool = false, pick: WordRange? = nil, confirmation: String? = nil) {
+    /// `expanded` sets the starting state for the off-screen render test of slice 52.
+    init(entry: TranscriptionEntry, formatter: DateFormatter, searchTerm: String, expanded: Bool = false) {
         self.entry = entry
         self.formatter = formatter
         self.searchTerm = searchTerm
         _isExpanded = State(initialValue: expanded)
-        _pick = State(initialValue: pick)
-        _confirmation = State(initialValue: confirmation)
-    }
-
-    private var rawTokens: [String] {
-        WordPick.tokens(of: entry.rawText.isEmpty ? entry.text : entry.rawText)
-    }
-
-    private var pickedText: String {
-        guard let pick else { return "" }
-        return WordPick.text(of: rawTokens, from: pick.anchor, to: pick.index)
     }
 
     private var displayedText: String {
@@ -275,65 +261,24 @@ struct HistoryRow: View {
                     .labelsHidden()
 
                     ScrollView {
-                        if selectedVariant == .raw {
-                            PickableWords(tokens: rawTokens, pick: $pick)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        } else {
-                            Text(displayedText)
-                                .font(.system(size: 12))
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
+                        Text(displayedText)
+                            .font(.system(size: 12))
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .frame(maxHeight: 200)
 
-                    // Slice 52: pick words in Raw and add them to the dictionary
-                    // (mockup `history-pick` variant A).
-                    if selectedVariant == .raw {
-                        if let pick, !pickedText.isEmpty {
-                            HStack(spacing: 8) {
-                                Button("Add to Dictionary…") {
-                                    sheetModel = AddToDictionaryModel(heard: pickedText, service: dictionaryService)
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.small)
-                                Text("“\(pickedText)”")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.secondary)
-                                    .id(pick.lo)
-                            }
-                        }
-                        Text("Click a word; shift-click to extend the pick.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("Switch to Raw to pick a word: Polished text has already been changed by the dictionary and the AI step.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                    }
-                    if let confirmation {
-                        HStack(spacing: 8) {
-                            Label(confirmation, systemImage: undoFailed ? "exclamationmark.circle" : "checkmark")
-                                .font(.system(size: 11))
-                                .foregroundStyle(undoFailed ? .orange : .green)
-                            if lastModel != nil, !undoFailed {
-                                Button("Undo") {
-                                    if lastModel?.undo() == true {
-                                        self.confirmation = nil
-                                    } else {
-                                        self.confirmation = "Not undone: the entry was changed since."
-                                        undoFailed = true
-                                    }
-                                    lastModel = nil
-                                }
-                                .buttonStyle(.link)
-                                .font(.system(size: 11))
-                            }
-                        }
-                    }
-
                     HStack {
                         Spacer()
+                        // Slice 52: words are marked in the "Fix a word" window, on the polished text.
+                        Button {
+                            FixWordRequest.open(entry, with: openWindow)
+                        } label: {
+                            Label("Fix a word…", systemImage: "character.cursor.ibeam")
+                                .font(.system(size: 11))
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                         Button {
                             copyToClipboard(displayedText)
                             withAnimation { showCopied = true }
@@ -355,17 +300,6 @@ struct HistoryRow: View {
             }
         }
         .padding(.vertical, 8)
-        .sheet(item: $sheetModel) { model in
-            AddToDictionarySheet(model: model) { result in
-                if let result {
-                    confirmation = result
-                    undoFailed = false
-                    lastModel = model
-                    pick = nil
-                }
-                sheetModel = nil
-            }
-        }
     }
 
     /// Per-row Copy honors the global default; in-disclosure Copy honors the in-view Picker.
@@ -414,45 +348,6 @@ struct TagView: View {
             .background(color.opacity(0.2))
             .foregroundStyle(color)
             .clipShape(RoundedRectangle(cornerRadius: 4))
-    }
-}
-
-/// A pick of tokens: the first-clicked word and the word clicked last (with Shift).
-struct WordRange: Equatable {
-    var anchor: Int
-    var index: Int
-    var lo: Int { min(anchor, index) }
-    var hi: Int { max(anchor, index) }
-    func contains(_ i: Int) -> Bool { (lo...hi).contains(i) }
-}
-
-/// The raw text as clickable words: hover highlights, click picks, shift-click extends.
-struct PickableWords: View {
-    let tokens: [String]
-    @Binding var pick: WordRange?
-    @State private var hovered: Int? = nil
-
-    var body: some View {
-        WrappingLayout(spacing: 4, lineSpacing: 2) {
-            ForEach(Array(tokens.enumerated()), id: \.offset) { index, token in
-                Text(token)
-                    .font(.system(size: 12))
-                    .padding(.horizontal, 1)
-                    .background(
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(Color.accentColor.opacity(pick?.contains(index) == true ? 0.25 : (hovered == index ? 0.1 : 0)))
-                    )
-                    .contentShape(Rectangle())
-                    .onHover { inside in hovered = inside ? index : (hovered == index ? nil : hovered) }
-                    .onTapGesture {
-                        if NSEvent.modifierFlags.contains(.shift), let current = pick {
-                            pick = WordRange(anchor: current.anchor, index: index)
-                        } else {
-                            pick = WordRange(anchor: index, index: index)
-                        }
-                    }
-            }
-        }
     }
 }
 

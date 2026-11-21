@@ -126,6 +126,7 @@ private struct FixWordField: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text([model.note, "Return adds · Esc cancels"].filter { !$0.isEmpty }.joined(separator: " "))
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                     ForEach(model.warnings, id: \.self) { warning in
                         Label(warning, systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
@@ -197,4 +198,13 @@ struct MarkableWords: View {
             hypot(a.value.midX - point.x, a.value.midY - point.y) < hypot(b.value.midX - point.x, b.value.midY - point.y)
         }?.key
     }
+}
+
+/// A pick of tokens: the first-clicked word and the word clicked last (with Shift).
+struct WordRange: Equatable {
+    var anchor: Int
+    var index: Int
+    var lo: Int { min(anchor, index) }
+    var hi: Int { max(anchor, index) }
+    func contains(_ i: Int) -> Bool { (lo...hi).contains(i) }
 }
