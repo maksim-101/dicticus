@@ -1,13 +1,15 @@
 # State of 52-dictionary-ux
 Slice: 52-dictionary-ux (standard)
-Step: fix
-Next: build PLAN.md Amendment 1 tasks 5-10 (task 5 first: F1a, F1b, F1e, F1f, F1g), then review of the amendment's diff, then verify criteria 4, 5, 8-13
-Waiting on: nothing (Amendment 1 approved; build tasks 5-10 next, in a fresh session)
+Step: build
+Next: build PLAN.md Amendment 1 task 6 (dictionary window tabs and search), then tasks 7-10, then review of the amendment's diff, then verify criteria 4, 5, 8-13
+Waiting on: nothing
 Started: 2026-11-14T14:07:19Z
 Baseline: at 04395b4 in a throwaway worktree: macOS Dicticus 1960 tests 0 failures (8 skipped), Dicticus-Debug-Recorder 2042 tests 0 failures (10 skipped); iOS simulator first run "test runner hung before establishing connection" (environment), rerun 1780 tests 0 failures (11 skipped)
+Baseline (Amendment 1 build): the run recorded at 1d0a773 stands in (`git diff --stat 1d0a773 HEAD -- . ':!.flow'` shows only DESIGN.md, one line): Dicticus 1992 tests 0 failures, Recorder 2074 tests 1 failure (TextInjectorTests clipboard test outside the slice, item 68), iOS 1802 tests 0 failures at 807ebb9
 Base: branch point
 Risk: none
-Carried: none
+Carried:
+- 52 build: VM screenshots for F1b (popover add form fits), F1e (popover closes on opening a window), F1g (double-click renames) from task 5, in the mac-space turn after task 6
 
 ## Decisions
 - 2026-11-14 question: teaching route is "Fix from history" only (select a misheard word in a past dictation, type the correct spelling); the "say it again" panel and a spoken command were not chosen.

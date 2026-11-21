@@ -73,6 +73,7 @@ Route: keep the stored format and the group API of task 1; one shared "fix a wor
 - **Goal:** the popover quick-add refuses an empty or identical replacement (F1a); the popover keeps its size with the add form open (F1b); opening the dictionary or another window from the popover closes the popover (F1e); removing a heard form and Delete Selected offer Undo (F1f, a confirmation line with Undo like the History one); double-click on a spelling starts the rename, checked on real input in the VM first (F1g; fixed only if it fails there too).
 - **Files:** `macOS/Dicticus/Views/DictionaryPane.swift`, `PopoverRoot.swift`, `DictionaryView.swift`, `DictionaryGroupRow.swift`; tests in `macOS/DicticusTests/`.
 - **Verify:** regression test for F1a seen failing first; F1f undo restores the removed keys (test through an isolated `DictionaryService`); F1b, F1e, F1g by VM screenshots.
+- **Status:** done 7f42bac, inline: UI fixes across five small views, each a few lines (F1a guard moved into `setReplacement` so every add path refuses an empty spelling; `closePopover` also called from History and Settings buttons). VM screenshots for F1b, F1e, F1g owed to the mac-space turn after task 6.
 - **Depends on:** none
 
 ### Task 6: dictionary window with tabs and search (criterion 12; ends F1j)
