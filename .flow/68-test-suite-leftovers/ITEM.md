@@ -17,4 +17,6 @@ Imported at the flow adoption of 2026-11-15 from the old GSD lists; inventory ro
 
 Two order- or environment-dependent failures in the full macOS run of 2026-11-21 (slice 52), both passing when run alone: EditGuardCompoundRepairTests.testR0_checkerSignalsOnThisMac asserts the Mac's live German spell checker lists "Komma" among its completions, which depends on AppleSpell's state; DebugRecorderFinalStageTests.testFinalStageCapturesPostCapitalizationMutation reads DebugRecorder.shared.lastRecordForTests after a 150 ms sleep and got another test's record. A third in the Recorder run of 2026-11-21 08:00Z: TextInjectorTests.testInjectText_frontmostChanged_fallsBackToClipboardWithoutPaste found the clipboard empty (shared system clipboard while the owner worked; passed in the two runs before).
 
+`scripts/pre-push` runs the suites with `-quiet` in a temporary checkout it deletes afterwards, so a failed push leaves only "TEST FAILED" and no test name; it happened twice in slice 52 (2026-11-21). Keeping the result bundle or the failing-test lines in a file outside the checkout would fix it.
+
 Sources: root STATE.md Carried; .planning/notes/2026-11-01-codebase-audit.md section 5; .flow/52-dictionary-ux/STATE.md History 2026-11-21

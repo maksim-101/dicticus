@@ -1,7 +1,7 @@
 # State of 52-dictionary-ux
 Slice: 52-dictionary-ux (standard)
 Step: build
-Next: build PLAN.md Amendment 1 task 6 (dictionary window tabs and search), then tasks 7-10, then review of the amendment's diff, then verify criteria 4, 5, 8-13
+Next: build PLAN.md Amendment 1 task 8 (popover Home card), then 9-10, then review of the amendment's diff, then verify criteria 4, 5, 8-13
 Waiting on: nothing
 Started: 2026-11-14T14:07:19Z
 Baseline: at 04395b4 in a throwaway worktree: macOS Dicticus 1960 tests 0 failures (8 skipped), Dicticus-Debug-Recorder 2042 tests 0 failures (10 skipped); iOS simulator first run "test runner hung before establishing connection" (environment), rerun 1780 tests 0 failures (11 skipped)
@@ -9,8 +9,7 @@ Baseline (Amendment 1 build): the run recorded at 1d0a773 stands in (`git diff -
 Base: branch point
 Risk: none
 Carried:
-- 52 build: VM screenshots for F1b (popover add form fits), F1e (popover closes on opening a window), F1g (double-click renames) from task 5, in the mac-space turn after task 6
-
+- 52 build: VM screenshots for F1b (popover add form fits), F1e (popover closes on opening a window), F1g (double-click renames) from task 5, and task 6's tabs, search and F1j check, in the mac-space turn of task 10
 ## Decisions
 - 2026-11-14 question: teaching route is "Fix from history" only (select a misheard word in a past dictation, type the correct spelling); the "say it again" panel and a spoken command were not chosen.
 - 2026-11-14 question: "Mac first"; the iPhone/iPad screens become a follow-up item.

@@ -80,12 +80,14 @@ Route: keep the stored format and the group API of task 1; one shared "fix a wor
 - **Goal:** tabs at the top "Entries | Spoken Punctuation | Voice Commands", each filling the window and scrolling itself; on Entries a rounded search field with magnifier and clear button above the list, ⌘F focuses it, filtering by spelling or heard form (case-insensitive, diacritics-insensitive), count "N of M words" while filtering; footer "Add ▾" menu (Add Entry…, Import CSV…, Starter Packs ▸ three packs) next to Edit; the Starter Packs paragraph goes; the Case Sensitive toggle goes from the Mac window (the shared setting stays at its stored value, false for the owner; the iOS toggle stays until item 65).
 - **Files:** `macOS/Dicticus/Views/DictionaryView.swift` (split into the tab container and an entries view); filter function in `Shared/Services/DictionaryService.swift` or a small helper; tests in `Shared/DicticusTests/DictionaryGroupTests.swift`.
 - **Verify:** filter tests (spelling match, heard-form match, no match, umlaut); VM: each tab, a filtered list, and opening Spoken Punctuation with the window still responding (clicks reach the list after switching back).
+- **Status:** done d7a2ab4, inline: one view restructured, each result reshaped the next edit. Same commit narrows 7f42bac's guard: identical pairs anchor the fuzzy pass, and five matching tests failed in the full macOS run (log kept in the session only). Import moved into the Add menu as "Import CSV…" (still reads JSON). VM part owed to the next mac-space turn.
 - **Depends on:** none
 
 ### Task 7: shared fix-a-word component (criterion 9)
 - **Goal:** a view that shows a dictation's polished text as markable words (click marks one, drag or shift-click marks a run; whole words, end punctuation trimmed, reusing `WordPick`), and on marking opens "Heard as" (the marked text) and "Correct spelling" (focused) inline; Return adds through `addHeardForm` (joins a known spelling), Escape cancels; everyday-word and clash warnings next to the field, non-blocking; then "Added: … Applies from your next dictation. Undo". The sheet's model is reused for note, warnings, save and undo; the sheet itself goes.
 - **Files:** new `macOS/Dicticus/Views/FixWordView.swift`; `AddToDictionarySheet.swift` (model kept, view removed or renamed); `Shared/Utilities/WordPick.swift` if polished-text tokens need a change; tests `AddToDictionarySheetModelTests`, `WordPickTests`.
 - **Verify:** model tests carried over (warnings, join note, save makes `applyWithTrace` rewrite, undo); a drag-run pick test on polished text.
+- **Status:** done a927763, inline: a gesture and layout loop. The sheet view stays until task 9 removes its last caller (History).
 - **Depends on:** none
 
 ### Task 8: popover Home card (criterion 10)
