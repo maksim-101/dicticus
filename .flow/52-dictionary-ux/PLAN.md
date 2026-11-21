@@ -101,6 +101,7 @@ Route: keep the stored format and the group API of task 1; one shared "fix a wor
 - **Goal:** a window with recent dictations on the left (last one preselected and highlighted) and the chosen one large on the right with task 7's component, even spacing; opened in one click from the popover (Home card and History tab). The History window's Raw-view pick and its sheet go; its rows keep Copy and search, and a row's "Fix a word…" opens this window on that dictation.
 - **Files:** new `macOS/Dicticus/Views/FixWordWindow.swift`; `DicticusApp.swift` (window scene); `HistoryView.swift`, `HistoryPane.swift`.
 - **Verify:** build; VM screenshots of the window in the three steps and of the route from the popover.
+- **Status:** done 413d9fe, inline: window layout loop with renders. Entry points: Home card button, History tab's RECENT line, History row button and right-click menu. History rows show Raw/Polished as selectable text again (answers R4 by restoring selection). VM screenshots owed to task 10.
 - **Depends on:** task 7
 
 ### Task 10: full check and VM evidence for criteria 4, 5, 8-13

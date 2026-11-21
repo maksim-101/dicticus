@@ -1,7 +1,7 @@
 # State of 52-dictionary-ux
 Slice: 52-dictionary-ux (standard)
 Step: build
-Next: build PLAN.md Amendment 1 task 9 ("Fix a word" window), then 10, then review of the amendment's diff, then verify criteria 4, 5, 8-13
+Next: build PLAN.md Amendment 1 task 10 (mac-space walkthrough with screenshots for criteria 4, 5, 8-13 and task 5's F1b/F1e/F1g, then the three suites and the dictionary checksum), then review of the amendment's diff, then verify criteria 4, 5, 8-13
 Waiting on: nothing
 Started: 2026-11-14T14:07:19Z
 Baseline: at 04395b4 in a throwaway worktree: macOS Dicticus 1960 tests 0 failures (8 skipped), Dicticus-Debug-Recorder 2042 tests 0 failures (10 skipped); iOS simulator first run "test runner hung before establishing connection" (environment), rerun 1780 tests 0 failures (11 skipped)
