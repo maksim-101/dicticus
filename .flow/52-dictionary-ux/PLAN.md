@@ -65,7 +65,7 @@
 
 Tests use invented words only (public repo; no dictation text from the logs); every `xcodebuild` passes `-derivedDataPath build`; `scripts/check-running-copy.sh` after test runs; no Spotlight calls; the simulator is shut down after the iOS suite; GUI checks only in `mac-space`.
 
-## Amendment 1 (BRIEF.md Amendment 1, criteria 9-13; waiting on the owner's approval)
+## Amendment 1 (BRIEF.md Amendment 1, criteria 9-13; approved by the owner 2026-11-21)
 
 Route: keep the stored format and the group API of task 1; one shared "fix a word" component (markable polished text plus inline field) used in two places; the dictionary window gets a tab container so the reference sections leave the entries view. Colours: only those the current UI uses (DESIGN.md Don't, criterion 13). Each task's Verify uses the slice's targeted-test command shape from tasks 1-3 (`-derivedDataPath build`, `CODE_SIGNING_ALLOWED=NO`) with the named test classes, then `scripts/check-running-copy.sh`; screenshots only in mac-space.
 

@@ -2,7 +2,7 @@
 Slice: 52-dictionary-ux (standard)
 Step: fix
 Next: F1 (FIX.md): map every route into the dictionary from the code, walk it in the mac-space VM on seeded invented entries, then sort and fix the friction points; then verify criterion 8 again
-Waiting on: the owner: approval of Amendment 1 (BRIEF.md criteria 9-13, PLAN.md tasks 5-10) before building; VM tests wait for the mac-space turn (after read-aloud-extension); key-hold grant done by the owner
+Waiting on: nothing for the build (Amendment 1 approved; tasks 5-10 next, in a fresh session); VM tests wait for the mac-space turn (after read-aloud-extension)
 Started: 2026-11-14T14:07:19Z
 Baseline: at 04395b4 in a throwaway worktree: macOS Dicticus 1960 tests 0 failures (8 skipped), Dicticus-Debug-Recorder 2042 tests 0 failures (10 skipped); iOS simulator first run "test runner hung before establishing connection" (environment), rerun 1780 tests 0 failures (11 skipped)
 Base: branch point
@@ -26,6 +26,7 @@ Carried: none
 - 2026-11-21 mockup round 1, pointer board: none of A/B/C chosen. The owner never uses "Revert to Raw" ("we could leave that out") and always judges the polished text, never the raw one; A and C "feel a little bit crowded", "one step too many". Requested design: see where I am, which is the last transcription and which one I chose, then mark a word or a few words; the marking itself starts the entry (heard form) and a text field appears for the corrected value. Round 2 board follows.
 - 2026-11-21 mockup round 1, window board: search placement B (full-width row above the list), "visually ... could be enhanced to make it look a little bit more tidy and modern"; the bottom panel and the popover are rejected ("not a fan of like half split screens or pop-ups that don't seem to be able to be closed"), a better place for the reference sections is needed. Case Sensitive toggle: the owner never turned it on and believes case is handled with it off; if so, strike it. Checked in code: with the toggle off the exact pass ignores case, except a single all-caps key matches case-sensitively by itself (`DictionaryService.swift:380-382`); the toggle makes every key case-sensitive. So the toggle goes (macOS; iOS has the same toggle, `iOS/Dicticus/Settings/DictionaryManagementView.swift:135`, for item 65).
 - 2026-11-21 mockup round 2: fixing a word: "I think A and B are needed even though option B could visually be refreshed as well, because not every space is being used ... the white space is uneven" (A in the popover and B the Fix window, both). Dictionary window: "I want Option B" (tabs at the top, Add ▾ menu), "and don't just add new colors if you feel like it" (A's green sidebar was read as a new colour scheme). Folded into BRIEF.md as amendments 9-13; the no-new-colours rule is a standing design decision (DESIGN.md).
+- 2026-11-21 Amendment 1 (BRIEF.md criteria 9-13, PLAN.md tasks 5-10): approved by the owner ("Approve as written"), including the History window losing its Raw pick and sheet in favour of "Fix a word…" into the new window.
 
 ## History
 - 2026-11-21 52 fix F1: the owner ran the VM microphone grant; walkthrough in mac-space done (FIX.md F1a-F1i, screenshots evidence/vm-f1-*); the History seed had invalid UUIDs (fixed in evidence/vm-seed.sh). Same VM run reproduced item 142 (its ITEM.md). VM handed to another session, which shuts it down.

@@ -25,7 +25,7 @@ The owner, on the Mac, after noticing a recurring mishearing: either in the Dict
 7. `[check]` `exists` The macOS test suites (Dicticus and Dicticus-Debug-Recorder schemes) and the iOS simulator suite pass (the dictionary code is shared), and the owner's live dictionary blob is byte-identical before and after the test runs (checksum).
 8. `[judge]` `new` The grouped list and the add-from-History flow look and feel right, judged on screenshots of the built app in the Mac test VM with a fixture dictionary, next to the chosen mockups: `mockups/dictionary-rows.png` (variant A, left) and `mockups/history-pick-2-sheet-join.png` / `history-pick-4-warnings.png` (variant A, left window; the sheet is shared).
 
-## Amendment 1 (owner, 2026-11-21, at verify; mockup rounds 1-2; tasks in PLAN.md Amendment 1, waiting on the owner's approval)
+## Amendment 1 (owner, 2026-11-21, at verify; mockup rounds 1-2; tasks in PLAN.md Amendment 1, approved by the owner 2026-11-21)
 
 Existing checks whose expected result changes: criterion 4 (sheet save-path test and the History screenshots), criterion 5 (warnings move from the sheet to the inline field), criterion 8 (judged against the round-2 boards); verify redoes them. Criterion 4 changes: picking works on the polished text, not on Raw; no Raw/Polished switch, no "Add to Dictionary…" button and no sheet. Criteria 5 and 6 keep their expectations for the inline field. Criterion 8 is judged against the round-2 boards below.
 
