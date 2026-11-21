@@ -439,7 +439,8 @@ class DictionaryService: ObservableObject {
         let trimmedOriginal = original.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedReplacement = replacement.trimmingCharacters(in: .whitespacesAndNewlines)
         // An empty replacement deletes the heard word from every dictation (slice 52 F1a).
-        guard !trimmedOriginal.isEmpty, !trimmedReplacement.isEmpty, trimmedOriginal != trimmedReplacement else { return }
+        // An identical pair stays allowed: it anchors the fuzzy pass ("Tailscale" → "Tailscale").
+        guard !trimmedOriginal.isEmpty, !trimmedReplacement.isEmpty else { return }
 
         dictionary[trimmedOriginal] = DictionaryMetadata(
             replacement: trimmedReplacement,
@@ -533,6 +534,15 @@ class DictionaryService: ObservableObject {
                 source: members.map(\.value.source).min { $0.sortPriority < $1.sortPriority } ?? .user
             )
         }
+    }
+
+    /// Rows whose spelling or one of whose heard forms contains `query`, ignoring case and
+    /// diacritics; an empty query keeps every row (dictionary window search, criterion 12).
+    nonisolated static func filter(_ groups: [DictionaryGroup], query: String) -> [DictionaryGroup] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return groups }
+        func hit(_ s: String) -> Bool { s.range(of: q, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
+        return groups.filter { hit($0.spelling) || $0.forms.contains(where: hit) }
     }
 
     /// The key that already stands for `form`, compared the way the exact pass matches:

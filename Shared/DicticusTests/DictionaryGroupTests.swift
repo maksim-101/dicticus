@@ -223,12 +223,14 @@ final class DictionaryGroupTests: XCTestCase {
     }
 
     /// F1a: the popover quick-add stored `replacement: ""`, which deletes the heard word.
-    func testSetReplacementRefusesEmptyOrIdenticalReplacement() {
+    func testSetReplacementRefusesEmptyReplacement() {
         service.setReplacement(for: "kwib ly", with: "")
         service.setReplacement(for: "flor", with: "   ")
-        service.setReplacement(for: "Quibbly", with: "Quibbly")
         XCTAssertTrue(service.dictionary.isEmpty)
         XCTAssertTrue(persisted().isEmpty)
+
+        service.setReplacement(for: "Quibbly", with: "Quibbly")
+        XCTAssertEqual(service.dictionary["Quibbly"]?.replacement, "Quibbly", "an identical pair anchors the fuzzy pass")
     }
 
     func testRestoreEntryUndoesAddAndChange() {
@@ -243,6 +245,26 @@ final class DictionaryGroupTests: XCTestCase {
         service.restoreEntry("flor", to: nil)
         XCTAssertNil(service.dictionary["flor"])
         XCTAssertEqual(persisted(), service.dictionary)
+    }
+
+    // MARK: - Search
+
+    func testFilterMatchesSpellingOrHeardFormIgnoringCaseAndDiacritics() {
+        let d = Date()
+        let groups = DictionaryService.groups(of: [
+            "flor dex": DictionaryMetadata(replacement: "FlorDex", createdAt: d),
+            "flora via": DictionaryMetadata(replacement: "Floravia", createdAt: d),
+            "zorn x": DictionaryMetadata(replacement: "Zornex", createdAt: d),
+            "grun bach": DictionaryMetadata(replacement: "Grünbach", createdAt: d),
+        ])
+        func spellings(_ q: String) -> Set<String> { Set(DictionaryService.filter(groups, query: q).map(\.spelling)) }
+
+        XCTAssertEqual(spellings("FLOR"), ["FlorDex", "Floravia"], "spelling and heard form, any case")
+        XCTAssertEqual(spellings("zorn x"), ["Zornex"], "heard form only")
+        XCTAssertEqual(spellings("grunbach"), ["Grünbach"], "umlaut ignored")
+        XCTAssertEqual(spellings("grün"), ["Grünbach"])
+        XCTAssertEqual(spellings("quibbly"), [])
+        XCTAssertEqual(spellings("  "), Set(groups.map(\.spelling)), "empty query keeps every row")
     }
 
     // MARK: - Everyday words
