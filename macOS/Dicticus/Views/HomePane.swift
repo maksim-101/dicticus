@@ -28,6 +28,8 @@ struct HomePane: View {
     // Re-render the subline whenever a standard hotkey binding changes.
     @State private var shortcutChangeToken: AnyObject? = nil
     @State private var sublineText: String = ""
+    /// Which dictation the card shows: 0 is the last one, "‹ earlier" counts up.
+    @State private var cardIndex = 0
 
     var body: some View {
         ScrollView {
@@ -49,6 +51,7 @@ struct HomePane: View {
             }
         }
         .onAppear {
+            cardIndex = 0
             refreshSubline()
             observeShortcutChanges()
         }
@@ -197,45 +200,47 @@ struct HomePane: View {
         }
     }
 
-    // MARK: - Last Transcription
+    // MARK: - Last dictation card (slice 52 criterion 10, mockup `pointer-r2` A)
+
+    private var cardEntry: TranscriptionEntry? {
+        historyService.entries.indices.contains(cardIndex) ? historyService.entries[cardIndex] : nil
+    }
 
     @ViewBuilder
     private var lastTranscriptionSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("LAST TRANSCRIPTION")
-                .font(.caption)
-                .foregroundStyle(Color.secondary)
-
-            if let text = hotkeyManager.lastTranscriptionText, !text.isEmpty {
-                Text(text)
-                    .font(.body)
-                    .foregroundStyle(Color.secondary)
-                    .lineLimit(3)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                HStack(spacing: 8) {
-                    CopyToClipboardButton(text: text)
-                        .frame(maxWidth: .infinity)
-                    RevertToRawButton(entry: historyService.entries.first)
-                        .frame(maxWidth: .infinity)
+        if let entry = cardEntry {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 4) {
+                    Text(cardIndex == 0 ? "Last dictation" : "Earlier dictation")
+                        .font(.caption.weight(.semibold))
+                    Text("· \(entry.createdAt.formatted(date: .omitted, time: .shortened)) · \(entry.language.uppercased())")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("‹ earlier") { cardIndex += 1 }
+                        .disabled(cardIndex + 1 >= historyService.entries.count)
+                        .help("Show the dictation before this one")
+                    if cardIndex > 0 {
+                        Button("›") { cardIndex -= 1 }
+                            .help("Show the next dictation")
+                    }
                 }
-            } else {
-                Text("No recent transcription.")
-                    .font(.body)
-                    .foregroundStyle(Color.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
 
-                HStack(spacing: 8) {
-                    Button("Copy to Clipboard") {}
-                        .buttonStyle(.borderedProminent)
-                        .frame(maxWidth: .infinity)
-                        .disabled(true)
-                        .accessibilityLabel("Copy to Clipboard")
-                    RevertToRawButton(entry: historyService.entries.first)
-                        .frame(maxWidth: .infinity)
-                }
+                FixWordView(text: entry.text)
+                    .environmentObject(DictionaryService.shared)
+
+                CopyToClipboardButton(text: entry.text)
+                    .controlSize(.small)
             }
+            .padding(10)
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(Color.accentColor.opacity(0.6), lineWidth: 1))
+        } else {
+            Text("No recent dictation.")
+                .font(.body)
+                .foregroundStyle(Color.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
@@ -326,7 +331,7 @@ private struct CopyToClipboardButton: View {
     @State private var showCopied = false
 
     var body: some View {
-        Button(showCopied ? "Copied!" : "Copy to Clipboard") {
+        Button(showCopied ? "Copied!" : "Copy") {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
             showCopied = true
@@ -334,39 +339,8 @@ private struct CopyToClipboardButton: View {
                 showCopied = false
             }
         }
-        .buttonStyle(.borderedProminent)
-        .accessibilityLabel("Copy to Clipboard: \(text.prefix(40))")
-    }
-}
-
-// MARK: - RevertToRawButton
-
-/// Secondary (.bordered) button that re-pastes the raw ASR text of the last
-/// dictation via TextInjector, with a transient "Reverted!" label — mirrors
-/// CopyToClipboardButton's @State + asyncAfter pattern (R-06 / CLEANRD-02).
-private struct RevertToRawButton: View {
-
-    let entry: TranscriptionEntry?
-    @State private var showReverted = false
-
-    var body: some View {
-        let decision = RevertToRawState.evaluate(entry: entry)
-
-        Button {
-            Task {
-                await revertToRaw()
-                showReverted = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                    showReverted = false
-                }
-            }
-        } label: {
-            Label(showReverted ? "Reverted!" : "Revert to Raw", systemImage: "arrow.uturn.backward")
-        }
         .buttonStyle(.bordered)
-        .disabled(!decision.enabled)
-        .help(decision.help)
-        .accessibilityLabel("Revert to Raw")
+        .accessibilityLabel("Copy to Clipboard: \(text.prefix(40))")
     }
 }
 

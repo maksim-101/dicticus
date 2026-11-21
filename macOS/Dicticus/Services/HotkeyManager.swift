@@ -51,12 +51,6 @@ class HotkeyManager: ObservableObject {
     /// Not used in production UI — exists to verify notification posting in tests.
     @Published var lastPostedNotification: DicticusNotification?
 
-    /// Last successful transcription text for display in menu bar dropdown (D-21).
-    /// Returns nil when no transcription has occurred in this session.
-    var lastTranscriptionText: String? {
-        transcriptionService?.lastResult?.text
-    }
-
     /// D-03: Suppress key repeat — ignore keyDown when already down.
     private var isKeyDown = false
 
