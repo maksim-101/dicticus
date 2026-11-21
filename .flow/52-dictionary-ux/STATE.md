@@ -1,7 +1,7 @@
 # State of 52-dictionary-ux
 Slice: 52-dictionary-ux (standard)
 Step: build
-Next: build PLAN.md Amendment 1 task 8 (popover Home card), then 9-10, then review of the amendment's diff, then verify criteria 4, 5, 8-13
+Next: build PLAN.md Amendment 1 task 9 ("Fix a word" window), then 10, then review of the amendment's diff, then verify criteria 4, 5, 8-13
 Waiting on: nothing
 Started: 2026-11-14T14:07:19Z
 Baseline: at 04395b4 in a throwaway worktree: macOS Dicticus 1960 tests 0 failures (8 skipped), Dicticus-Debug-Recorder 2042 tests 0 failures (10 skipped); iOS simulator first run "test runner hung before establishing connection" (environment), rerun 1780 tests 0 failures (11 skipped)
@@ -30,6 +30,7 @@ Carried:
 - 2026-11-21 Amendment 1 (BRIEF.md criteria 9-13, PLAN.md tasks 5-10): approved by the owner ("Approve as written"), including the History window losing its Raw pick and sheet in favour of "Fix a word…" into the new window.
 
 ## History
+- 2026-11-21 52 build: tasks 5-8 done (7f42bac, d7a2ab4, a927763, e46d01d). The full macOS run after task 5 found five matching tests failing: the new empty-spelling guard also refused identical pairs, which anchor the fuzzy pass; narrowed in d7a2ab4, the five pass. The pre-push check then failed on testK7_DoesNotOverrideUserCustomization, which needs the gitignored personal lexicon and so fails on every clean checkout (likely also the lost-output failure of 807ebb9); fixed as an adjacent bug in 1f04f9d, passing in a clean worktree.
 - 2026-11-21 52 fix: mac-space turn after two other sessions: F1j reproduced (layout overflow, not a hang), F1g reproduced a third time (cause inferred: double-tap gesture inside the selectable List); item 142 reproduced with a held key (short sound ending before the verify, PLAY at release). VM shut down, relay stopped, guest apps quit.
 - 2026-11-21 52 fix F1: the owner ran the VM microphone grant; walkthrough in mac-space done (FIX.md F1a-F1i, screenshots evidence/vm-f1-*); the History seed had invalid UUIDs (fixed in evidence/vm-seed.sh). Same VM run reproduced item 142 (its ITEM.md). VM handed to another session, which shuts it down.
 - 2026-11-21 52 fix F1 started: route map from the code (gitignored `.planning/debug/audit-2026-11-21/dictionary-entry-points.md`): no pointer to the dictionary after a misheard dictation outside History's collapsed rows, no search in the window, "heard form"/"spelling" never explained, four add forms with four sets of labels, rename hidden, deletes without undo, popover and window counts disagree. mac-space: Release and Debug-Recorder builds of 1d0a773's code built in the guest, invented 249-entry dictionary (173 spellings) seeded, media-pause setting on, a 228 s spoken test file made; the app was not launched, because the microphone prompt blocks the guest and granting it in the guest's TCC database is the owner's step (`vm-grant-mic.sh` in the same folder). VM stopped.

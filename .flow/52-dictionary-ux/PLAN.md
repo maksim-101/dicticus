@@ -94,6 +94,7 @@ Route: keep the stored format and the group API of task 1; one shared "fix a wor
 - **Goal:** the card is titled "Last dictation · time · language", its polished text uses task 7's component in place, "‹ earlier" / "›" step through recent dictations, Copy is the only button; "Revert to Raw" and its code path go.
 - **Files:** `macOS/Dicticus/Views/HomePane.swift`; whatever only Revert to Raw used.
 - **Verify:** build and the existing HomePane-related tests; VM screenshots of the three steps.
+- **Status:** done e46d01d, inline: one view. No HomePane tests exist; RevertToRawTests keeps only its hotkey test. The Revert-to-Raw hotkey (Settings → Hotkeys) shares the paste function and stays. VM screenshots owed to task 10.
 - **Depends on:** task 7
 
 ### Task 9: "Fix a word" window (criterion 11)
