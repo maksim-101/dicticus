@@ -34,4 +34,13 @@ final class WordPickTests: XCTestCase {
         XCTAssertEqual(WordPick.text(of: [], from: 0, to: 0), "")
         XCTAssertEqual(WordPick.text(of: ["…"], from: 0, to: 0), "")
     }
+
+    /// Criterion 9: a drag across words of the polished text marks the run between the
+    /// word under the press and the word under the pointer, in either direction.
+    func testDragRunOnPolishedText() {
+        let polished = WordPick.tokens(of: "Can you check whether mirror cove imports the timeline from the FlorDex export correctly?")
+        XCTAssertEqual(WordPick.text(of: polished, from: 4, to: 5), "mirror cove")
+        XCTAssertEqual(WordPick.text(of: polished, from: 5, to: 4), "mirror cove")
+        XCTAssertEqual(WordPick.text(of: polished, from: 13, to: 11), "FlorDex export correctly")
+    }
 }
