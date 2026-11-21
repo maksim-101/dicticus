@@ -24,3 +24,21 @@ Carried items: none.
 | R11 | NIT | minimality: context-menu Delete duplicates `deleteSelected()` and skips `refreshEntries()` | fix (F9, one shared helper) |
 | R12 | NIT | minimality: `removeHeardForm` is a thin wrapper over `removeReplacement` | won't fix: the guard skips a save of the live store when the form is already gone (a stale chip), which `removeReplacement` would write anyway |
 | R13 | NIT | minimality: `HistoryRow.init` gains defaults used only by the render test | won't fix: the off-screen render (criterion 4 and 8 evidence) drives the row's pick and confirmation states through them; documented in the code |
+
+Round 1 fixes: commit 6a32001 (mechanical-edit agent, sonnet; regression tests seen failing before each of F1-F4 and F7; slice tests 43 executed, 0 failures; iOS build succeeded). F3: `WordPick.text` already trims the pick, so only the model's whitespace trim changed.
+
+## Round 2: c608f3e..6a32001
+
+Reviewer: a fresh agent (opus), correctness rubric, given the range and the round-1 fix rows; read the diff, DictionaryService 320-640, the four views, the render test and the callers of `existingKey`, `addHeardForm`, `renameSpelling`, `undo`, `WrappingLayout`, `deleteGroups`, `restoreEntry`; ran nothing (the full check ran in parallel).
+
+Round-1 rows resolved: R1 yes, R2 yes (over-broad, see R14/R15), R3 yes, R5 yes, R6 yes, R7 yes (gap R17), R8 yes, R9 yes in code (not render-checked), R11 yes.
+
+| id | sev | summary | disposition |
+|---|---|---|---|
+| R14 | BLOCKER | `spellingClashReason` refuses a spelling whose case-variant key already maps to that same spelling ("github" → "GitHub": adding "git hub" to GitHub, picking GitHub in the sheet, or merging a row into GitHub is refused); checked `DictionaryService.swift:550-554` | fix step: return nil when the found key's replacement equals the spelling; regression test |
+| R15 | WARNING | the own-forms check in `renameSpelling` became case-insensitive, refusing "Cloud" → "Claude" when the row holds "claude", which the exact pass handles idempotently; `addHeardForm` still accepts it, so the paths disagree; checked `:588` | fix step: back to exact equality; adjust the test at `DictionaryGroupTests.swift:116` |
+| R16 | WARNING | the confirmation line now shows the failure style whenever `lastModel` is nil, so the off-screen render (built without a model) shows a failed confirmation; criterion 4/8 evidence `render-history-confirmation.png` changes; checked `HistoryView.swift:315-318` | fix step: a separate failed flag; re-render |
+| R17 | NIT | Escape in a row's add-form field leaves the row warning showing | fix step |
+| R18 | NIT | footer Add checks the untrimmed original, so a whitespace-only original enables Add | fix step |
+| R19 | NIT | `fittedSize` measures each subview twice per layout pass | won't fix: two measurements per token on rows of at most a few hundred tokens |
+| R20 | NIT | the footer Add Entry (`setReplacement`) and iOS `renameEntry` can still store a spelling that is another heard form; `Slice52RenderTests.swift:93` counts warnings against the shared store | defer: untouched code; noted in item 65 (iOS dictionary UX) and item 133 |
