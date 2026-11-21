@@ -24,6 +24,8 @@ Running: nothing. Relay stopped and cua switched back to local:mac-space (observ
 - 2026-11-14 brief: approved by the owner ("approved").
 - 2026-11-14 plan: approved by the owner ("approve").
 - 2026-11-14 question (build, task 4): screenshots by "Render headless on this Mac" (an off-screen test renders both windows with invented data); no VM run, no answer to the VM's microphone prompt.
+- 2026-11-21 owner: run the two macOS suites now ("you can run it now"); also analyse the dictionary's contents for patterns the pipeline should handle.
+- 2026-11-21 owner (beyond this slice, recorded here because it is the open slice): the miner spike (item 58) goes ahead; the audit's proposals become flow items; the iOS keyboard re-test with Full Access is approved; the two-repository setup comes after the current review and optimisation work; before acting on these, research open- and closed-source competitors; the product name is "Grok Bot"; on iOS 27 a lock-screen Live Activity stop after switching apps works without error, while the Live Activity's expanded view looks off (buttons out of place, could be more compact).
 
 ## History
 - 2026-11-15 52 build (paused): main merged in after the flow 0.10.5 adoption of the GSD backlog (d8f6410; today's adoption commits were rewritten into this one on the owner's word, to keep private notes out of the public history); the root `Carried:` line about the test-host exit crash became idea 126; item 65 kept in ROADMAP.md. Next unchanged.
