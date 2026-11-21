@@ -1,0 +1,9 @@
+Amendment 1 full check (slice 52), 2026-11-21, code at d3640fd (no code change since; later commits are .flow and CLAUDE.md)
+pre-push on a clean checkout of d3640fd: macOS Dicticus suite and iOS simulator suite passed (pre-push: tests passed)
+blob-before 99d3453153d7eb10
+Dicticus exit=0 Executed 1993 tests, with 10 tests skipped and 0 failures (0 unexpected) in 142.148 (142.526) seconds
+Dicticus-Debug-Recorder exit=0 Executed 2075 tests, with 11 tests skipped and 0 failures (0 unexpected) in 138.988 (139.409) seconds
+blob-after 99d3453153d7eb10
+OK: only /Applications/Dicticus.app is running (pid 4336)
+blob = sha256 prefix of the customDictionaryMetadata value in com.dicticus.app
+cleanup: Debug and Debug-Recorder-Test Dicticus.app copies unregistered (lsregister -u) and deleted
