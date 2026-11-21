@@ -25,12 +25,22 @@ The owner, on the Mac, after noticing a recurring mishearing: either in the Dict
 7. `[check]` `exists` The macOS test suites (Dicticus and Dicticus-Debug-Recorder schemes) and the iOS simulator suite pass (the dictionary code is shared), and the owner's live dictionary blob is byte-identical before and after the test runs (checksum).
 8. `[judge]` `new` The grouped list and the add-from-History flow look and feel right, judged on screenshots of the built app in the Mac test VM with a fixture dictionary, next to the chosen mockups: `mockups/dictionary-rows.png` (variant A, left) and `mockups/history-pick-2-sheet-join.png` / `history-pick-4-warnings.png` (variant A, left window; the sheet is shared).
 
+## Amendments (owner, 2026-11-21, at verify; mockup rounds 1-2)
+
+Criterion 4 changes: picking works on the polished text, not on Raw; no Raw/Polished switch, no "Add to Dictionary…" button and no sheet. Criteria 5 and 6 keep their expectations for the inline field. Criterion 8 is judged against the round-2 boards below.
+
+9. `[check]` `new` Fix a word inline (mockup `pointer-r2`, variants A and B together): marking one word, or a run of words by drag or shift-click, in the polished text fills "Heard as" and opens a "Correct spelling" field under the text with the cursor in it; Return adds (through the group-aware path, so a known spelling joins its row), Escape cancels, then the line "Added: … Applies from your next dictation. Undo". The everyday-word and clash warnings of criterion 5 show next to the field, without blocking. Observed: tests of the add path and the warnings; screenshots in the Mac test VM.
+10. `[check]` `new` Variant A: the popover's Home card is titled with the dictation it shows ("Last dictation · time · language"), its polished text is markable in place, "‹ earlier" steps to older dictations, Copy is its only button; "Revert to Raw" is removed. Observed: VM screenshots of the three steps.
+11. `[check]` `new` Variant B: a "Fix a word" window with recent dictations on the left (the last one preselected and highlighted) and the chosen dictation large on the right, reached in one click from the popover; even white space (owner: "not every space is being used ... the white space is uneven"). Observed: VM screenshots; owner judges the look.
+12. `[check]` `new` Dictionary window (mockup `dictionary-window-r2`, variant B): a rounded search field with a magnifier and a clear button above the list filters rows by spelling or heard form, ⌘F focuses it, the count reads "N of M words"; tabs at the top "Entries | Spoken Punctuation | Voice Commands" each fill the whole window, with their own scrolling; Starter Packs and Import CSV sit in an "Add ▾" menu next to Add Entry; the Case Sensitive toggle is removed (matching stays case-insensitive except a single all-caps key, as today). Observed: a filter test; VM screenshots of each tab; opening Spoken Punctuation leaves the window responsive (F1j).
+13. `[check]` `exists` No new colours: the views use the colours the current UI uses (system and semantic colours, the existing accent); the green of the mockups' sidebar and selection is not taken over (owner: "don't just add new colors if you feel like it").
+
 ## Not in this slice
 
 - iPhone and iPad screens: item 65 (`.flow/65-dictionary-ux-ios/`), owner's choice "Mac first" (2026-11-14).
 - A "say the word again" teaching panel and a spoken "add to dictionary" command: not chosen by the owner (2026-11-14). The spoken correct spelling would be misheard the same way, so the correct spelling is always typed.
 - Suggested entries mined from the logs or from post-paste edits: item 58 and SEED-003.
-- Search in the Dictionary pane, and any change to how matching works (exact pass, fuzzy pass, guards).
+- Any change to how matching works (exact pass, fuzzy pass, guards). Search in the dictionary window moved into the slice by amendment 12.
 - A canonical-plus-aliases storage format.
 - Free text selection with a right-click "Add to Dictionary…" in History (mockup `history-pick` variant B, not chosen), and picking parts of a word.
 

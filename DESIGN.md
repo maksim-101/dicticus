@@ -208,6 +208,7 @@ Default spring: `.spring(response: 0.45, dampingFraction: 0.85)` for non-modal g
 - **Do** layer the brand pair (forest + sage) only on **brand surfaces**: app icon, onboarding hero, "What's New" splash. Standard chrome stays Apple-semantic.
 - **Do** use `recording` (red) for the mic-active state only. Never for delete buttons.
 - **Don't** introduce gradients or glassmorphism. Dicticus signals trust through restraint, not visual flair. One scoped exception: the macOS live transcript overlay uses native Liquid Glass (`NSGlassEffectView`), a top sheen gradient and a top fade mask (Phase 51, user-approved after design rounds 5 to 7 on 2026-10-15); nothing else.
+- **Don't** add colours a screen does not already use (owner, 2026-11-21: "don't just add new colors if you feel like it"). New views take the colours the existing UI shows (system and semantic colours, the current accent); a mockup's colours are never carried into the build unless the owner chose them.
 - **Don't** animate the actual text-insertion path. Animations are for state framing, never for content arrival.
 - **Don't** override Dynamic Type. All typography respects user accessibility settings.
 - **Don't** add a third typeface. SF Pro + SF Mono cover everything.
