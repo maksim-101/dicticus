@@ -55,6 +55,7 @@ final class AddToDictionarySheetModelTests: XCTestCase {
         XCTAssertEqual(model.warnings.count, 2)
         XCTAssertTrue(model.warnings[0].contains("everyday word"))
         XCTAssertTrue(model.warnings[1].contains("becomes “Quibbly”"))
+        XCTAssertTrue(model.canAdd, "warnings inform, they do not block")
 
         model.correct = "Quibbly"
         XCTAssertEqual(model.warnings.count, 1, "no conflict warning when it already becomes that spelling")
