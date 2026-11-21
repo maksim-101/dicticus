@@ -18,6 +18,7 @@ struct PopoverHeader: View {
 
     @EnvironmentObject var hotkeyManager: HotkeyManager
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.closePopover) private var closePopover
     @State private var isHoveringGear = false
     @State private var isHoveringQuit = false
 
@@ -69,6 +70,7 @@ struct PopoverHeader: View {
                     // NSApp.activate guards the .accessory first-click foreground pitfall.
                     NSApp.activate(ignoringOtherApps: true)
                     openSettings()
+                    closePopover()
                 } label: {
                     Image(systemName: "gear")
                         .font(.system(size: 15))

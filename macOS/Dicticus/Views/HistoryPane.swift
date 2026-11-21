@@ -11,6 +11,7 @@ import SwiftUI
 struct HistoryPane: View {
 
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.closePopover) private var closePopover
     @ObservedObject private var historyService = HistoryService.shared
 
     var body: some View {
@@ -75,6 +76,7 @@ struct HistoryPane: View {
         Button {
             openWindow(id: "history")
             NSApp.activate(ignoringOtherApps: true)
+            closePopover()
         } label: {
             HStack {
                 Image(systemName: "magnifyingglass")

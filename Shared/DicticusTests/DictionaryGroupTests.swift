@@ -204,6 +204,33 @@ final class DictionaryGroupTests: XCTestCase {
         XCTAssertEqual(service.dictionary, before)
     }
 
+    func testUndoOfRemovalsRestoresTheRemovedEntries() {
+        service.setReplacement(for: "kwib ly", with: "Quibbly")
+        service.setReplacement(for: "quibli", with: "Quibbly")
+        service.setReplacement(for: "flor", with: "Zornex")
+        service.setReplacement(for: "gitlo", with: "GitLo")
+        let before = service.dictionary
+
+        service.restoreEntries(service.removeHeardForm("quibli"))
+        XCTAssertEqual(service.dictionary, before)
+
+        let removed = service.removeGroups(spellings: ["Quibbly", "Zornex"])
+        XCTAssertEqual(Set(service.dictionary.keys), ["gitlo"])
+        XCTAssertEqual(Set(removed.keys), ["kwib ly", "quibli", "flor"])
+        service.restoreEntries(removed)
+        XCTAssertEqual(service.dictionary, before, "createdAt and source come back unchanged")
+        XCTAssertEqual(persisted(), before)
+    }
+
+    /// F1a: the popover quick-add stored `replacement: ""`, which deletes the heard word.
+    func testSetReplacementRefusesEmptyOrIdenticalReplacement() {
+        service.setReplacement(for: "kwib ly", with: "")
+        service.setReplacement(for: "flor", with: "   ")
+        service.setReplacement(for: "Quibbly", with: "Quibbly")
+        XCTAssertTrue(service.dictionary.isEmpty)
+        XCTAssertTrue(persisted().isEmpty)
+    }
+
     func testRestoreEntryUndoesAddAndChange() {
         service.setReplacement(for: "kwib ly", with: "Quibbly")
         let old = service.dictionary["kwib ly"]

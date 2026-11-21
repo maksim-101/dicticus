@@ -7,6 +7,8 @@ struct DictionaryGroupRow: View {
     let group: DictionaryService.DictionaryGroup
     @Binding var renamingSpelling: String?
     var onMessage: (String?) -> Void
+    /// The removed entries and a line describing them, for the window's Undo.
+    var onRemoved: ([String: DictionaryMetadata], String) -> Void = { _, _ in }
 
     @State private var isAdding = false
     @State private var newForm = ""
@@ -73,9 +75,10 @@ struct DictionaryGroupRow: View {
                 .onSubmit(rename)
                 .onExitCommand { renamingSpelling = nil; onMessage(nil) }
         } else {
+            // The double-click is the List's primary action (DictionaryView); a tap gesture
+            // here swallowed the clicks inside the selectable List (F1g).
             Text(group.spelling)
                 .font(.system(size: 13, weight: .semibold))
-                .onTapGesture(count: 2) { renamingSpelling = group.spelling }
                 .help("Double-click to change the spelling for all its heard forms")
         }
     }
@@ -85,7 +88,7 @@ struct DictionaryGroupRow: View {
         return HStack(spacing: 4) {
             Text(form).font(.system(size: 12))
             Button {
-                dictionaryService.removeHeardForm(form)
+                onRemoved(dictionaryService.removeHeardForm(form), "Removed “\(form)” from \(group.spelling).")
             } label: {
                 Image(systemName: "xmark").font(.system(size: 8, weight: .semibold))
             }

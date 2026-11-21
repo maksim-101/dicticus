@@ -7,6 +7,12 @@ enum PopoverTab: String, CaseIterable {
     case history
 }
 
+extension EnvironmentValues {
+    /// Closes the menu bar popover; MenuBarExtra has no dismiss of its own, and a popover
+    /// left open covers the window it just opened (slice 52 F1e).
+    @Entry var closePopover: () -> Void = {}
+}
+
 /// Root container for the menu bar popover (replaces monolithic MenuBarView).
 ///
 /// Architecture per RESEARCH Pattern 1 (Q-04 fallback):
@@ -29,6 +35,7 @@ struct PopoverRoot: View {
 
     @State private var tab: PopoverTab = .home
     @State private var showOnboarding = false
+    @State private var panel: NSWindow?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -59,6 +66,8 @@ struct PopoverRoot: View {
         }
         .frame(width: 348, height: 320)
         .dynamicTypeSize(...DynamicTypeSize.accessibility3)
+        .background(WindowAccessor { panel = $0 })
+        .environment(\.closePopover, { [panel] in panel?.close() })
         .onAppear {
             // Start permission polling so changes in System Settings are detected live.
             permissionManager.startPolling()

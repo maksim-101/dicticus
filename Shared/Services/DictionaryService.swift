@@ -437,10 +437,12 @@ class DictionaryService: ObservableObject {
 
     func setReplacement(for original: String, with replacement: String) {
         let trimmedOriginal = original.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedOriginal.isEmpty else { return }
+        let trimmedReplacement = replacement.trimmingCharacters(in: .whitespacesAndNewlines)
+        // An empty replacement deletes the heard word from every dictation (slice 52 F1a).
+        guard !trimmedOriginal.isEmpty, !trimmedReplacement.isEmpty, trimmedOriginal != trimmedReplacement else { return }
 
         dictionary[trimmedOriginal] = DictionaryMetadata(
-            replacement: replacement.trimmingCharacters(in: .whitespacesAndNewlines),
+            replacement: trimmedReplacement,
             createdAt: Date()
         )
         save()
@@ -570,9 +572,12 @@ class DictionaryService: ObservableObject {
         return .saved
     }
 
-    func removeHeardForm(_ form: String) {
-        guard dictionary[form] != nil else { return }
+    /// Returns the removed entry, for Undo.
+    @discardableResult
+    func removeHeardForm(_ form: String) -> [String: DictionaryMetadata] {
+        guard let removed = dictionary[form] else { return [:] }
         removeReplacement(for: form)
+        return [form: removed]
     }
 
     /// Gives every heard form of `oldSpelling` the new spelling. `createdAt` is kept and
@@ -597,10 +602,25 @@ class DictionaryService: ObservableObject {
         return .saved
     }
 
-    func removeGroup(spelling: String) {
-        let keys = dictionary.filter { $0.value.replacement == spelling }.map(\.key)
-        guard !keys.isEmpty else { return }
-        for key in keys { dictionary.removeValue(forKey: key) }
+    /// Removes every row in `spellings` with one save; returns the removed entries, for Undo.
+    @discardableResult
+    func removeGroups(spellings: Set<String>) -> [String: DictionaryMetadata] {
+        let removed = dictionary.filter { spellings.contains($0.value.replacement) }
+        guard !removed.isEmpty else { return [:] }
+        for key in removed.keys { dictionary.removeValue(forKey: key) }
+        save()
+        return removed
+    }
+
+    @discardableResult
+    func removeGroup(spelling: String) -> [String: DictionaryMetadata] {
+        removeGroups(spellings: [spelling])
+    }
+
+    /// Puts removed entries back unchanged (Undo of a removal); one save.
+    func restoreEntries(_ entries: [String: DictionaryMetadata]) {
+        guard !entries.isEmpty else { return }
+        dictionary.merge(entries) { _, restored in restored }
         save()
     }
 

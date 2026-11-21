@@ -22,7 +22,9 @@ struct DictionaryView: View {
     /// Selected rows, by spelling (slice 52).
     @State private var selection: Set<String> = []
     @State private var renamingSpelling: String? = nil
-    
+    /// The last removal, offered for Undo until the next one (F1f).
+    @State private var pendingUndo: (message: String, entries: [String: DictionaryMetadata])? = nil
+
     @State private var sortMode: DictionarySortMode = .mostRecent
     @State private var isShowingRemoveAllConfirmation = false
     @State private var duplicateWarning: String? = nil
@@ -107,9 +109,9 @@ struct DictionaryView: View {
             .padding(.vertical, 4)
 
             List(groups, selection: $selection) { group in
-                DictionaryGroupRow(group: group, renamingSpelling: $renamingSpelling) { message in
+                DictionaryGroupRow(group: group, renamingSpelling: $renamingSpelling, onMessage: { message in
                     withAnimation(.easeInOut(duration: 0.2)) { duplicateWarning = message }
-                }
+                }, onRemoved: offerUndo)
                 .tag(group.spelling)
             }
             .listStyle(.inset)
@@ -123,6 +125,23 @@ struct DictionaryView: View {
                     deleteGroups(items)
                 }
                 .disabled(items.isEmpty)
+            } primaryAction: { items in
+                if items.count == 1 { renamingSpelling = items.first }
+            }
+
+            if let undo = pendingUndo {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.secondary)
+                    Text(undo.message)
+                    Button("Undo") {
+                        dictionaryService.restoreEntries(undo.entries)
+                        pendingUndo = nil
+                    }
+                    .buttonStyle(.link)
+                }
+                .font(.system(size: 12))
+                .padding(.vertical, 4)
+                .transition(.opacity)
             }
 
             // Duplicate Warning
@@ -543,11 +562,16 @@ struct DictionaryView: View {
     }
 
     private func deleteGroups(_ spellings: Set<String>) {
-        for spelling in spellings {
-            dictionaryService.removeGroup(spelling: spelling)
-        }
+        let removed = dictionaryService.removeGroups(spellings: spellings)
         selection.subtract(spellings)
         refreshEntries()
+        let what = spellings.count == 1 ? "“\(spellings.first!)”" : "\(spellings.count) words"
+        offerUndo(removed, "Deleted \(what) and \(removed.count) heard \(removed.count == 1 ? "form" : "forms").")
+    }
+
+    private func offerUndo(_ entries: [String: DictionaryMetadata], _ message: String) {
+        guard !entries.isEmpty else { return }
+        withAnimation(.easeInOut(duration: 0.2)) { pendingUndo = (message, entries) }
     }
 
     // MARK: - Starter Packs (Phase 31-03)

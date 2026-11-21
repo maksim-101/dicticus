@@ -23,6 +23,7 @@ struct HomePane: View {
 
     // Used by the hotkey-registration-failed branch to open the Settings window (Hotkeys pane).
     @Environment(\.openSettings) private var openSettings
+    @Environment(\.closePopover) private var closePopover
 
     // Re-render the subline whenever a standard hotkey binding changes.
     @State private var shortcutChangeToken: AnyObject? = nil
@@ -123,6 +124,7 @@ struct HomePane: View {
                             Button("Open Hotkeys Settings") {
                                 NSApp.activate(ignoringOtherApps: true)
                                 openSettings()
+                                closePopover()
                             }
                             .controlSize(.small)
                             .accessibilityLabel("Open Hotkeys Settings to reassign key combination")
