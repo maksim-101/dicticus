@@ -1,0 +1,14 @@
+# Both macOS suites on 1d0a773, 2026-11-21 07:56-08:02Z, with the customDictionaryMetadata blob hashed (sha256) before and after
+before 51670d884c459781cea9de6745435372145bf245acd1f3b98b41e944b3e4b7d5 07:56:51Z
+Dicticus exit 0
+	 Executed 1992 tests, with 10 tests skipped and 0 failures (0 unexpected) in 143.689 (144.057) seconds
+** TEST SUCCEEDED **
+Dicticus-Debug-Recorder exit 65
+	 Executed 2074 tests, with 11 tests skipped and 1 failure (0 unexpected) in 154.213 (154.604) seconds
+** TEST FAILED **
+after  51670d884c459781cea9de6745435372145bf245acd1f3b98b41e944b3e4b7d5 08:02:43Z
+OK: only /Applications/Dicticus.app is running (pid 4336)
+
+Test Case '-[DicticusTests.AddToDictionarySheetModelTests testEverydayWordAndExistingKeyWarnings]' passed (0.602 seconds).
+## Recorder failure
+macOS/DicticusTests/TextInjectorTests.swift:133: error: -[DicticusTests.TextInjectorTests testInjectText_frontmostChanged_fallsBackToClipboardWithoutPaste] : XCTAssertEqual failed: ("nil") is not equal to ("Optional("alpha beta")")

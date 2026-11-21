@@ -1,0 +1,13 @@
+# Full check on 807ebb9 (code = ac93cfe), 2026-11-21
+## suite-Dicticus
+	 Executed 1992 tests, with 10 tests skipped and 0 failures (0 unexpected) in 132.676 (133.077) seconds
+** TEST SUCCEEDED **
+## suite-Dicticus-Debug-Recorder
+	 Executed 2074 tests, with 11 tests skipped and 0 failures (0 unexpected) in 133.812 (134.192) seconds
+** TEST SUCCEEDED **
+## iOS first run
+Testing failed:
+	Dicticus (98720) encountered an error (The test runner hung before establishing connection.)
+## iOS rerun
+	 Executed 1802 tests, with 11 tests skipped and 0 failures (0 unexpected) in 84.559 (84.945) seconds
+** TEST SUCCEEDED **

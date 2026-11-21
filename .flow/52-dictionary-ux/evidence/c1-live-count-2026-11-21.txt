@@ -1,0 +1,3 @@
+# Live dictionary count, read-only (plistlib), 2026-11-21, branch at 5412ee7
+entries 311 groups (distinct replacement) 188
+blob sha256 51670d884c459781 newest createdAt 816934251.437467
