@@ -2,7 +2,7 @@
 Slice: 52-dictionary-ux (standard)
 Step: fix
 Next: F1 (FIX.md): map every route into the dictionary from the code, walk it in the mac-space VM on seeded invented entries, then sort and fix the friction points; then verify criterion 8 again
-Waiting on: nothing for the build (amendments 9-13 settled); VM tests wait for the mac-space turn (after read-aloud-extension), the held-key media test also for the owner's vm-grant-keyhold.sh
+Waiting on: the owner: approval of Amendment 1 (BRIEF.md criteria 9-13, PLAN.md tasks 5-10) before building; VM tests wait for the mac-space turn (after read-aloud-extension); key-hold grant done by the owner
 Started: 2026-11-14T14:07:19Z
 Baseline: at 04395b4 in a throwaway worktree: macOS Dicticus 1960 tests 0 failures (8 skipped), Dicticus-Debug-Recorder 2042 tests 0 failures (10 skipped); iOS simulator first run "test runner hung before establishing connection" (environment), rerun 1780 tests 0 failures (11 skipped)
 Base: branch point

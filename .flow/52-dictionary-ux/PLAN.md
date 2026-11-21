@@ -65,6 +65,45 @@
 
 Tests use invented words only (public repo; no dictation text from the logs); every `xcodebuild` passes `-derivedDataPath build`; `scripts/check-running-copy.sh` after test runs; no Spotlight calls; the simulator is shut down after the iOS suite; GUI checks only in `mac-space`.
 
+## Amendment 1 (BRIEF.md Amendment 1, criteria 9-13; waiting on the owner's approval)
+
+Route: keep the stored format and the group API of task 1; one shared "fix a word" component (markable polished text plus inline field) used in two places; the dictionary window gets a tab container so the reference sections leave the entries view. Colours: only those the current UI uses (DESIGN.md Don't, criterion 13). Each task's Verify uses the slice's targeted-test command shape from tasks 1-3 (`-derivedDataPath build`, `CODE_SIGNING_ALLOWED=NO`) with the named test classes, then `scripts/check-running-copy.sh`; screenshots only in mac-space.
+
+### Task 5: fixes from the VM walkthrough (FIX.md F1a, F1b, F1e, F1f, F1g)
+- **Goal:** the popover quick-add refuses an empty or identical replacement (F1a); the popover keeps its size with the add form open (F1b); opening the dictionary or another window from the popover closes the popover (F1e); removing a heard form and Delete Selected offer Undo (F1f, a confirmation line with Undo like the History one); double-click on a spelling starts the rename, checked on real input in the VM first (F1g; fixed only if it fails there too).
+- **Files:** `macOS/Dicticus/Views/DictionaryPane.swift`, `PopoverRoot.swift`, `DictionaryView.swift`, `DictionaryGroupRow.swift`; tests in `macOS/DicticusTests/`.
+- **Verify:** regression test for F1a seen failing first; F1f undo restores the removed keys (test through an isolated `DictionaryService`); F1b, F1e, F1g by VM screenshots.
+- **Depends on:** none
+
+### Task 6: dictionary window with tabs and search (criterion 12; ends F1j)
+- **Goal:** tabs at the top "Entries | Spoken Punctuation | Voice Commands", each filling the window and scrolling itself; on Entries a rounded search field with magnifier and clear button above the list, ⌘F focuses it, filtering by spelling or heard form (case-insensitive, diacritics-insensitive), count "N of M words" while filtering; footer "Add ▾" menu (Add Entry…, Import CSV…, Starter Packs ▸ three packs) next to Edit; the Starter Packs paragraph goes; the Case Sensitive toggle goes from the Mac window (the shared setting stays at its stored value, false for the owner; the iOS toggle stays until item 65).
+- **Files:** `macOS/Dicticus/Views/DictionaryView.swift` (split into the tab container and an entries view); filter function in `Shared/Services/DictionaryService.swift` or a small helper; tests in `Shared/DicticusTests/DictionaryGroupTests.swift`.
+- **Verify:** filter tests (spelling match, heard-form match, no match, umlaut); VM: each tab, a filtered list, and opening Spoken Punctuation with the window still responding (clicks reach the list after switching back).
+- **Depends on:** none
+
+### Task 7: shared fix-a-word component (criterion 9)
+- **Goal:** a view that shows a dictation's polished text as markable words (click marks one, drag or shift-click marks a run; whole words, end punctuation trimmed, reusing `WordPick`), and on marking opens "Heard as" (the marked text) and "Correct spelling" (focused) inline; Return adds through `addHeardForm` (joins a known spelling), Escape cancels; everyday-word and clash warnings next to the field, non-blocking; then "Added: … Applies from your next dictation. Undo". The sheet's model is reused for note, warnings, save and undo; the sheet itself goes.
+- **Files:** new `macOS/Dicticus/Views/FixWordView.swift`; `AddToDictionarySheet.swift` (model kept, view removed or renamed); `Shared/Utilities/WordPick.swift` if polished-text tokens need a change; tests `AddToDictionarySheetModelTests`, `WordPickTests`.
+- **Verify:** model tests carried over (warnings, join note, save makes `applyWithTrace` rewrite, undo); a drag-run pick test on polished text.
+- **Depends on:** none
+
+### Task 8: popover Home card (criterion 10)
+- **Goal:** the card is titled "Last dictation · time · language", its polished text uses task 7's component in place, "‹ earlier" / "›" step through recent dictations, Copy is the only button; "Revert to Raw" and its code path go.
+- **Files:** `macOS/Dicticus/Views/HomePane.swift`; whatever only Revert to Raw used.
+- **Verify:** build and the existing HomePane-related tests; VM screenshots of the three steps.
+- **Depends on:** task 7
+
+### Task 9: "Fix a word" window (criterion 11)
+- **Goal:** a window with recent dictations on the left (last one preselected and highlighted) and the chosen one large on the right with task 7's component, even spacing; opened in one click from the popover (Home card and History tab). The History window's Raw-view pick and its sheet go; its rows keep Copy and search, and a row's "Fix a word…" opens this window on that dictation.
+- **Files:** new `macOS/Dicticus/Views/FixWordWindow.swift`; `DicticusApp.swift` (window scene); `HistoryView.swift`, `HistoryPane.swift`.
+- **Verify:** build; VM screenshots of the window in the three steps and of the route from the popover.
+- **Depends on:** task 7
+
+### Task 10: full check and VM evidence for criteria 4, 5, 8-13
+- **Goal:** the three suites green, the owner's dictionary blob unchanged (checksum), and a VM walkthrough with screenshots of every new screen next to the round-2 boards for criterion 8.
+- **Verify:** as criterion 7; screenshots under `evidence/` named after their criterion.
+- **Depends on:** tasks 5-9
+
 ## Departures from the brief
 
 - Criteria 4 and 8 name screenshots "in the Mac test VM". On 2026-11-14 a macOS microphone prompt blocked the app windows in mac-space and refused synthetic input; the owner chose "Render headless on this Mac": a test renders the windows off-screen on the host with invented data. These images show the real SwiftUI layout but no launched app and no click-through.
