@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"  xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <channel>
+        <title>Dicticus Changelog</title>
+        <link>https://maksim-101.github.io/dicticus/appcast.xml</link>
+        <description>Most recent changes with links to updates.</description>
+        <language>en</language>
+        <item>
+            <title>Version 1.5.2</title>
+            <sparkle:releaseNotesLink>https://github.com/maksim-101/dicticus/releases/tag/v1.5.2</sparkle:releaseNotesLink>
+            <pubDate>Wed, 25 Nov 2026 05:13:00 +0000</pubDate>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/maksim-101/dicticus/releases/download/v1.5.2/Dicticus.dmg"
+                       sparkle:version="30"
+                       sparkle:shortVersionString="1.5.2"
+                       sparkle:edSignature="U+SjtfuO/rcdlz7YNin2g+mMI1IE47y90EwyJMDxkagH15AQxwUbc2GxtyCdbQaMssJ8x6PciLLkqH3pGB8qBg=="
+                       length="11391381"
+                       type="application/octet-stream" />
+        </item>
+    </channel>
+</rss>

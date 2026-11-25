@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dicticus Privacy Policy</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    font: 16px/1.7 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    max-width: 42rem; margin: 0 auto; padding: 2.5rem 1.25rem 4rem;
+    color: #1a1a1a; background: #fff;
+  }
+  @media (prefers-color-scheme: dark) { body { color: #e8e8e8; background: #141414; } }
+  h1 { font-size: 1.8rem; margin-bottom: .25rem; letter-spacing: -0.01em; }
+  h2 { font-size: 1.15rem; margin-top: 2.25rem; }
+  .sub { color: #666; margin-top: 0; }
+  @media (prefers-color-scheme: dark) { .sub { color: #999; } }
+  .lede { font-size: 1.05rem; border-left: 3px solid #888; padding-left: 1rem; margin: 1.75rem 0; }
+  ul { padding-left: 1.25rem; }
+  li { margin: .55rem 0; }
+  footer { margin-top: 3rem; padding-top: 1.25rem; border-top: 1px solid #ddd; color: #666; font-size: .9rem; }
+  @media (prefers-color-scheme: dark) { footer { border-color: #333; color: #999; } }
+</style>
+</head>
+<body>
+
+<h1>Dicticus Privacy Policy</h1>
+<p class="sub">Last updated: 31 August 2026</p>
+
+<p class="lede">
+  Dicticus does not collect any data. Your voice recordings and the text transcribed from them stay
+  on your device. Nothing is sent to us, and nothing is sent to anyone else.
+</p>
+
+<h2>How your voice is handled</h2>
+<p>
+  Dicticus turns speech into text entirely on your own device. Both the speech recognition model and
+  the optional text cleanup model run locally, on your device's own processor. Your audio is never
+  uploaded anywhere in order to be transcribed, and once the transcription is finished the recording
+  is discarded rather than kept.
+</p>
+<p>
+  This is not a policy choice that could quietly change in an update. It is how the app is built:
+  there is no server on our side that could receive your voice, because we do not operate one.
+</p>
+
+<h2>What is stored, and where</h2>
+<p>
+  Everything Dicticus keeps is stored on your device alone. That includes your transcription
+  history, so that you can find and reuse what you dictated earlier, and you are free to delete
+  individual entries or clear the history entirely. It also includes any word corrections you add to
+  your personal dictionary, your app settings, and the speech recognition model itself, along with
+  the text cleanup model if you have chosen to enable it.
+</p>
+<p>
+  None of this is transmitted anywhere, backed up to our servers, or visible to us in any form.
+</p>
+
+<h2>When Dicticus uses the network</h2>
+<p>
+  There are exactly two occasions, and neither one involves your voice or your text. The first is
+  downloading the models: when you first use the app it fetches the speech recognition model, and
+  the text cleanup model as well if you enable that feature, from public model repositories. The
+  second, on macOS only, is checking a public feed to see whether a newer version of the app has
+  been released.
+</p>
+<p>
+  Once the models are on your device, Dicticus works completely offline.
+</p>
+
+<h2>Analytics and tracking</h2>
+<p>
+  There are none of either. Dicticus contains no analytics library, no crash reporting service, no
+  advertising identifier, and no tracking of any kind. We have no way of knowing who you are,
+  whether you use the app, or how often you open it.
+</p>
+
+<h2>Sharing your data</h2>
+<p>
+  We do not share your data with anyone, for the straightforward reason that we never receive it.
+  Dicticus has no accounts, no sign in, and no server component that holds anything belonging to
+  you.
+</p>
+
+<h2>The permissions Dicticus asks for</h2>
+<ul>
+  <li>
+    <strong>Microphone access</strong>, which the app needs in order to hear you at all. This one is
+    required.
+  </li>
+  <li>
+    <strong>Accessibility and Input Monitoring</strong> on macOS, so that the push to talk hotkey
+    works in any application and so that the finished text can be placed at your cursor.
+  </li>
+  <li>
+    <strong>Audio capture from other apps</strong> on macOS, which is optional. Dicticus uses it for
+    one narrow purpose: measuring whether sound is currently playing, so that it can pause your
+    music while you dictate. Only the loudness level is read. No audio from other apps is ever
+    recorded, stored, or examined for its content.
+  </li>
+</ul>
+
+<h2>Children</h2>
+<p>
+  Dicticus is not aimed at children, and it collects no information from anyone at all, children
+  included.
+</p>
+
+<h2>If this policy ever changes</h2>
+<p>
+  Should Dicticus ever gain a feature that sends audio or text off your device, this page will be
+  updated to say so before that feature ships, and the change will be described here in plain terms
+  rather than buried in a list of amendments. Any such feature would be switched off by default and
+  would require your explicit consent before it did anything.
+</p>
+
+<h2>Getting in touch</h2>
+<p>
+  Questions about this policy are welcome through the project's issue tracker at
+  <a href="https://github.com/maksim-101/dicticus">github.com/maksim-101/dicticus</a>.
+</p>
+
+<footer>
+  Dicticus is a local first dictation app for macOS and iOS.
+</footer>
+
+</body>
+</html>
