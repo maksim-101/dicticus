@@ -1,0 +1,414 @@
+import SwiftUI
+import AppKit
+
+/// Settings → AI Cleanup pane.
+///
+/// Group "Model": model name, LLM status, download controls, idle unload.
+/// Group "Language": Swiss German toggle (app-local UserDefaults on macOS).
+/// Group "Context-Aware Formatting": on/off toggle and per-app overrides.
+struct AiCleanupPane: View {
+    @EnvironmentObject var warmupService: ModelWarmupService
+
+    var body: some View {
+        Form {
+            Section("Model") {
+                LabeledContent(ModelDownloadService.modelDisplayName) {
+                    statusView
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(warmupService.llmStatus == .ready ? "Model ready" : warmupService.llmStatus.label)
+
+                if warmupService.offersLlmDownload {
+                    Button("Download (2.7 GB)") { warmupService.downloadLlmOnDemand() }
+                }
+
+                AutoDownloadFormRow()
+
+                IdleUnloadFormRow()
+            }
+
+            Section("Language") {
+                SwissGermanFormRow()
+            }
+
+            Section("Context-Aware Formatting") {
+                ContextAwareFormattingFormRow()
+                Text("Overrides below apply only while context-aware formatting is enabled above.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                ContextOverridesEditor()
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    @ViewBuilder
+    private var statusView: some View {
+        HStack(spacing: 4) {
+            if warmupService.llmStatus.isActive {
+                ProgressView()
+                    .controlSize(.small)
+            }
+            Text(warmupService.llmStatus.label)
+                .foregroundStyle(statusColor)
+        }
+    }
+
+    private var statusColor: Color {
+        switch warmupService.llmStatus {
+        case .ready:   return Color(red: 0.17, green: 0.64, blue: 0.44)   // DESIGN.md `ready` light
+        case .failed:  return .red
+        case .downloading, .loading: return .orange
+        case .idle, .notDownloaded: return .secondary
+        }
+    }
+}
+
+/// Swiss German toggle row styled for a Settings Form (LabeledContent layout).
+///
+/// Backs the `useSwissGerman` key on `DicticusDefaults.suite`.
+private struct SwissGermanFormRow: View {
+    @State private var isOn: Bool = SwissGermanFormRow.currentValue()
+
+    private static func currentValue() -> Bool {
+        SwissDefaultMigration.runIfNeeded()
+        return DicticusDefaults.useSwissGerman
+    }
+
+    var body: some View {
+        Toggle("Swiss German spelling (ß→ss)", isOn: $isOn)
+            .onChange(of: isOn) { _, newValue in
+                DicticusDefaults.suite.set(newValue, forKey: SwissDefaultMigration.toggleKey)
+            }
+    }
+}
+
+/// 261103-r9g: the auto-download switch. Backs `ModelWarmupService.autoDownloadDefaultsKey`
+/// on `DicticusDefaults.suite`; a missing key reads as off. Read once per launch, so switching it
+/// on starts nothing in the running session — the Download button does that.
+private struct AutoDownloadFormRow: View {
+    @State private var isOn: Bool = ModelWarmupService.autoDownloadEnabled(from: DicticusDefaults.suite)
+
+    var body: some View {
+        Toggle("Download the model automatically", isOn: $isOn)
+            .help("Downloads the 2.7 GB model at launch when it is missing. When off, Dicticus asks the first time you use AI cleanup.")
+            .onChange(of: isOn) { _, newValue in
+                DicticusDefaults.suite.set(newValue, forKey: ModelWarmupService.autoDownloadDefaultsKey)
+            }
+    }
+}
+
+/// Phase 50 D-10: idle-unload period picker. Persists an `Int` minutes value under
+/// `ModelWarmupService.idleUnloadDefaultsKey`; the idle-check loop reads the key on
+/// every tick, so no restart is needed for a change to take effect. macOS-only by
+/// design (iOS has no idle unload — D-09).
+private struct IdleUnloadFormRow: View {
+    @State private var minutes: Int = IdleUnloadFormRow.currentValue()
+
+    private static func currentValue() -> Int {
+        DicticusDefaults.suite.object(forKey: ModelWarmupService.idleUnloadDefaultsKey) as? Int
+            ?? ModelWarmupService.idleUnloadDefaultMinutes
+    }
+
+    var body: some View {
+        LabeledContent("Unload AI model after idle") {
+            Picker("Unload AI model after idle", selection: $minutes) {
+                ForEach(ModelWarmupService.idleUnloadOptionsMinutes, id: \.self) { m in
+                    Text("\(m) min").tag(m)
+                }
+                Divider()
+                Text("Never").tag(0)
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .frame(width: 110)
+        }
+        .help("Frees ~2.7 GB of memory after this much idle time; the model reloads on your next AI-cleanup dictation.")
+        .onChange(of: minutes) { _, newValue in
+            DicticusDefaults.suite.set(newValue, forKey: ModelWarmupService.idleUnloadDefaultsKey)
+        }
+    }
+}
+
+/// Context-aware formatting disable toggle (Phase 38 Plan 03, D-09, CTXFMT-03).
+///
+/// Backs `ContextResolver.enabledKey` on `DicticusDefaults.suite` — the same
+/// suite `ContextResolver.isEnabled` reads at `HotkeyManager`'s press-time
+/// resolve call, so this row is the single source of truth for whether
+/// context-aware formatting runs at all. Disabled ⇒ `ContextResolver.resolve`
+/// always returns `.default`, i.e. exactly today's (pre-Phase-38) behavior.
+private struct ContextAwareFormattingFormRow: View {
+    @State private var isOn: Bool = ContextResolver.isEnabled(DicticusDefaults.suite)
+
+    var body: some View {
+        Toggle("Context-aware formatting", isOn: $isOn)
+            .onChange(of: isOn) { _, newValue in
+                DicticusDefaults.suite.set(newValue, forKey: ContextResolver.enabledKey)
+            }
+    }
+}
+
+/// One installed/running app, as offered by the override editor's app picker
+/// (see `ContextOverridesEditor.loadInstalledApps`).
+/// Display-only; `ContextResolver`'s storage format stays keyed by raw
+/// `bundleID` string, unaffected by this view-layer convenience.
+private struct InstalledAppEntry: Hashable {
+    let displayName: String
+    let bundleID: String
+}
+
+/// The override editor's "add" form app-selection state: either a concrete
+/// picked app (by bundle ID) or the manual "Other…" fallback that reveals
+/// the raw bundle-ID `TextField` for apps not enumerated by
+/// `ContextOverridesEditor.loadInstalledApps`.
+private enum AppPickerSelection: Hashable {
+    case app(String)
+    case other
+}
+
+/// Inline "app → context" override editor (Phase 38 Plan 03, D-05, CTXFMT-03).
+///
+/// Follows `DictionaryPane`'s inline-list-with-add-form pattern rather than
+/// standing up a separate manager window for a handful of reassignments.
+/// Reads/writes go exclusively through `ContextResolver.loadGuarded`/`save` —
+/// this view never writes the override map to `UserDefaults` directly, so the
+/// present-but-unreadable → suppress-seed + rolling-backup data-loss guard
+/// (RESEARCH Pitfall 4) is always honored.
+private struct ContextOverridesEditor: View {
+    @State private var overrides: [String: DictationContext] = [:]
+    @State private var showingAddForm = false
+    @State private var newBundleID = ""
+    @State private var newContext: DictationContext = .default
+    @State private var installedApps: [InstalledAppEntry] = []
+    @State private var appSelection: AppPickerSelection = .other
+    /// CR-01 fix: `ContextResolver.loadGuarded`'s `suppressSeed` signal was
+    /// computed but never consulted, so a present-but-unreadable override
+    /// blob was shown identically to "no overrides configured" — and the
+    /// next edit would silently overwrite it. This flag makes the signal
+    /// actionable: `reload()` sets it, and the banner below warns the user
+    /// instead of presenting an empty list as if it were the real state.
+    @State private var overridesUnreadable = false
+
+    private var sortedOverrideIDs: [String] {
+        overrides.keys.sorted()
+    }
+
+    var body: some View {
+        Group {
+            if overridesUnreadable {
+                Label(
+                    "Your saved app overrides could not be read and are not shown below. Adding or editing an override here will overwrite them — restore first if you want to recover them.",
+                    systemImage: "exclamationmark.triangle"
+                )
+                .font(.caption)
+                .foregroundStyle(.orange)
+
+                // WR-01 fix: `save()` already stashes the previous blob into
+                // `overridesBackupKey` before every overwrite, but nothing
+                // read it back — a corrupted-then-overwritten map was only
+                // recoverable via a manual `defaults read`. This button
+                // gives the same rolling backup a real, user-facing recovery
+                // path.
+                Button("Restore previous overrides") {
+                    restoreFromBackup()
+                }
+                .buttonStyle(.bordered)
+            }
+
+            ForEach(sortedOverrideIDs, id: \.self) { bundleID in
+                HStack {
+                    Text(bundleID)
+                        .font(.system(.body, design: .monospaced))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+
+                    Spacer()
+
+                    Picker("Context for \(bundleID)", selection: bindingForOverride(bundleID)) {
+                        ForEach(DictationContext.allCases, id: \.self) { context in
+                            Text(context.rawValue.capitalized).tag(context)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .frame(width: 180)
+
+                    Button {
+                        removeOverride(bundleID)
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityLabel("Remove override for \(bundleID)")
+                }
+            }
+
+            if showingAddForm {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        // Raw bundle-ID entry was too technical for most users.
+                        // Primary path is now an app picker; manual bundle-ID
+                        // entry survives as the "Other…" fallback below for apps not
+                        // enumerated (e.g. not currently running and not in /Applications).
+                        Picker("App", selection: $appSelection) {
+                            ForEach(installedApps, id: \.bundleID) { app in
+                                Text("\(app.displayName) (\(app.bundleID))")
+                                    .tag(AppPickerSelection.app(app.bundleID))
+                            }
+                            Divider()
+                            Text("Other… (enter bundle ID manually)")
+                                .tag(AppPickerSelection.other)
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .frame(maxWidth: 260)
+                        .onChange(of: appSelection) { _, newValue in
+                            switch newValue {
+                            case .app(let bundleID): newBundleID = bundleID
+                            case .other: newBundleID = ""
+                            }
+                        }
+
+                        Picker("New override context", selection: $newContext) {
+                            ForEach(DictationContext.allCases, id: \.self) { context in
+                                Text(context.rawValue.capitalized).tag(context)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .frame(width: 100)
+
+                        Button("Add") {
+                            addOverride()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(newBundleID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .accessibilityLabel("Save app override")
+
+                        Button("Cancel") {
+                            cancelAdd()
+                        }
+                        .buttonStyle(.bordered)
+                        .accessibilityLabel("Cancel adding override")
+                    }
+
+                    if appSelection == .other {
+                        TextField("Bundle ID (e.g. com.example.app)", text: $newBundleID)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                }
+            } else {
+                Button("+ Add App Override") {
+                    appSelection = .other
+                    showingAddForm = true
+                    // WR-03 fix: loadInstalledApps() enumerates every .app bundle
+                    // in /Applications (FileManager + Bundle/Info.plist parsing)
+                    // — blocking I/O that stalled the popover when run
+                    // synchronously on the MainActor inside this button action.
+                    Task.detached(priority: .userInitiated) {
+                        let apps = Self.loadInstalledApps()
+                        await MainActor.run { installedApps = apps }
+                    }
+                }
+                .accessibilityLabel("Add app formatting override")
+            }
+
+            DisclosureGroup("Built-in defaults (read-only)") {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Apps that declare the developer-tools category (\(ContextResolver.developerToolsCategory)) get the Code context. Your overrides above win.")
+                        .font(.caption)
+                    Text("Terminals that declare another category:")
+                        .font(.caption)
+                        .padding(.top, 2)
+                    ForEach(ContextResolver.terminalFallback.keys.sorted(), id: \.self) { bundleID in
+                        LabeledContent(bundleID, value: ContextResolver.terminalFallback[bundleID]!.rawValue.capitalized)
+                            .font(.system(.caption, design: .monospaced))
+                    }
+                }
+                .padding(.top, 4)
+            }
+        }
+        .onAppear(perform: reload)
+    }
+
+    private func reload() {
+        let result = ContextResolver.loadGuarded(from: DicticusDefaults.suite, key: ContextResolver.overridesKey)
+        overrides = result.overrides
+        overridesUnreadable = result.suppressSeed
+    }
+
+    private func persist() {
+        ContextResolver.save(overrides, to: DicticusDefaults.suite, key: ContextResolver.overridesKey, backupKey: ContextResolver.overridesBackupKey)
+    }
+
+    /// WR-01 fix: reads the rolling backup blob `save()` stashed before its
+    /// last overwrite and restores it as the live override map, so a
+    /// present-but-unreadable trip of the CR-01 guard has a real recovery
+    /// path instead of requiring a manual `defaults read`/`write`.
+    private func restoreFromBackup() {
+        let backup = ContextResolver.loadGuarded(from: DicticusDefaults.suite, key: ContextResolver.overridesBackupKey)
+        overrides = backup.overrides
+        overridesUnreadable = false
+        persist()
+    }
+
+    private func bindingForOverride(_ bundleID: String) -> Binding<DictationContext> {
+        Binding(
+            get: { overrides[bundleID] ?? .default },
+            set: { newValue in
+                overrides[bundleID] = newValue
+                persist()
+            }
+        )
+    }
+
+    private func addOverride() {
+        let trimmed = newBundleID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        overrides[trimmed] = newContext
+        persist()
+        cancelAdd()
+    }
+
+    private func removeOverride(_ bundleID: String) {
+        overrides.removeValue(forKey: bundleID)
+        persist()
+    }
+
+    private func cancelAdd() {
+        showingAddForm = false
+        newBundleID = ""
+        newContext = .default
+        appSelection = .other
+    }
+
+    /// Enumerate installed/running apps for the override editor's app picker,
+    /// so the user doesn't need to know a raw bundle ID. Sources are UNIONed and
+    /// deduped by bundle ID, preferring the richer `localizedName` from a
+    /// running app over the on-disk display name when both exist.
+    nonisolated private static func loadInstalledApps() -> [InstalledAppEntry] {
+        var byBundleID: [String: InstalledAppEntry] = [:]
+
+        for app in NSWorkspace.shared.runningApplications where app.activationPolicy == .regular {
+            guard let bundleID = app.bundleIdentifier else { continue }
+            byBundleID[bundleID] = InstalledAppEntry(displayName: app.localizedName ?? bundleID, bundleID: bundleID)
+        }
+
+        if let entries = try? FileManager.default.contentsOfDirectory(
+            at: URL(fileURLWithPath: "/Applications"),
+            includingPropertiesForKeys: nil
+        ) {
+            for url in entries where url.pathExtension == "app" {
+                guard let bundleID = Bundle(url: url)?.bundleIdentifier, byBundleID[bundleID] == nil else { continue }
+                byBundleID[bundleID] = InstalledAppEntry(
+                    displayName: FileManager.default.displayName(atPath: url.path),
+                    bundleID: bundleID
+                )
+            }
+        }
+
+        return byBundleID.values.sorted {
+            $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+        }
+    }
+}

@@ -1,0 +1,4566 @@
+import Foundation
+import NaturalLanguage
+
+/// Phase 44 Plan 01 (D-01, the phase's load-bearing architectural decision):
+/// the shared vocabulary + entry point for the edit-level fidelity guard.
+///
+/// EditGuard owns content and numeric VALUE identity. `NumberRevert` (Step
+/// 3a.5) owns number FORM. The guard never rewrites a digit — it only
+/// accepts or rejects the LLM's edit — so the two layers cannot
+/// double-revert.
+///
+/// This plan (44-01) declares ONLY the public vocabulary + a fail-closed
+/// stub. No diff logic (plan 44-06 `EditDiff`), no per-edit classification
+/// (plan 44-10) lives here yet — every later plan in this phase (44-02
+/// through 44-11) compiles against these exact types, so the surface is
+/// frozen first.
+///
+/// `@MainActor`: matches `CleanupService.tokenizeForDialectGate`, which is
+/// `@MainActor`-isolated, and the `@MainActor` call sites (`TextProcessingService`, the spike-004
+/// harness) that will invoke `EditGuard.apply(...)` — avoids Swift 6
+/// strict-concurrency churn later.
+///
+/// INVARIANT: until plan 44-10 lands the classifier, `apply(...)` returns
+/// the rules-cleaned baseline. A half-built guard that passes the LLM
+/// candidate through is strictly worse than no guard.
+@MainActor
+public enum EditGuard {
+
+    // MARK: - Token vocabulary
+
+    /// A single token from either the baseline or candidate stream.
+    ///
+    /// `trailing` is the whitespace/punctuation that followed this token in
+    /// the source string, so a token array rebuilds losslessly (mirrors the
+    /// lossless-reconstruction contract of `rebuild(tokenize(s)) == s`).
+    public struct Token: Equatable, Sendable {
+        /// Surface form, original casing.
+        public let text: String
+        /// Lowercased form, used for classification lookups.
+        public let normalized: String
+        public let kind: TokenKind
+        /// Position in its own stream (baseline stream or candidate stream).
+        public let index: Int
+        public let sentenceIndex: Int
+        /// Whitespace/punctuation that followed this token in the source text.
+        public let trailing: String
+
+        public init(
+            text: String,
+            normalized: String,
+            kind: TokenKind,
+            index: Int,
+            sentenceIndex: Int,
+            trailing: String
+        ) {
+            self.text = text
+            self.normalized = normalized
+            self.kind = kind
+            self.index = index
+            self.sentenceIndex = sentenceIndex
+            self.trailing = trailing
+        }
+    }
+
+    public enum TokenKind: String, Sendable {
+        case word
+        case numeric
+        case punctuation
+    }
+
+    // MARK: - Edit vocabulary
+
+    public enum EditKind: String, Sendable {
+        case keep
+        case substitute
+        case insert
+        case delete
+        case move
+    }
+
+    /// A single typed edit between the baseline and candidate token streams.
+    /// `from` is the baseline-side token (nil for `.insert`); `to` is the
+    /// candidate-side token (nil for `.delete`).
+    public struct Edit: Sendable {
+        public let kind: EditKind
+        public let from: Token?
+        public let to: Token?
+
+        public init(kind: EditKind, from: Token?, to: Token?) {
+            self.kind = kind
+            self.from = from
+            self.to = to
+        }
+    }
+
+    // MARK: - Classification vocabulary (D-10 / D-11 wire format)
+
+    /// D-10's scoring vocabulary — the classes of edit this guard ACCEPTS.
+    /// `rawValue` strings are the wire format later plans (and the D-09
+    /// bake-off's surviving-yield scoring) depend on; do not rename cases
+    /// without updating every consumer.
+    public enum AcceptClass: String, Sendable {
+        case punctuationOrCasing
+        case inflectionFix
+        case functionWordSubstitution
+        case functionWordInsertion
+        case wordOrderRepair
+        case fillerDeletion
+        case repetitionDeletion
+        case numberFormChange
+        /// Quick task 260723-sx1, criterion A: a `.substitute` where `old`
+        /// is NOT a known word, `new` IS a known word, and the pair is
+        /// phonetically/orthographically close (the guard's own
+        /// content-word similarity gate, not `NumberRevert`'s). Additive in
+        /// this commit (Task 1) — no classification logic assigns it yet;
+        /// wired in Task 2.
+        case nonWordRepair
+        /// Quick task 260723-sx1, criterion B: a `.delete` (or, per the
+        /// pronoun-pair arm, a pronoun-old `.substitute` paired against
+        /// unrelated punctuation by `EditDiff`) that collapses two ADJACENT
+        /// aligned near-duplicate blocks (stutter/restart) down to one
+        /// copy. Additive in this commit (Task 1); wired in Task 2.
+        case disfluencyCollapse
+        /// Quick task 260801-m8o: a `.delete` of a lone `.` that structurally
+        /// reads as a Whisper pause-split rather than a genuine sentence
+        /// boundary — see `isPauseSplitPeriod`'s four-arm predicate. Classified
+        /// context-free (whether or not the surrounding edit group would
+        /// otherwise revert) so `applyAtomicGroupCoupling`'s exemption for this
+        /// class alone can drop the period even when a bundled neighbour edit
+        /// in the same atomic group is independently rejected.
+        case pauseSplitMerge
+        /// Quick task 260825-q1w (D-A/D-B): a
+        /// PURE two-token hyphen join — the candidate token is exactly the
+        /// two ADJACENT baseline tokens joined by a single hyphen, compared
+        /// on `normalized` so no letter can change. Example shapes:
+        /// `well`/`known` -> `well-known` (delete partner) and
+        /// `user`/`facing` -> `user-facing` (punctuation partner). Assigned by
+        /// `applyHyphenCompoundJoinExemption`, called at the end of
+        /// `classify` — the ONLY scope holding `dictProtectedLower` and the
+        /// only place that runs before `rebuild`'s coupling passes.
+        case hyphenCompoundJoin
+        /// Quick task 261003-aua: a German substitute whose source the
+        /// platform checker knows only as an unlisted compound split
+        /// (`Lesweise`) and whose candidate it suggests and lists
+        /// (`Leseweise`). Assigned at `classifySubstitute` step 8.5.
+        case compoundRepair
+        /// Quick task 261003-au9: a `substitute` of the connector `and` (en)
+        /// or `und` (de) by `.` between two clauses, where the words on both
+        /// sides are the same kept words and the continuation was lowercase
+        /// in the baseline and capitalised by the LLM (or is an English
+        /// I-form). Assigned in `classifySubstitute` by `isConnectorSplit`.
+        /// Context-dependent: it reverts with its sentence when an
+        /// independent content rejection sits in it.
+        case connectorSplit
+        /// Quick task 261003-au9: a terminal-mark (or comma) `.move` in one of
+        /// two shapes: the utterance-final baseline mark replaced by a
+        /// different terminal mark at the candidate's end, or a terminal mark
+        /// jumping at most six baseline tokens over quiet words. Assigned by
+        /// `applyPunctuationMoveExemption` as a post-pass over moves
+        /// `classifyMove` rejected as `unclassified`. Context-dependent, and
+        /// reverted by the boundary rule in `applySentenceCoupledRevert` when
+        /// the recase of the word after it is itself reverted. Provisional:
+        /// three corpus fires, against 260831-q2r's measured blanket-accept
+        /// corruptions.
+        case punctuationMove
+        /// Quick task 261003-fiu: an English contraction the LLM wrote out in
+        /// full where the contraction stood (`that's` -> `that is`, `don't` -> `do not`,
+        /// `we're` -> `we are`, `can't` -> `cannot`): a rejected host
+        /// substitute plus the inserted expansion word, flipped together by
+        /// `applyContractionExpansionExemption`. Closed tables, English only.
+        /// Context-dependent: it reverts with its sentence when an
+        /// independent content rejection sits in it, so the host never renders
+        /// without its expansion word.
+        case contractionExpansion
+        /// Quick task 261008-gb5: a substitute of `and`/`or` (en) or `und`/`oder`
+        /// (de) by `,` whose kept neighbours are unchanged and whose list still
+        /// holds a later `and`/`or` (`und`/`oder`) within four equal words, in
+        /// both texts. A different surviving coordinator counts. Context-
+        /// dependent: it reverts with its sentence when an independent content
+        /// rejection sits in it, so a comma never ships next to a reverted
+        /// remainder of its list.
+        case listComma
+    }
+
+    /// D-11's forensics vocabulary — the classes of edit this guard REJECTS.
+    /// `rawValue` strings are the wire format `DebugCleanupRecord.GateEntry`
+    /// (plan 44-11) serializes; do not rename cases without updating every
+    /// consumer.
+    ///
+    /// `derivationalSuffixChange` is its OWN case, distinct from
+    /// `contentWordIdentityChange`, per D-02a: the user blocked derivation
+    /// (`Handhabe`→`Handhabung`) on research evidence and requires the cost
+    /// of that block to be separately visible in D-10's scoring — merging it
+    /// into `contentWordIdentityChange` would hide exactly the number this
+    /// decision needs to stay accountable to.
+    public enum RejectionClass: String, Sendable {
+        case digitValueChange
+        case pronounDeleted
+        case pronounPersonChange
+        case moodLockSentenceInitialVerb
+        case contentWordIdentityChange
+        case derivationalSuffixChange
+        case contentWordDeletion
+        case contentWordInsertion
+        case numberInsertion
+        case unclassified
+        /// Quick task 260723-rif: assigned by `applyAtomicGroupCoupling` when
+        /// an otherwise-accepted edit is flipped to rejected because it
+        /// shares an atomic revert group (a keep-bounded run of interacting
+        /// edits, or a `.move`-bridged pair of such runs) with another edit
+        /// that was independently rejected. See that function's doc comment.
+        case atomicGroupRevert
+        /// Quick task 260817-r2u: a `.substitute` within the D-02
+        /// function<->function allowlist where exactly one side is a
+        /// negation token (`FunctionWords.isNegation`). Distinct from
+        /// `contentWordIdentityChange` per D-11 forensics — this is a
+        /// meaning-inversion class specific to negation polarity, not a
+        /// generic content-word change, and its cost must stay separately
+        /// visible in scoring. Observed in production: a negation deleted
+        /// from text pasted at the user's cursor.
+        case negationChange
+        /// Phase 49.6 (EDITGUARD-03, D-06): assigned by
+        /// `applySentenceCoupledRevert` when an otherwise-accepted
+        /// CONTEXT-DEPENDENT edit (D-02) is flipped to rejected because a
+        /// CONTENT-BEARING rejection (D-03) sits in the same BASELINE
+        /// sentence (D-01/D-04) — the unit is the raw sentence, not the
+        /// keep-bounded run `atomicGroupRevert` uses, and the
+        /// punctuation-only-group exemption `atomicGroupRevert` honors does
+        /// NOT apply here (D-02).
+        case sentenceCoupledRevert
+        /// Quick task 260930-s19: assigned by `classifyMove`, `classifyDelete`
+        /// and `classifySubstitute` to a baseline token that
+        /// `clauseRelocationIndices` marks: a member of a RUN of two or more
+        /// word/numeric `.move` edits that carries a clause across a clause
+        /// boundary or a raw sentence boundary, or a coupled sentence-terminal
+        /// mark the LLM removed to make room for it. A run is a set of moves
+        /// whose `from` tokens are consecutive in the BASELINE stream (only
+        /// baseline punctuation between members). Criterion A: a
+        /// clause-boundary mark sits between two members. Criterion B: a
+        /// member's jumped span holds a raw terminal mark that has a word
+        /// after it. Coupled marks: a `.delete` (or `.substitute` to a
+        /// non-terminal mark) of the terminal mark ending the sentence before
+        /// the run's origin sentence, or lying inside a member's jumped span,
+        /// unless `isPauseSplitPeriod` holds.
+        ///
+        /// A member of `sentenceRevertTriggerClasses`: the repro's two
+        /// inserted commas sit in a punctuation-only cluster that atomic
+        /// coupling reverts only because a move destination happens to bridge
+        /// into it, whereas the coupled-sentence revert returns the rest of
+        /// each touched raw sentence to raw deterministically. The synthetic
+        /// P1 fixture in `EditGuardClauseRelocationTests` reproduces the
+        /// German defect shape index for index.
+        case clauseRelocation
+        /// Quick task 260930-s1h: assigned by `classifySubstitute` to a
+        /// casing-only `.substitute` whose baseline token is an all-caps word
+        /// (two or more letters, every letter uppercase), whose candidate form
+        /// lowers at least one of those letters, and whose baseline
+        /// predecessor is a `.` token. Defect shape: the dictionary produced
+        /// a dotted identifier with an all-caps extension, the LLM title-cased
+        /// the extension, and step 1's casing-only accept shipped it. Of the
+        /// all-caps lowerings seen, only the after-dot one reached the paste
+        /// (the others were reverted by `sentenceCoupledRevert`).
+        ///
+        /// Scope is "after a dot" because a mid-sentence brand recase is
+        /// a correct repair, as were the
+        /// all-caps recases the pre-EditGuard gate allowed on purpose.
+        /// NOT a member of `sentenceRevertTriggerClasses`: a casing-only
+        /// restore carries no content signal, and triggering would revert the
+        /// raw sentence's other accepted punctuation. Known residual:
+        /// `projectFormatting` emits candidate casing verbatim and could in
+        /// principle lower an acronym; none has been observed.
+        case acronymLoweredAfterDot
+        /// Quick task 261008-gb4 (F5): assigned by `classifySubstitute` to a
+        /// casing-only `.substitute` of a word whose normalized form is a
+        /// dictionary replacement value (`dictProtected`). Defect shape:
+        /// the dictionary produced a lowercase term, the LLM wrote it in
+        /// capitals, and step 1's casing-only accept ran before step 5's
+        /// dictProtect check and shipped it.
+        ///
+        /// The first version rejected every casing change and was measured to
+        /// cost correct fixes (a German noun capital,
+        /// a colon and an article dragged out of the same edit cluster), so it
+        /// now fires only when the new casing is neither the dictionary
+        /// spelling nor a plain first-letter capital of it (ALL CAPS, mixed
+        /// case), and the rejection does not make `applyAtomicGroupCoupling`
+        /// revert the rest of its cluster.
+        /// NOT a member of `sentenceRevertTriggerClasses` (the
+        /// `acronymLoweredAfterDot` precedent): a casing-only restore carries
+        /// no content signal, and triggering would revert the sentence's
+        /// other accepted punctuation. Moving step 5 itself ahead of step 1
+        /// would yield `contentWordIdentityChange`, a trigger.
+        case dictProtectedCasing
+        /// Quick task 261008-gb4 (F2): assigned by `applySeamMarkCoupling` to
+        /// an accepted `punctuationOrCasing` delete of a baseline mark, and to
+        /// the casing-only substitute of the word after it, when a rejected
+        /// punctuation `.move` of the candidate lands on that very seam.
+        /// Defect shape: the LLM
+        /// deleted the baseline's period or comma at a seam and moved a mark
+        /// onto it; the move was rejected, the delete was not, and the seam
+        /// shipped with no mark at all. Both edits are reverted together, so
+        /// the seam keeps its dictated mark and the casing of the word after
+        /// it. Accept to reject only; `pauseSplitMerge` deletes are left
+        /// alone. NOT a member of `sentenceRevertTriggerClasses`.
+        case punctuationSeamCoupling
+        /// Quick task 261030-orz (spike 021): assigned by the particle-inversion
+        /// pass in `rebuild` to the accepted word moves of a German sentence
+        /// whose dictated text opens with a run of the particles also, ja,
+        /// doch, und, aber and whose rebuilt text puts a finite-or-modal verb
+        /// directly after that run in place of the dictated word. Why: the
+        /// move turns a discourse marker into a consequence adverb (`Also ich
+        /// habe` means "well, I have", `Also habe ich` means "therefore I
+        /// have"). Evidence (spike 021): such inversions were reverted only by
+        /// other rejections in the same sentence, and in a replay with the
+        /// current prompt (arm A0) some reached the cursor. `dann` and `so`
+        /// are not leaders: as sentence-initial adverbs they require
+        /// verb-second order, so blocking them would reject correct repairs.
+        /// NOT a member of `sentenceRevertTriggerClasses`: rejecting the moves
+        /// restores the dictated order exactly, and the sentence's other
+        /// accepted edits (commas, case repairs, which spike 021 counted as
+        /// good next to the inversion) do not depend on
+        /// it. Unlike the mood lock there is no paired punctuation half to
+        /// revert.
+        case particleInversion
+    }
+
+    /// The log-shaped record: one classified edit, ready to serialize
+    /// straight into `DebugCleanupRecord.GateEntry` (plan 44-11).
+    public struct ClassifiedEdit: Codable, Sendable {
+        public let kind: String
+        public let from: String?
+        public let to: String?
+        public let accepted: Bool
+        public let acceptClass: String?
+        public let rejectClass: String?
+
+        public init(
+            kind: String,
+            from: String?,
+            to: String?,
+            accepted: Bool,
+            acceptClass: String?,
+            rejectClass: String?
+        ) {
+            self.kind = kind
+            self.from = from
+            self.to = to
+            self.accepted = accepted
+            self.acceptClass = acceptClass
+            self.rejectClass = rejectClass
+        }
+    }
+
+    /// The guard's result: the reconstructed text, every classified edit
+    /// (for D-11 forensics), and whether the degenerate-alignment fail-closed
+    /// path fired.
+    public struct GuardResult: Sendable {
+        public let text: String
+        public let edits: [ClassifiedEdit]
+        public let failedClosed: Bool
+        public let failClosedReason: String?
+        /// Seams where a rejected removal of a terminal mark restored it in
+        /// front of a lowercase word the LLM had continued — see
+        /// `RestoredMarkContinuation`.
+        public let restoredMarkContinuations: [RestoredMarkContinuation]
+
+        public init(
+            text: String,
+            edits: [ClassifiedEdit],
+            failedClosed: Bool,
+            failClosedReason: String?,
+            restoredMarkContinuations: [RestoredMarkContinuation] = []
+        ) {
+            self.text = text
+            self.edits = edits
+            self.failedClosed = failedClosed
+            self.failClosedReason = failClosedReason
+            self.restoredMarkContinuations = restoredMarkContinuations
+        }
+    }
+
+    /// The surface of one restored seam: `precedingWord`, the restored
+    /// `mark`, and the lowercase `followingWord`. Text-keyed so it survives
+    /// NumberRevert, `collapseDanglingPunctuation` and segment concatenation
+    /// without offset bookkeeping; a later step that changes either
+    /// neighbour makes the triple stop matching.
+    public struct RestoredMarkContinuation: Sendable, Equatable, Hashable {
+        public let precedingWord: String
+        public let mark: String
+        public let followingWord: String
+
+        public init(precedingWord: String, mark: String, followingWord: String) {
+            self.precedingWord = precedingWord
+            self.mark = mark
+            self.followingWord = followingWord
+        }
+    }
+
+    // MARK: - Public entry point
+
+    /// Diffs `llmOutput` against `rulesCleaned`, classifies each edit, and
+    /// rebuilds the output from the baseline plus only the accepted edits
+    /// (D-01). Parameter shape is byte-comparable to
+    /// `CleanupService.gatePerSentence` so plan 44-11's call-site swap is
+    /// mechanical.
+    ///
+    /// - Parameters:
+    ///   - rawText: raw ASR dictation, before dictionary/ITN/Swiss/rules/
+    ///     self-correction processing. Accepted for parity with
+    ///     `gatePerSentence`'s signature but deliberately UNUSED — see the
+    ///     "T-42-06 decision" doc comment on `classify(...)` below. Kept as
+    ///     a parameter (not removed) so 44-11's call-site swap stays
+    ///     mechanical and so a future plan can wire it without another
+    ///     signature change.
+    ///   - rulesCleaned: deterministic Swift-side cleanup output (rules pass)
+    ///     — the fallback text on every fail-closed path.
+    ///   - llmOutput: post-strip/leak-guard LLM output (the candidate).
+    ///   - language: BCP-47-ish language tag ("de"/"en"/...).
+    ///   - dictProtected: dictionary-replacement values that must survive
+    ///     verbatim.
+    /// - Returns: a `GuardResult`. Every untrusted path returns
+    ///   `rulesCleaned` verbatim (`failedClosed == true`); the trusted path
+    ///   returns the baseline rebuilt with only the individually-approved
+    ///   edits applied. MUST NOT return `llmOutput` wholesale — construct,
+    ///   never merely accept-or-reject the LLM's whole text (D-01).
+    public static func apply(
+        rawText: String = "",
+        rulesCleaned: String,
+        llmOutput: String,
+        language: String,
+        dictProtected: Set<String> = [],
+        lexicon: any SpellLexicon = PlatformSpellLexicon.shared
+    ) -> GuardResult {
+        let safe = GuardResult(
+            text: rulesCleaned,
+            edits: [],
+            failedClosed: true,
+            failClosedReason: "notApplicable"
+        )
+
+        guard !rulesCleaned.isEmpty, !llmOutput.isEmpty else {
+            return GuardResult(text: rulesCleaned.isEmpty ? llmOutput : rulesCleaned, edits: [], failedClosed: true, failClosedReason: "emptyInput")
+        }
+
+        guard CleanupService.prefilterLLMOutput(rulesCleaned: rulesCleaned, llmOutput: llmOutput) else {
+            return GuardResult(text: safe.text, edits: [], failedClosed: true, failClosedReason: "prefilter")
+        }
+
+        let whole = applySingleWindow(
+            rulesCleaned: rulesCleaned, llmOutput: llmOutput, language: language,
+            dictProtected: dictProtected, lexicon: lexicon
+        )
+        guard whole.failedClosed else { return whole }
+
+        // Quick task 260830-fp4 (items 1+2): reached only when the
+        // whole-window classify/rebuild pipeline above could not reconcile
+        // the two token streams AT ALL (`degenerateAlignment` /
+        // `rebuildInvariant`). Every fixture in `EditGuardFixtures.all`
+        // still returns above, at `guard whole.failedClosed else { return
+        // whole }` — see that file's own note on why the corpus is
+        // deliberately shaped to never trip `isDegenerate`, and
+        // `EditGuardTests.testRebuildNeverReturnsNilOnAnyFixture` for the
+        // `rebuildInvariant` side — so nothing below this guard changes ANY
+        // existing fixture's rebuilt text; it only widens what happens on
+        // the residual class of inputs that were ALREADY reverting to
+        // `rulesCleaned` wholesale.
+        if let projected = salvageWithProjection(source: rulesCleaned, candidate: llmOutput) {
+            return projected
+        }
+        if let segmented = applySegmented(
+            rulesCleaned: rulesCleaned, llmOutput: llmOutput, language: language,
+            dictProtected: dictProtected, lexicon: lexicon
+        ) {
+            return segmented
+        }
+        return whole
+    }
+
+    /// The pre-260830-fp4 body of `apply` — diffs, classifies, and rebuilds
+    /// ONE window (either the whole utterance, or one sentence segment from
+    /// `applySegmented`). Byte-identical logic to what `apply` used to do
+    /// inline; extracted so `applySegmented` can call it once per segment
+    /// without duplicating it.
+    private static func applySingleWindow(
+        rulesCleaned: String,
+        llmOutput: String,
+        language: String,
+        dictProtected: Set<String>,
+        lexicon: any SpellLexicon
+    ) -> GuardResult {
+        let baselineTokens = EditGuardTokenizer.tokenize(rulesCleaned)
+        let candidateTokens = EditGuardTokenizer.tokenize(llmOutput)
+        let edits = EditDiff.diff(baseline: baselineTokens, candidate: candidateTokens)
+        let confidence = EditDiff.confidence(baseline: baselineTokens, candidate: candidateTokens, edits: edits)
+        guard !EditDiff.isDegenerate(confidence) else {
+            return GuardResult(text: rulesCleaned, edits: [], failedClosed: true, failClosedReason: "degenerateAlignment")
+        }
+
+        let classified = classify(
+            edits: edits,
+            baseline: baselineTokens,
+            candidate: candidateTokens,
+            language: language,
+            dictProtected: dictProtected,
+            lexicon: lexicon
+        )
+
+        guard let rebuilt = rebuild(
+            baseline: baselineTokens,
+            candidate: candidateTokens,
+            edits: edits,
+            classified: classified,
+            language: language
+        ) else {
+            return GuardResult(text: rulesCleaned, edits: [], failedClosed: true, failClosedReason: "rebuildInvariant")
+        }
+
+        return GuardResult(
+            text: collapseDanglingPunctuation(rebuilt.text), edits: rebuilt.classified,
+            failedClosed: false, failClosedReason: nil,
+            restoredMarkContinuations: rebuilt.restoredMarkContinuations
+        )
+    }
+
+    // MARK: - Quick task 260830-fp4, item 1: formatting-projection salvage
+
+    /// Modeled on the approach of natter's `TranscriptFormattingProjection.project`
+    /// (Apache 2.0; approach only, no code copied; see NOTICE). Deliberately narrower than
+    /// this file's own `classify`/`rebuild`: fires only when `source` and
+    /// `candidate` have the SAME COUNT of content tokens (`.word`/
+    /// `.numeric` — punctuation is never counted, matching natter's
+    /// letter-or-number token class) and at least
+    /// `formattingProjectionMatchThreshold` of them already match verbatim
+    /// (`normalized`, so casing differences don't count as mismatches). AN
+    /// INSERTION OR A DELETION CHANGES THE CONTENT-TOKEN COUNT, so it is
+    /// unconditionally excluded by the guard below and must still take the
+    /// existing reject-to-`rulesCleaned` route — this function can only
+    /// ever salvage a pure word-substitution difference. See
+    /// `EditGuardProjectionSalvageTests.testInsertionNeverTakesProjectionPath`
+    /// / `testDeletionNeverTakesProjectionPath` for the proof.
+    ///
+    /// Within that gate: emit `candidate`'s own punctuation/spacing/casing
+    /// verbatim (via each token's own `trailing` — the same
+    /// lossless-reconstruction contract `EditGuardTokenizer` guarantees
+    /// everywhere else in this file), but substitute `source`'s ORIGINAL
+    /// surface text back wherever a content token's `normalized` form
+    /// differs from `source`'s token at that position. This is what makes
+    /// the salvage safe under D-03/D-04 even without running `classify`: a
+    /// digit-value change or a pronoun swap always differs in `normalized`,
+    /// so it is always reverted to the dictated original here, never
+    /// silently kept.
+    private static let formattingProjectionMatchThreshold = 0.8
+
+    static func projectFormatting(source: String, candidate: String) -> String? {
+        let sourceContent = EditGuardTokenizer.tokenize(source).filter { $0.kind != .punctuation }
+        let candidateAll = EditGuardTokenizer.tokenize(candidate)
+        let candidateContentCount = candidateAll.reduce(0) { $0 + ($1.kind == .punctuation ? 0 : 1) }
+        guard !sourceContent.isEmpty, sourceContent.count == candidateContentCount else { return nil }
+
+        var matching = 0
+        var contentIndex = 0
+        var result = ""
+        for token in candidateAll {
+            if token.kind == .punctuation {
+                result += token.text + token.trailing
+                continue
+            }
+            let sourceToken = sourceContent[contentIndex]
+            contentIndex += 1
+            if sourceToken.normalized == token.normalized {
+                matching += 1
+                result += token.text + token.trailing
+            } else {
+                result += sourceToken.text + token.trailing
+            }
+        }
+        guard Double(matching) / Double(sourceContent.count) >= formattingProjectionMatchThreshold else { return nil }
+        return result
+    }
+
+    /// Wires `projectFormatting` into a `GuardResult`: on success, tags a
+    /// single synthetic `ClassifiedEdit` marker (`acceptClass:
+    /// "formattingProjection"`) so D-11's forensics log and this task's own
+    /// non-vacuity count can see the salvage fired. Deliberately NOT a new
+    /// `AcceptClass` case — that enum's own doc comment says "do not rename
+    /// cases without updating every consumer," and this is a whole-text
+    /// transform, not a single classified edit, so it does not belong in
+    /// that per-edit wire vocabulary; `ClassifiedEdit.acceptClass` is a
+    /// plain `String?`, so tagging it here widens no enum.
+    private static func salvageWithProjection(source: String, candidate: String) -> GuardResult? {
+        guard let projected = projectFormatting(source: source, candidate: candidate) else { return nil }
+        let marker = ClassifiedEdit(
+            kind: "projection", from: nil, to: nil,
+            accepted: true, acceptClass: "formattingProjection", rejectClass: nil
+        )
+        return GuardResult(text: collapseDanglingPunctuation(projected), edits: [marker], failedClosed: false, failClosedReason: nil)
+    }
+
+    // MARK: - Quick task 260830-fp4, item 2: sub-utterance revert granularity
+
+    /// Splits BOTH `rulesCleaned` and `llmOutput` into sentence segments
+    /// using `SelfCorrectionResolver`'s own regex-based sentence-boundary
+    /// splitter (`boundarySentenceSpans`, bumped from `private` to
+    /// package-internal for this reuse) rather than an NLTokenizer-based one:
+    /// this pipeline's post-ASR text carries
+    /// "a.m."/decimal-point shapes `boundarySentenceSpans` is already built
+    /// to protect against splitting on (see its own doc comment).
+    ///
+    /// Only ever called from `apply` AFTER the whole-utterance pipeline
+    /// (`applySingleWindow` + the whole-text `salvageWithProjection`
+    /// attempt) has ALREADY failed. This ordering is deliberate, not
+    /// incidental: running per-segment BEFORE the whole-utterance attempt
+    /// would change `EditDiff`'s alignment for every multi-sentence fixture
+    /// in `EditGuardFixtures.all` — its move-pairing is GLOBAL across the
+    /// whole diffed text (`classifyMove`'s own doc comment: `pairMovesFirst`'s
+    /// unbounded cross-sentence matching is exactly the mechanism
+    /// `fx-mov-punct-en-fullrecord-spuriousmove` exists to pin),
+    /// and this task's constraints forbid touching `EditDiff.swift` or any
+    /// classification rule. Gating this behind the whole-utterance
+    /// pipeline's own failure means every existing fixture's diff/classify/
+    /// rebuild path is COMPLETELY UNCHANGED — this can only ever fire on the
+    /// residual class of inputs that were already reverting to
+    /// `rulesCleaned` wholesale.
+    ///
+    /// Deliberately conservative on alignment, for the same reason: returns
+    /// `nil` (caller falls through to the existing whole-text fail-closed
+    /// revert) whenever the two sides split into a DIFFERENT number of
+    /// sentences, or into one or fewer — it does not attempt any
+    /// merge/split reconciliation. Running a second sentence-boundary
+    /// definition against the same text would buy a benefit this task's
+    /// scope did not ask for, and this project's own gate-policy history
+    /// warns against reaching for it without measurement. The equal-count case is the
+    /// common, highest-confidence case.
+    private static func applySegmented(
+        rulesCleaned: String,
+        llmOutput: String,
+        language: String,
+        dictProtected: Set<String>,
+        lexicon: any SpellLexicon
+    ) -> GuardResult? {
+        let baselineSegments = sentenceSegments(rulesCleaned)
+        let candidateSegments = sentenceSegments(llmOutput)
+        guard baselineSegments.count > 1, baselineSegments.count == candidateSegments.count else { return nil }
+
+        var text = ""
+        var edits: [ClassifiedEdit] = []
+        var anySucceeded = false
+        var continuations: [RestoredMarkContinuation] = []
+        for (segmentBaseline, segmentCandidate) in zip(baselineSegments, candidateSegments) {
+            let segmentResult = applySingleWindow(
+                rulesCleaned: segmentBaseline, llmOutput: segmentCandidate, language: language,
+                dictProtected: dictProtected, lexicon: lexicon
+            )
+            if segmentResult.failedClosed, let salvaged = salvageWithProjection(source: segmentBaseline, candidate: segmentCandidate) {
+                text += salvaged.text
+                edits.append(contentsOf: salvaged.edits)
+                anySucceeded = true
+            } else {
+                text += segmentResult.text
+                edits.append(contentsOf: segmentResult.edits)
+                continuations.append(contentsOf: segmentResult.restoredMarkContinuations)
+                if !segmentResult.failedClosed { anySucceeded = true }
+            }
+        }
+        // If every segment ALSO fell back to its own baseline, the
+        // concatenation above is byte-identical to `rulesCleaned` (each
+        // segment is a lossless span of the original text) — return `nil`
+        // so the caller's existing `whole` fail-closed result stands
+        // unchanged, preserving its more informative `failClosedReason`
+        // ("degenerateAlignment"/"rebuildInvariant") instead of masking it.
+        guard anySucceeded else { return nil }
+        return GuardResult(text: text, edits: edits, failedClosed: false, failClosedReason: nil, restoredMarkContinuations: continuations)
+    }
+
+    /// Lossless-reconstruction sentence split: `sentenceSegments(s)
+    /// .joined() == s` for any `s` (inherited from
+    /// `SelfCorrectionResolver.boundarySentenceSpans`'s own contract), so
+    /// concatenating each segment's independently-rebuilt (or reverted)
+    /// text in `applySegmented` always reproduces the correct whitespace
+    /// between segments — no extra glue step needed.
+    private static func sentenceSegments(_ text: String) -> [String] {
+        let nsText = text as NSString
+        return SelfCorrectionResolver.boundarySentenceSpans(text).map { nsText.substring(with: $0) }
+    }
+
+    /// Collapse two punctuation marks separated ONLY by whitespace (e.g. `ready , . So`) into a
+    /// single mark. Such a sequence is never valid prose, so this is always a repair, never a
+    /// meaning change — no content token is touched.
+    ///
+    /// Root cause it backstops (documented, not fixed here): when the LLM splits a run-on sentence
+    /// (comma→period) AND adds a comma elsewhere, `EditDiff`'s LCS pairs the two IDENTICAL comma
+    /// tokens across the clause boundary, so `rebuild` keeps the baseline comma and inserts the new
+    /// period as a separate spaced token → ` , .`. Fixing the LCS pairing itself is deep and
+    /// high-regression; collapsing the provably-invalid output is the safe, targeted fix.
+    /// Example shapes: `ready, so`→`ready. So,`; `saved, otherwise`→`saved. Otherwise,` — seen
+    /// with both models.
+    ///
+    /// Winner: a sentence-terminal mark (`.!?`) beats a non-terminal (`,;:`); otherwise the later
+    /// mark wins. The required whitespace BETWEEN the marks is what makes this precise — legitimate
+    /// runs like `...`, `?!`, or `etc.,` have no interior space and never match.
+    ///
+    /// The interior-space requirement is DELIBERATE, not an oversight — do not widen it. Quick
+    /// task 260830-dc4 (the "und.," defect) found an unspaced mixed-source sibling of this
+    /// bug that this string-level pass is STRUCTURALLY BLIND to: when a rejected `.move` restores
+    /// a baseline mark that itself came from a multi-mark baseline run (e.g. one dot out of a
+    /// dictated "..."), that restored mark's OWN baseline trailing is empty — it sat directly
+    /// against another mark in the source, never a space — so no interior whitespace is ever
+    /// produced between it and whatever candidate-sourced mark ends up next to it, and this regex
+    /// never matches. Widening the pattern to also match the unspaced case would destroy `etc.,`
+    /// and a leading `...`, both pinned by `testCollapseUnit`. That unspaced mixed-source shape is
+    /// owned upstream, at the token level where provenance is still known, by
+    /// `collapseMixedProvenancePunctuationRuns` (see its doc comment) — this pass keeps owning
+    /// exactly the spaced same-source case it always has.
+    ///
+    /// A mark directly followed by a letter or digit starts a token (a dotted name such as `.NET`,
+    /// `.env`, `.git`, or `.5`), so it is not dangling: the second mark needs whitespace, the end
+    /// of the string, or a closing quote/bracket after it. The lookahead mirrors `stripPreamble`'s
+    /// Pitfall-5 lookahead. This pass runs on the rebuilt STRING after `multisetInvariantHolds` and
+    /// `renderingInvariantHolds`, so no fail-closed net sees its output;
+    /// `EditGuardMaterializeInvariantTests` P7 is the property that guards it. Quick task
+    /// 260930-s1a (defect shape: `stack: .NET` was pasted as `stack.NET`).
+    static func collapseDanglingPunctuation(_ text: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: " *([.,;:!?]) +([.,;:!?])(?=\\s|$|[\"')\\]])") else { return text }
+        let terminals: Set<Character> = [".", "!", "?"]
+        var current = text
+        // Loop so a run of 3+ (e.g. ` , . ;`) fully collapses.
+        while true {
+            let range = NSRange(current.startIndex..., in: current)
+            guard let m = regex.firstMatch(in: current, range: range),
+                  let r1 = Range(m.range(at: 1), in: current),
+                  let r2 = Range(m.range(at: 2), in: current),
+                  let full = Range(m.range, in: current) else { break }
+            let p1 = current[r1.lowerBound], p2 = current[r2.lowerBound]
+            let winner = (terminals.contains(p1) && !terminals.contains(p2)) ? p1 : p2
+            current.replaceSubrange(full, with: String(winner))
+        }
+        return current
+    }
+
+    // MARK: - D-04 pronoun family (identity beyond grammatical person)
+
+    /// `PronounPersonMap` only tracks grammatical PERSON (1st/2nd/3rd).
+    /// Two pronouns can share a person yet refer to a DIFFERENT subject —
+    /// "him" -> "her" are both third person, but the substitution changes
+    /// WHO is being talked about, which is a meaning change, not a repair
+    /// (44-10's pronoun gender-flip gap, raised by 44-03's
+    /// `fx-sub-pronoun-en-genderflip` fixture). This table adds a coarser
+    /// "family" identity beneath person: two pronouns are interchangeable
+    /// (a case-declension of the SAME referent, e.g. German `ihn`->`ihm`,
+    /// English `him`->`his`) only when they share a family. A substitution
+    /// across families is rejected even when `PronounPersonMap` reports the
+    /// same person — this is a STRICTER predicate than person-equality
+    /// alone (family-equal implies person-equal), so it can only reject
+    /// MORE than the person-only check, never accept something the
+    /// person-only check would have rejected. That is the safe direction
+    /// per this file's asymmetric-risk framing (a false reject costs a
+    /// missed repair; a false accept pastes a corrupted meaning).
+    ///
+    /// Deliberately conservative: German `sie`/`ihnen` are each given their
+    /// OWN family rather than grouped with a plural sibling, mirroring
+    /// `PronounPersonMap`'s own documented KNOWN GAP (that ambiguity is
+    /// already accepted there) — a genuine case-declension repair between
+    /// them becomes a missed repair (safe) rather than a risked false
+    /// accept. `sich` (invariant reflexive across all 3rd-person genders)
+    /// gets its own family for the same reason.
+    private static let germanPronounFamily: [String: String] = [
+        "ich": "1sg", "mich": "1sg", "mir": "1sg",
+        "wir": "1pl", "uns": "1pl", "unser": "1pl",
+        "du": "2sg", "dich": "2sg", "dir": "2sg",
+        "ihr": "2pl", "euch": "2pl",
+        "er": "3sg.m", "ihn": "3sg.m", "ihm": "3sg.m",
+        "sie": "3.sie", "ihnen": "3.ihnen",
+        "es": "3sg.n",
+        "sich": "3.reflexive"
+    ]
+
+    /// English half of the pronoun-family table — see `germanPronounFamily`.
+    private static let englishPronounFamily: [String: String] = [
+        "i": "1sg", "me": "1sg", "my": "1sg",
+        "we": "1pl", "us": "1pl", "our": "1pl",
+        "you": "2", "your": "2", "yours": "2",
+        "he": "3sg.m", "him": "3sg.m", "his": "3sg.m",
+        "she": "3sg.f", "her": "3sg.f",
+        "it": "3sg.n", "its": "3sg.n",
+        "they": "3pl", "them": "3pl", "their": "3pl"
+    ]
+
+    private static func pronounFamily(_ token: String, language: String) -> String? {
+        let lower = token.lowercased()
+        let prefix = language.prefix(2).lowercased()
+        return prefix == "en" ? englishPronounFamily[lower] : germanPronounFamily[lower]
+    }
+
+    // MARK: - Filler predicate (dispatches to the closed D-05 lists)
+
+    private static func isFillerToken(_ normalized: String, language: String) -> Bool {
+        let prefix = language.prefix(2).lowercased()
+        return prefix == "en"
+            ? FillerWordRemover.englishFillers.contains(normalized)
+            : FillerWordRemover.germanFillers.contains(normalized)
+    }
+
+    // MARK: - Part B: classify
+
+    /// Classifies every edit in `edits` against D-02..D-06, in the fixed
+    /// order documented on each branch below (first match wins). Returns a
+    /// `[ClassifiedEdit]` in the SAME order/count as `edits` — `rebuild`
+    /// zips them back together positionally, so callers must never reorder
+    /// or filter either array independently.
+    ///
+    /// **T-42-06 decision (recorded here, not implemented):** `rawText` is
+    /// NOT threaded into classification. Verified against the Phase 42
+    /// self-correction fixtures during 44-10 development
+    /// (`testSelfCorrectionKeepsLLMResolutionOverDegradedRulesBaseline`'s
+    /// scenario, replayed through this classifier by hand): D-05's
+    /// deletion predicate rejects the degraded rules-cleaned baseline's
+    /// stray self-correction artifacts (`"actually"`, `"it's"`, `"think"`)
+    /// as `contentWordDeletion`, so the guard falls back toward the
+    /// degraded-but-safe baseline rather than the LLM's cleaner resolution
+    /// — a REGRESSION relative to `gatePerSentence`'s T-42-06 raw-window
+    /// switch on that one scenario. The regression is in the SAFE
+    /// direction (a missed repair — clunkier text survives, not a
+    /// corrupted one) and is documented in `44-10-SUMMARY.md` rather than
+    /// implemented, because implementing the raw-window switch faithfully
+    /// requires per-sentence window classification (mirroring
+    /// `gateSentenceWindow`'s architecture) that this edit-level guard does
+    /// not otherwise need — out of scope for this plan. `rawText` stays a
+    /// parameter so a follow-up plan can wire it without another signature
+    /// change.
+    public static func classify(
+        edits: [Edit],
+        baseline: [Token],
+        candidate: [Token],
+        language: String,
+        dictProtected: Set<String>,
+        lexicon: any SpellLexicon = PlatformSpellLexicon.shared
+    ) -> [ClassifiedEdit] {
+        let dictProtectedLower = Set(dictProtected.map { $0.lowercased() })
+        let disfluencyIndices = disfluencyAcceptedIndices(edits: edits, baseline: baseline, language: language)
+        let clauseRelocation = clauseRelocationIndices(edits: edits, baseline: baseline)
+        var result: [ClassifiedEdit] = []
+        result.reserveCapacity(edits.count)
+
+        for edit in edits {
+            let (accepted, acceptClass, rejectClass) = classifyOne(
+                edit, baseline: baseline, language: language, dictProtectedLower: dictProtectedLower,
+                candidate: candidate, lexicon: lexicon, disfluencyIndices: disfluencyIndices,
+                clauseRelocationIndices: clauseRelocation
+            )
+            result.append(ClassifiedEdit(
+                kind: edit.kind.rawValue,
+                from: edit.from?.text,
+                to: edit.to?.text,
+                accepted: accepted,
+                acceptClass: acceptClass?.rawValue,
+                rejectClass: rejectClass?.rawValue
+            ))
+        }
+        applyHyphenCompoundJoinExemption(edits: edits, verdicts: &result, dictProtectedLower: dictProtectedLower)
+        applyPunctuationMoveExemption(edits: edits, verdicts: &result, baseline: baseline, candidate: candidate, language: language)
+        applySeamMarkCoupling(edits: edits, verdicts: &result, candidate: candidate)
+        applyContractionExpansionExemption(edits: edits, verdicts: &result, baseline: baseline, candidate: candidate, language: language, dictProtectedLower: dictProtectedLower)
+        return result
+    }
+
+    /// Quick task 260825-q1w (D-A/D-B): accepts a PURE two-token hyphen join
+    /// that `classifyOne` rejected as `derivationalSuffixChange` or
+    /// `contentWordIdentityChange` — a `.substitute` whose candidate token
+    /// is exactly the two ADJACENT baseline tokens joined by a single
+    /// hyphen, immediately followed by the now-redundant second baseline
+    /// token being dropped (a `.delete`, or a `.substitute` against
+    /// prosodic punctuation — landmine 1's two partner shapes). Every join
+    /// in the corpus is this PAIR; accepting only the substitute half would
+    /// render `user-facing facing`, so both verdicts flip together or
+    /// neither does.
+    ///
+    /// Deliberately narrow: digit-bearing tokens stay under the D-03 hard
+    /// lock (word kind required on both sides), a dictionary-protected
+    /// baseline token on either half never exempts, and the comparison is
+    /// on `normalized` so casing rides along (`json`/`datei` ->
+    /// `JSON-Datei`) but no letter may differ. Three-or-more-token joins are
+    /// excluded by construction (only `i+1` is ever consulted) — the one
+    /// three-token case seen (`ready-to-ship`-style) reads as a
+    /// mis-repair, not a join to accept (out-of-scope section of the plan).
+    /// No coupling-pass exemption is added here (landmine 3) — a qualifying
+    /// join can still be reverted by `applyAtomicGroupCoupling` when another
+    /// member of its atomic group is independently rejected; that is a
+    /// documented, deliberate limitation, not a bug.
+    private static func applyHyphenCompoundJoinExemption(
+        edits: [Edit],
+        verdicts: inout [ClassifiedEdit],
+        dictProtectedLower: Set<String>
+    ) {
+        for i in edits.indices {
+            guard edits[i].kind == .substitute, !verdicts[i].accepted,
+                  let rejectClass = verdicts[i].rejectClass,
+                  rejectClass == RejectionClass.derivationalSuffixChange.rawValue
+                    || rejectClass == RejectionClass.contentWordIdentityChange.rawValue,
+                  let from = edits[i].from, let to = edits[i].to,
+                  from.kind == .word, to.kind == .word
+            else { continue }
+
+            let j = i + 1
+            guard j < edits.count, !verdicts[j].accepted else { continue }
+
+            let partnerFrom: Token
+            if edits[j].kind == .delete, let pf = edits[j].from, pf.kind == .word {
+                partnerFrom = pf
+            } else if edits[j].kind == .substitute,
+                      let pf = edits[j].from, pf.kind == .word,
+                      let pt = edits[j].to, pt.kind == .punctuation,
+                      isProsodicPunctuation(pt.text) {
+                partnerFrom = pf
+            } else {
+                continue
+            }
+
+            guard partnerFrom.index == from.index + 1 else { continue }
+            guard !dictProtectedLower.contains(from.normalized),
+                  !dictProtectedLower.contains(partnerFrom.normalized) else { continue }
+            guard to.normalized == from.normalized + "-" + partnerFrom.normalized else { continue }
+
+            verdicts[i] = ClassifiedEdit(
+                kind: verdicts[i].kind, from: verdicts[i].from, to: verdicts[i].to,
+                accepted: true, acceptClass: AcceptClass.hyphenCompoundJoin.rawValue, rejectClass: nil
+            )
+            verdicts[j] = ClassifiedEdit(
+                kind: verdicts[j].kind, from: verdicts[j].from, to: verdicts[j].to,
+                accepted: true, acceptClass: AcceptClass.hyphenCompoundJoin.rawValue, rejectClass: nil
+            )
+        }
+    }
+
+    private static func classifyOne(
+        _ edit: Edit,
+        baseline: [Token],
+        language: String,
+        dictProtectedLower: Set<String>,
+        candidate: [Token],
+        lexicon: any SpellLexicon,
+        disfluencyIndices: Set<Int>,
+        clauseRelocationIndices: Set<Int>
+    ) -> (accepted: Bool, acceptClass: AcceptClass?, rejectClass: RejectionClass?) {
+        switch edit.kind {
+        case .keep:
+            guard let a = edit.from else { return (true, nil, nil) }
+            return a.kind == .punctuation ? (true, .punctuationOrCasing, nil) : (true, nil, nil)
+
+        case .substitute:
+            return classifySubstitute(edit, baseline: baseline, candidate: candidate, language: language, dictProtectedLower: dictProtectedLower, lexicon: lexicon, disfluencyIndices: disfluencyIndices, clauseRelocationIndices: clauseRelocationIndices)
+
+        case .insert:
+            return classifyInsert(edit, language: language, candidate: candidate)
+
+        case .delete:
+            return classifyDelete(edit, baseline: baseline, language: language, disfluencyIndices: disfluencyIndices, clauseRelocationIndices: clauseRelocationIndices)
+
+        case .move:
+            return classifyMove(edit, language: language, clauseRelocationIndices: clauseRelocationIndices)
+        }
+    }
+
+
+    /// Quick task 261003-au9: closed connector lists for `isConnectorSplit`.
+    private static let connectorSplitWords: [String: Set<String>] = ["en": ["and"], "de": ["und"]]
+    private static let connectorSplitMarks: Set<String> = ["."]
+
+    /// Quick task 261003-au9 (Rule A). Only `and`/`und` and only `.`: `;` has
+    /// no capitalisation signal ("Brot; Milch" would pass), and `but`, `or`,
+    /// `because`, `so`, `aber`, `oder`, `weil` carry meaning a period drops.
+    /// The neighbours must be the same kept words so the edit is purely the
+    /// connector; the continuation must be recased by the LLM (or an English
+    /// I-form) so an already-capitalised noun or name ("Brot und Milch") stays
+    /// a phrase coordination. The dictionary-protected and negation guards
+    /// cannot fire with this closed list; they stay as a defensive floor.
+    private static func isConnectorSplit(
+        a: Token, b: Token, baseline: [Token], candidate: [Token],
+        language: String, dictProtectedLower: Set<String>
+    ) -> Bool {
+        guard a.kind == .word, b.kind == .punctuation, connectorSplitMarks.contains(b.text) else { return false }
+        let lang = language.prefix(2).lowercased() == "en" ? "en" : "de"
+        guard connectorSplitWords[lang]?.contains(a.normalized) == true,
+              !dictProtectedLower.contains(a.normalized),
+              !FunctionWords.isNegation(a.normalized, language: language) else { return false }
+        let ai = a.index, bi = b.index
+        guard ai > 0, ai + 1 < baseline.count, bi > 0, bi + 1 < candidate.count else { return false }
+        let bp = baseline[ai - 1], bn = baseline[ai + 1], cp = candidate[bi - 1], cn = candidate[bi + 1]
+        guard bp.kind == .word, bn.kind == .word, cp.kind == .word, cn.kind == .word,
+              bp.normalized == cp.normalized, bn.normalized == cn.normalized else { return false }
+        if b.text == "." {
+            guard cn.text.first?.isUppercase == true else { return false }
+            // The LLM must have capitalised the continuation itself (lowercase in the baseline), or it is the
+            // always-capitalised English first-person pronoun family. An already-capitalised noun or name after the
+            // connector ("Brot und Milch", "the plan and the budget") is a phrase coordination, not a clause start.
+            let recased = bn.text.first?.isLowercase == true
+            let firstPerson = lang == "en" && ["i", "i'm", "i've", "i'll", "i'd"].contains(bn.normalized)
+            guard recased || firstPerson else { return false }
+        }
+        return true
+    }
+
+    /// Quick task 261008-gb5: list words for `isListComma`.
+    private static let listCommaWords: [String: Set<String>] = ["en": ["and", "or"], "de": ["und", "oder"]]
+    private static let listCommaWordCap = 4
+
+    /// Quick task 261008-gb5 (list comma). `and`/`or` (`und`/`oder`) replaced
+    /// by `,` is accepted only while the list still ends in a coordinator: the
+    /// kept neighbours are the same words, and scanning right from the right
+    /// neighbour (skipping commas, stopping at any other punctuation, crossing
+    /// at most `listCommaWordCap` words) reaches a later list word in the
+    /// baseline and in the candidate, with equal words in between. `A and B` ->
+    /// `A, B` has no later coordinator, so the replaced `and` still counts as
+    /// a lost word and stays rejected; so do `A and B and C` -> `A, B, C`,
+    /// `and not` and `and then`.
+    private static func isListComma(
+        a: Token, b: Token, baseline: [Token], candidate: [Token],
+        language: String, dictProtectedLower: Set<String>
+    ) -> Bool {
+        guard a.kind == .word, b.kind == .punctuation, b.text == "," else { return false }
+        let lang = language.prefix(2).lowercased() == "en" ? "en" : "de"
+        guard let words = listCommaWords[lang], words.contains(a.normalized),
+              !dictProtectedLower.contains(a.normalized),
+              !FunctionWords.isNegation(a.normalized, language: language) else { return false }
+        let ai = a.index, bi = b.index
+        guard ai > 0, ai + 1 < baseline.count, bi > 0, bi + 1 < candidate.count else { return false }
+        let bp = baseline[ai - 1], bn = baseline[ai + 1], cp = candidate[bi - 1], cn = candidate[bi + 1]
+        guard bp.kind == .word, bn.kind == .word, cp.kind == .word, cn.kind == .word,
+              bp.normalized == cp.normalized, bn.normalized == cn.normalized else { return false }
+        func scan(_ tokens: [Token], from start: Int) -> (stop: String, between: [String])? {
+            var between: [String] = []
+            var i = start
+            while i < tokens.count {
+                let t = tokens[i]
+                if t.kind == .punctuation {
+                    guard t.text == "," else { return nil }
+                } else if t.kind == .word {
+                    if words.contains(t.normalized) { return (t.normalized, between) }
+                    between.append(t.normalized)
+                    if between.count > listCommaWordCap { return nil }
+                } else {
+                    return nil
+                }
+                i += 1
+            }
+            return nil
+        }
+        guard let sb = scan(baseline, from: ai + 2), let sc = scan(candidate, from: bi + 2) else { return false }
+        return sb.stop == sc.stop && sb.between == sc.between
+    }
+
+    /// Quick task 261003-au9: prosodic marks a rejected punctuation `.move` may be re-accepted for.
+    private static let movableMarks: Set<String> = [",", ".", "?", "!"]
+    private static let punctuationMoveJumpCap = 6
+
+    /// Quick task 261003-au9: "quiet" means a keep, or a substitute that only
+    /// changes a word's case. Shared by `applyPunctuationMoveExemption` and
+    /// `applySeamMarkCoupling`.
+    private static func isQuietEdit(_ e: Edit) -> Bool {
+        if e.kind == .keep { return true }
+        if e.kind == .substitute, let f = e.from, let t = e.to, f.kind == .word, f.normalized == t.normalized { return true }
+        return false
+    }
+
+    /// Quick task 261003-au9 (Rule B). Re-accepts a rejected `unclassified`
+    /// punctuation move in the two shapes named on `AcceptClass.punctuationMove`.
+    /// "Quiet" means a keep, or a substitute that only changes a word's case.
+    /// The destination's two candidate neighbours must be adjacent in `edits`
+    /// and quiet, so nothing is rendered between the mark and its neighbours;
+    /// the mark never lands after a coordinator or negator, and a terminal
+    /// mark never lands before a word the LLM left lowercase.
+    private static func applyPunctuationMoveExemption(
+        edits: [Edit], verdicts: inout [ClassifiedEdit],
+        baseline: [Token], candidate: [Token], language: String
+    ) {
+        let quiet = isQuietEdit
+        var byCand: [Int: Edit] = [:]
+        var idxByCand: [Int: Int] = [:]
+        var byBase: [Int: Int] = [:]
+        for (k, e) in edits.enumerated() {
+            if let t = e.to { byCand[t.index] = e; idxByCand[t.index] = k }
+            if let f = e.from { byBase[f.index] = k }
+        }
+        for i in edits.indices {
+            guard edits[i].kind == .move, !verdicts[i].accepted,
+                  verdicts[i].rejectClass == RejectionClass.unclassified.rawValue,
+                  let a = edits[i].from, let b = edits[i].to,
+                  a.kind == .punctuation, b.kind == .punctuation, a.text == b.text,
+                  movableMarks.contains(a.text) else { continue }
+            let terminal = sentenceTerminalMarks.contains(a.text)
+            // destination: previous candidate token is a word; the next one (if any) is a word,
+            // capitalised after a terminal mark; neither a coordinator/negator before the mark.
+            guard b.index > 0, candidate[b.index - 1].kind == .word else { continue }
+            let cprev = candidate[b.index - 1]
+            if b.index + 1 < candidate.count {
+                let cnext = candidate[b.index + 1]
+                guard cnext.kind == .word else { continue }
+                if terminal, cnext.text.first?.isUppercase != true { continue }
+            }
+            if FunctionWords.isConjunctionOrNegator(cprev.normalized, language: language) { continue }
+            if terminal, FunctionWords.isSubstitutable(cprev.normalized, language: language) { continue }
+            // origin: word on the left, word (if any) on the right.
+            guard a.index > 0, baseline[a.index - 1].kind == .word else { continue }
+            if a.index + 1 < baseline.count, baseline[a.index + 1].kind != .word { continue }
+            // nothing is rendered between the destination's two candidate neighbours.
+            guard let ip = idxByCand[b.index - 1], quiet(edits[ip]) else { continue }
+            if b.index + 1 < candidate.count {
+                guard let inx = idxByCand[b.index + 1], inx == ip + 1, quiet(edits[inx]) else { continue }
+            }
+            var ok = false
+            // Shape 1: the utterance-final baseline mark replaced by a different terminal mark at the candidate's end.
+            if a.index == baseline.count - 1, let lastC = candidate.last, lastC.kind == .punctuation,
+               lastC.text != a.text, sentenceTerminalMarks.contains(lastC.text) {
+                ok = true
+            }
+            // Shape 2: a short jump over kept words only.
+            if !ok, terminal, i > 0, quiet(edits[i - 1]), i + 1 < edits.count, quiet(edits[i + 1]),
+               let pf = byCand[b.index - 1]?.from {
+                let lo = min(a.index, pf.index), hi = max(a.index, pf.index)
+                if hi - lo <= punctuationMoveJumpCap,
+                   (lo...hi).allSatisfy({ $0 == a.index || (byBase[$0].map { quiet(edits[$0]) } ?? false) }) {
+                    ok = true
+                }
+            }
+            guard ok else { continue }
+            verdicts[i] = ClassifiedEdit(kind: verdicts[i].kind, from: verdicts[i].from, to: verdicts[i].to,
+                                         accepted: true, acceptClass: AcceptClass.punctuationMove.rawValue, rejectClass: nil)
+        }
+    }
+
+    private static let seamMarks: Set<String> = [",", ".", ";", ":", "?", "!"]
+
+    /// Quick task 261008-gb4 (F2). Where a punctuation `.move` is rejected,
+    /// the candidate mark never renders at its destination. If that
+    /// destination is a seam between two quiet, non-punctuation candidate
+    /// tokens whose edits sit at `ip` and `ip + 2`, and `edits[ip + 1]` is an
+    /// accepted `punctuationOrCasing` delete of a baseline mark, the seam
+    /// would ship with no mark at all: the move that was meant to replace the
+    /// deleted mark is gone and the delete stands alone. The delete is then
+    /// rejected (`punctuationSeamCoupling`), and so is the casing-only
+    /// substitute of the word after it, so the dictated mark and the casing
+    /// after it come back together. (`applyAtomicGroupCoupling` would revert
+    /// that substitute anyway, as it shares a cluster with the delete; the
+    /// flip keeps the log attribution on `punctuationSeamCoupling`.)
+    ///
+    /// Why at classify time: `applyPunctuationMoveExemption` requires the two
+    /// neighbour edits of an accepted move to be adjacent (`inx == ip + 1`),
+    /// so an accepted `punctuationMove` never lands on a seam that holds a
+    /// delete; nearly all rejected punctuation moves in the planning
+    /// replay were rejected at classify (`unclassified`). A classify-time
+    /// pass therefore sees every seam shape, and `rebuild`'s
+    /// `applyAtomicGroupCoupling` sees the flips. Verdicts only go from
+    /// accepted to rejected. `pauseSplitMerge` deletes have a different
+    /// accept class and are left alone: a merged false pause-split period
+    /// stays merged.
+    private static func applySeamMarkCoupling(
+        edits: [Edit], verdicts: inout [ClassifiedEdit], candidate: [Token]
+    ) {
+        var idxByCand: [Int: Int] = [:]
+        for (k, e) in edits.enumerated() {
+            if let t = e.to { idxByCand[t.index] = k }
+        }
+        func reject(_ k: Int) {
+            verdicts[k] = ClassifiedEdit(
+                kind: verdicts[k].kind, from: verdicts[k].from, to: verdicts[k].to,
+                accepted: false, acceptClass: nil, rejectClass: RejectionClass.punctuationSeamCoupling.rawValue
+            )
+        }
+        for i in edits.indices {
+            guard edits[i].kind == .move, !verdicts[i].accepted,
+                  let a = edits[i].from, let b = edits[i].to,
+                  a.kind == .punctuation, b.kind == .punctuation,
+                  seamMarks.contains(a.text), seamMarks.contains(b.text) else { continue }
+            let j = b.index
+            guard j > 0, j < candidate.count - 1,
+                  candidate[j - 1].kind != .punctuation, candidate[j + 1].kind != .punctuation,
+                  let ip = idxByCand[j - 1], let inx = idxByCand[j + 1], inx == ip + 2,
+                  isQuietEdit(edits[ip]), isQuietEdit(edits[inx]) else { continue }
+            let d = ip + 1
+            guard edits[d].kind == .delete, let deleted = edits[d].from,
+                  deleted.kind == .punctuation, seamMarks.contains(deleted.text),
+                  verdicts[d].accepted,
+                  verdicts[d].acceptClass == AcceptClass.punctuationOrCasing.rawValue else { continue }
+            reject(d)
+            if edits[inx].kind == .substitute, verdicts[inx].accepted { reject(inx) }
+        }
+    }
+
+    /// Quick task 261003-fiu: negative contraction -> host; the expansion
+    /// word is always `not`. No `ain't` (no single full form). Also read by
+    /// `verbKeptBaselineOrder`, so a sentence-initial `Don't` rebuilt as
+    /// `Do not` is not mistaken for a fronted verb.
+    private static let negativeContractionHosts: [String: String] = [
+        "don't": "do", "doesn't": "does", "didn't": "did", "isn't": "is", "aren't": "are",
+        "wasn't": "was", "weren't": "were", "haven't": "have", "hasn't": "has", "hadn't": "had",
+        "won't": "will", "wouldn't": "would", "couldn't": "could", "shouldn't": "should",
+        "can't": "can", "mustn't": "must", "shan't": "shall", "needn't": "need",
+    ]
+    /// Suffix -> expansion word for the unambiguous suffix contractions. There
+    /// is no `'d` row: it is `would` or `had`, and no `let's` row: its `'s` is
+    /// `us`, so `let us` reads as "allow us".
+    private static let contractionSuffixExpansions: [String: String] = [
+        "'re": "are", "'ve": "have", "'ll": "will", "'m": "am",
+    ]
+    /// The only hosts whose `'s` is expanded to `is`: pronouns, wh-words and
+    /// `that`/`there`/`here`. A noun host (`the kiln's`) is a possessive or a
+    /// `has`, so the set is closed.
+    private static let isContractionHosts: Set<String> = [
+        "it", "that", "what", "where", "there", "here", "who", "how", "he", "she",
+    ]
+    /// Participles that make a `'s` read as `has` (`it's been`, `it's already
+    /// gone`). The window over the next two baseline words, together with the
+    /// four-letter `-ed` rule, errs toward rejection: `what's left` and `it's
+    /// done` stay as dictated although they could read as `is`.
+    private static let hasReadingParticiples: Set<String> = [
+        "been", "got", "gotten", "done", "gone", "seen", "taken", "given", "made", "had", "known", "shown",
+        "written", "come", "become", "begun", "broken", "chosen", "driven", "eaten", "fallen", "forgotten",
+        "found", "heard", "held", "kept", "left", "lost", "meant", "met", "paid", "said", "sent", "spent",
+        "stood", "told", "thought", "understood", "won", "brought", "bought", "caught", "taught", "built",
+        "felt", "led", "put", "set", "grown", "thrown", "drawn", "spoken", "stolen", "hidden", "risen",
+        "beaten", "forgiven", "proven", "shaken",
+    ]
+    private static let contractionSingleTokenExpansions: [String: String] = ["can't": "cannot"]
+
+    private static func contractionExpansionLookup(_ contraction: String) -> (host: String, word: String)? {
+        if let host = negativeContractionHosts[contraction] { return (host, "not") }
+        if contraction.hasSuffix("'s") {
+            let host = String(contraction.dropLast(2))
+            return isContractionHosts.contains(host) ? (host, "is") : nil
+        }
+        for (suffix, word) in contractionSuffixExpansions where contraction.hasSuffix(suffix) {
+            let host = String(contraction.dropLast(suffix.count))
+            guard !host.isEmpty, host.allSatisfy({ $0.isLetter }) else { return nil }
+            return (host, word)
+        }
+        return nil
+    }
+
+    /// Quick task 261003-fiu: accepts an English contraction written out in
+    /// full at its place. All six conditions together (a conjunction):
+    /// (1) a rejected `.substitute` whose prior class is
+    /// `contentWordIdentityChange` or `pronounPersonChange` (`it's` -> `it`
+    /// dies at step 4 as a pronoun change), the contraction not dictionary-
+    /// protected; (2) the contraction is in the closed tables; (3) the target
+    /// is the host and the candidate token directly after it is an `.insert`
+    /// of the expansion word (or the single `cannot`), so `it's` -> `is` and
+    /// `there's` -> `there` fail; (4) the host's case equals the contraction's,
+    /// or it is a capital at the text start or directly after a candidate
+    /// `.`/`?`/`!` (an accepted substitute renders verbatim, so a mid-sentence
+    /// capital would stay); (5) the baseline word before and after the
+    /// contraction equal the candidate word before the host and after the
+    /// span, which makes the pair the whole gap and keeps an LLM-inserted
+    /// mark out of condition 4; (6) for `'s`, none of the next two baseline
+    /// words reads as a has-participle.
+    ///
+    /// The expansion word is read at the host's CANDIDATE index plus one,
+    /// where the reader sees it: `EditDiff.pairAdjacentSubstitutes` emits
+    /// paired substitutes before surplus inserts, so an inserted comma can sit
+    /// between them in edit order. With condition 5 the insert is also the
+    /// next edit, so the lookup is correct by construction rather than a
+    /// provable guard. The prior-class gate and the dictionary check keep this
+    /// pass from overriding any other lock; no table contraction reaches
+    /// another class today, so both are defensive.
+    ///
+    /// Both verdicts flip together, and condition 5 puts both in one
+    /// keep-bounded cluster and one baseline sentence, so every coupling pass
+    /// (atomic group, sentence, mood lock attempt 1 followed by atomic
+    /// coupling) reverts them together; `do` never renders without `not`. The
+    /// multiset invariant cannot catch a split pair (it is computed from the
+    /// verdicts), which is why parity is structural and tested.
+    ///
+    /// Quick task 261003-gp8: in the two-token form the inserted expansion
+    /// word must be all lowercase (`do Not` mid-sentence was accepted and
+    /// shipped a stray capital).
+    private static func applyContractionExpansionExemption(
+        edits: [Edit], verdicts: inout [ClassifiedEdit],
+        baseline: [Token], candidate: [Token], language: String, dictProtectedLower: Set<String>
+    ) {
+        guard language.prefix(2).lowercased() == "en" else { return }
+        var idxByCand: [Int: Int] = [:]
+        for (k, e) in edits.enumerated() {
+            if let t = e.to { idxByCand[t.index] = k }
+        }
+        for i in edits.indices {
+            guard edits[i].kind == .substitute, !verdicts[i].accepted,
+                  let prior = verdicts[i].rejectClass,
+                  prior == RejectionClass.contentWordIdentityChange.rawValue
+                    || prior == RejectionClass.pronounPersonChange.rawValue,
+                  let a = edits[i].from, let b = edits[i].to,
+                  a.kind == .word, b.kind == .word,
+                  !dictProtectedLower.contains(a.normalized),
+                  let match = contractionExpansionLookup(a.normalized) else { continue }
+
+            var insertEdit: Int?
+            let spanEnd: Int
+            if contractionSingleTokenExpansions[a.normalized] == b.normalized {
+                spanEnd = b.index
+            } else {
+                guard b.normalized == match.host,
+                      let j = idxByCand[b.index + 1],
+                      edits[j].kind == .insert, !verdicts[j].accepted,
+                      verdicts[j].rejectClass == RejectionClass.contentWordInsertion.rawValue,
+                      let t = edits[j].to, t.kind == .word, t.normalized == match.word,
+                      t.text == t.text.lowercased() else { continue }
+                insertEdit = j
+                spanEnd = b.index + 1
+            }
+
+            let aUpper = a.text.first?.isUppercase == true
+            let bUpper = b.text.first?.isUppercase == true
+            let caseOK = aUpper == bUpper
+                || (!aUpper && bUpper && (b.index == 0
+                    || (candidate[b.index - 1].kind == .punctuation
+                        && sentenceTerminalMarks.contains(candidate[b.index - 1].text))))
+            guard caseOK else { continue }
+
+            if a.index == 0 {
+                guard b.index == 0 else { continue }
+            } else {
+                guard b.index > 0, baseline[a.index - 1].normalized == candidate[b.index - 1].normalized else { continue }
+            }
+            guard a.index + 1 < baseline.count, spanEnd + 1 < candidate.count,
+                  baseline[a.index + 1].normalized == candidate[spanEnd + 1].normalized else { continue }
+
+            if a.normalized.hasSuffix("'s") {
+                let next = baseline[(a.index + 1)...].lazy.filter { $0.kind == .word }.prefix(2)
+                if next.contains(where: { hasReadingParticiples.contains($0.normalized) || ($0.normalized.count >= 4 && $0.normalized.hasSuffix("ed")) }) { continue }
+            }
+
+            verdicts[i] = ClassifiedEdit(kind: verdicts[i].kind, from: verdicts[i].from, to: verdicts[i].to,
+                                         accepted: true, acceptClass: AcceptClass.contractionExpansion.rawValue, rejectClass: nil)
+            if let j = insertEdit {
+                verdicts[j] = ClassifiedEdit(kind: verdicts[j].kind, from: verdicts[j].from, to: verdicts[j].to,
+                                             accepted: true, acceptClass: AcceptClass.contractionExpansion.rawValue, rejectClass: nil)
+            }
+        }
+    }
+
+    // MARK: - substitute
+
+    private static func classifySubstitute(
+        _ edit: Edit,
+        baseline: [Token],
+        candidate: [Token],
+        language: String,
+        dictProtectedLower: Set<String>,
+        lexicon: any SpellLexicon = PlatformSpellLexicon.shared,
+        disfluencyIndices: Set<Int> = [],
+        clauseRelocationIndices: Set<Int> = []
+    ) -> (accepted: Bool, acceptClass: AcceptClass?, rejectClass: RejectionClass?) {
+        guard let a = edit.from, let b = edit.to else { return (false, nil, .unclassified) }
+
+        // Quick task 260930-s19: a coupled sentence-terminal mark (see
+        // `clauseRelocationIndices`) is rejected before any other arm.
+        if a.kind == .punctuation, clauseRelocationIndices.contains(a.index) {
+            return (false, nil, .clauseRelocation)
+        }
+
+        // Quick task 260930-s1h: an all-caps word lowered directly after a
+        // `.` is rejected before step 1's casing-only accept (see
+        // `RejectionClass.acronymLoweredAfterDot`).
+        if a.kind == .word, a.normalized == b.normalized,
+           a.text.contains(where: { $0.isLetter }),
+           a.text.filter({ $0.isLetter }).count >= 2,
+           a.text.allSatisfy({ !$0.isLetter || $0.isUppercase }),
+           b.text.contains(where: { $0.isLowercase }),
+           a.index > 0, baseline.indices.contains(a.index - 1),
+           baseline[a.index - 1].kind == .punctuation, baseline[a.index - 1].text == "." {
+            return (false, nil, .acronymLoweredAfterDot)
+        }
+
+        // Quick task 261008-gb4 (F5): a dictionary term keeps its exact
+        // spelling; the casing-only accept below must not reach it (see
+        // `RejectionClass.dictProtectedCasing`). A plain first-letter capital
+        // of the dictionary spelling is not rejected.
+        if a.kind == .word, a.normalized == b.normalized, a.text != b.text,
+           dictProtectedLower.contains(a.normalized),
+           b.text != a.text.prefix(1).uppercased() + a.text.dropFirst() {
+            return (false, nil, .dictProtectedCasing)
+        }
+
+        // 1. Casing-only fix.
+        if a.normalized == b.normalized, a.text != b.text {
+            return (true, .punctuationOrCasing, nil)
+        }
+        // 1.5. Quick task 260723-sx1, criterion B (defensive second path):
+        // `EditDiff` can pair a disfluency-block's leftover baseline WORD
+        // (a pronoun, per the pronoun-pair arm) against a leftover
+        // candidate PUNCTUATION token instead of emitting a clean `.delete`
+        // — e.g. "I they will review". Checked BEFORE the pronoun lock (step 4
+        // below) for the same D-04 reason `classifyDelete` checks this set
+        // first: the sentence keeps its subject via the ADJACENT surviving
+        // pronoun, so this is not the agent-erasing deletion D-04 exists to
+        // block.
+        if a.kind == .word, b.kind == .punctuation, disfluencyIndices.contains(a.index) {
+            return (true, .disfluencyCollapse, nil)
+        }
+        // 2. BOTH sides punctuation (SC#3 gap closure): the ORIGINAL rule accepted whenever EITHER side was
+        //    punctuation. `EditDiff`'s LCS+substitute-pairing can pair a real
+        //    WORD against trailing/adjacent punctuation when nothing else is
+        //    left to pair it with in a local gap (root-caused case:
+        //    baseline's orphaned "it's" at a truncated sentence boundary
+        //    paired against candidate's closing "."). That let a genuine
+        //    content word vanish, misclassified as a "punctuation-only" edit
+        //    — bypassing every digit/pronoun/content-word check below. A
+        //    word-vs-punctuation pairing must FALL THROUGH to those checks
+        //    instead of blanket-accepting; only a punctuation<->punctuation
+        //    substitute (e.g. "."->",") is a genuine punctuation-only edit.
+        //
+        //    Quick task 260723-sx1, criterion C: further restricted to
+        //    PROSODIC punctuation on BOTH sides (`prosodicPunctuation`) —
+        //    a symbol substitute (e.g. "#"->"+") is SYMBOL content, not
+        //    prosody, and must fall through to the content checks below
+        //    instead of blanket-accepting.
+        if a.kind == .punctuation, b.kind == .punctuation,
+           isProsodicPunctuation(a.text), isProsodicPunctuation(b.text) {
+            return (true, .punctuationOrCasing, nil)
+        }
+        if isConnectorSplit(a: a, b: b, baseline: baseline, candidate: candidate, language: language, dictProtectedLower: dictProtectedLower) {
+            return (true, .connectorSplit, nil)
+        }
+        if isListComma(a: a, b: b, baseline: baseline, candidate: candidate, language: language, dictProtectedLower: dictProtectedLower) {
+            return (true, .listComma, nil)
+        }
+        // 3. Digit lock (D-03).
+        if EditGuardTokenizer.isDigitBearing(a.text) || EditGuardTokenizer.isDigitBearing(b.text) {
+            if let va = EditGuardTokenizer.numericValue(a, language: language),
+               let vb = EditGuardTokenizer.numericValue(b, language: language),
+               va == vb {
+                return (true, .numberFormChange, nil)
+            }
+            return (false, nil, .digitValueChange)
+        }
+        // 4. Pronoun lock (D-04) — person AND family (see `pronounFamily`).
+        let aIsPronoun = PronounPersonMap.isPronoun(a.normalized, language: language)
+        let bIsPronoun = PronounPersonMap.isPronoun(b.normalized, language: language)
+        if aIsPronoun || bIsPronoun {
+            if aIsPronoun, bIsPronoun,
+               let famA = pronounFamily(a.normalized, language: language),
+               let famB = pronounFamily(b.normalized, language: language),
+               famA == famB {
+                return (true, .functionWordSubstitution, nil)
+            }
+            return (false, nil, .pronounPersonChange)
+        }
+        // 5. dictProtect — the user's dictionary spelling must survive verbatim.
+        //    (Casing-only changes of a dictionary term are rejected earlier,
+        //    before step 1, as `dictProtectedCasing`.)
+        if dictProtectedLower.contains(a.normalized) {
+            return (false, nil, .contentWordIdentityChange)
+        }
+        // Fillers may only be DELETED (D-05), never substituted for another
+        // word — no accept class covers filler substitution.
+        if isFillerToken(a.normalized, language: language) || isFillerToken(b.normalized, language: language) {
+            return (false, nil, .unclassified)
+        }
+        // 6. Function<->function (D-02 article/agreement repair).
+        if FunctionWords.isSubstitutable(a.normalized, language: language),
+           FunctionWords.isSubstitutable(b.normalized, language: language) {
+            // Quick task 260817-r2u: a negation swapped for a non-negation
+            // function word (or vice versa) is not an agreement repair — it
+            // flips the assertion. Reject early; a polarity flip must not
+            // fall through to steps 7/8/9's inflection / non-word-repair
+            // classes. Neither side negation, or BOTH sides negation
+            // (nicht->kein..., not<->no), still accepts as
+            // functionWordSubstitution unchanged.
+            let aIsNegation = FunctionWords.isNegation(a.normalized, language: language)
+            let bIsNegation = FunctionWords.isNegation(b.normalized, language: language)
+            if aIsNegation != bIsNegation {
+                return (false, nil, .negationChange)
+            }
+            // Phase 49.6 D-09 / CLASSIFY-01 (`and`->`or`,
+            // `kein`->`nicht`): a substitute touching a
+            // criterion-derived coordinator or negator changes the
+            // logical relation between clauses or the polarity of a
+            // claim, even when both sides are already-substitutable
+            // function words and the polarity check above did not fire
+            // (both sides negation, or a coordinator<->coordinator swap).
+            // Reuses `contentWordIdentityChange` (an existing D-03
+            // trigger) rather than a new label — one rule, no new
+            // vocabulary.
+            if FunctionWords.isConjunctionOrNegator(a.normalized, language: language)
+                || FunctionWords.isConjunctionOrNegator(b.normalized, language: language) {
+                return (false, nil, .contentWordIdentityChange)
+            }
+            return (true, .functionWordSubstitution, nil)
+        }
+        // 6.5. Quick task 260723-sx1, criterion A: non-word repair
+        // exemption. Accept iff `a` is NOT a known word, `b` IS a known
+        // word (dictProtect counts as known for BOTH arms — a dictionary
+        // term is never "repairable" in either direction), and the pair is
+        // orthographically/phonetically close. Placed BEFORE step 7's
+        // derivational lock (not after): the derivational lock was
+        // evidenced on real-word pairs (Handhabe->Handhabung);
+        // derivational analysis of a NON-word is meaningless, and
+        // geduldlicher->geduldiger would otherwise die at step 7 (-lich/
+        // -ig read as a derivational suffix pair) before this exemption is
+        // ever consulted. Real-word pairs (both known) never reach this
+        // branch — they still fall through to steps 7/8/9 unchanged.
+        //
+        // Quick task 261008-gb4 (NWR): the
+        // source must also be absent from the bundled EN+DE word list
+        // (`SpellLexicon.isListedWord`). The platform checker lacks some real
+        // words the bundled list holds, and a "repair" of one of those
+        // replaced a dictated word with a similar one. A listed source falls
+        // through to steps 7 to 9, where a lone word swap is rejected
+        // (gp8's carve-out keeps the sentence's punctuation).
+        //
+        // Quick task 261010-8dm: a German compound of two known words, with
+        // three or more letters changed, is left as dictated (see
+        // `isCompoundPartSwap`).
+        //
+        // Quick task 261017-g3j: the platform checker accepts CamelCase
+        // and hyphenated words built from known parts, which let an invented
+        // target through. The target must now be dictionary-protected, listed
+        // in the bundled EN+DE word list, or an exact member of the dictionary
+        // vocabulary; the platform checker alone no longer qualifies it.
+        //
+        // Quick task 261029-n8o: a target that is only in the bundled
+        // word list was a different real word than the one dictated. Every
+        // nonWordRepair accept observed that the 261017-g3j rule still
+        // allowed was harmful. The target must now be a word the dictionary
+        // wrote into this dictation or a word of the dictionary vocabulary.
+        if a.kind == .word, b.kind == .word,
+           !isKnownForRepair(a, language: language, dictProtectedLower: dictProtectedLower, lexicon: lexicon),
+           !lexicon.isListedWord(a.text, language: language),
+           dictProtectedLower.contains(b.normalized) || lexicon.isAugmentedWord(b.text),
+           isNonWordRepairClose(a.normalized, b.normalized, language: language),
+           !isCompoundPartSwap(a, b, language: language, lexicon: lexicon) {
+            return (true, .nonWordRepair, nil)
+        }
+        // 7. Derivation (D-02a) — checked BEFORE the lemma-lock accept path.
+        if InflectionRules.isDerivational(a.normalized, b.normalized, language: language) {
+            return (false, nil, .derivationalSuffixChange)
+        }
+        // 8. Lemma lock (D-02).
+        if InflectionRules.isAllowedInflection(a.normalized, b.normalized, language: language) {
+            return (true, .inflectionFix, nil)
+        }
+        // 8.5. Quick task 261003-aua: a long German one-edit repair the checker
+        // knows only as a compound split. After step 7 so the derivational
+        // lock still guards real words; the string guards run first so
+        // `guesses` is paid only for long one-edit pairs.
+        if a.kind == .word, b.kind == .word,
+           isCompoundRepairShape(a, b, language: language, dictProtectedLower: dictProtectedLower),
+           lexicon.isCompoundAcceptedRepair(source: a.text, candidate: b.text, language: language) {
+            return (true, .compoundRepair, nil)
+        }
+        // 9. Fail closed.
+        return (false, nil, .contentWordIdentityChange)
+    }
+
+    // MARK: - insert (D-06)
+
+    private static func classifyInsert(
+        _ edit: Edit,
+        language: String,
+        candidate: [Token]
+    ) -> (accepted: Bool, acceptClass: AcceptClass?, rejectClass: RejectionClass?) {
+        guard let b = edit.to else { return (false, nil, .unclassified) }
+
+        // Quick task 260723-sx1, criterion C: only PROSODIC/typographic
+        // marks are freely insertable. Every other punctuation-kind token
+        // (`+ * = < > | ^ ~ # $ % @ & _ §` …) is SYMBOL content — it
+        // changes meaning ("C" -> "C++"), so it is classed like any other
+        // invented content, not blanket-accepted.
+        if b.kind == .punctuation {
+            // Phase 49.6 D-11 / CLASSIFY-03 (`Zeta 5` ->
+            // `Zeta-5`): a hyphen fused onto a word-then-digit identifier
+            // changes the identifier — `digitValueChange` is the class the
+            // digit lock already uses for identifier/version integrity.
+            // Checked BEFORE the prosodic accept below, narrowly scoped to
+            // `-` with a WORD immediately to its left and a digit-bearing
+            // token immediately to its right. Digit-then-word inserts
+            // (`5-Tage-Woche`, `10-minute walk`) do not reach this branch
+            // at all when `EditDiff` pairs them as `hyphenCompoundJoin`
+            // substitutes (the common shape — verified via `debugEG`); on
+            // the rare path where one DOES reach here as a pure insert,
+            // the left-neighbour-is-`.word` guard still excludes it,
+            // since the left neighbour would be `.numeric`. Hyphen DELETES
+            // are untouched — this predicate lives only in `classifyInsert`;
+            // `–`/`—` are untouched — only the bare ASCII hyphen is
+            // digit-adjacent enough to read as identifier fusion.
+            // `candidate[i].index == i` holds by tokenizer construction
+            // (the same invariant `classifyDelete`'s repetition check and
+            // `isPauseSplitPeriod` already rely on).
+            if b.text == "-",
+               b.index - 1 >= 0, b.index + 1 < candidate.count,
+               candidate[b.index - 1].kind == .word,
+               EditGuardTokenizer.isDigitBearing(candidate[b.index + 1].text) {
+                return (false, nil, .digitValueChange)
+            }
+            if isProsodicPunctuation(b.text) {
+                return (true, .punctuationOrCasing, nil)
+            }
+            return (false, nil, .contentWordInsertion)
+        }
+        if b.kind == .numeric {
+            return (false, nil, .numberInsertion)
+        }
+        // A pronoun the user did not say invents an agent. Not on D-06's
+        // permitted list; classed `unclassified` rather than
+        // `contentWordInsertion` — pronoun insertion is a DIFFERENT failure
+        // shape (inventing a referent) from inventing a noun/verb/
+        // adjective/adverb, and D-11's forensics keep them distinguishable.
+        if PronounPersonMap.isPronoun(b.normalized, language: language) {
+            return (false, nil, .unclassified)
+        }
+        // A hallucinated filler insertion — not on D-06's permitted list
+        // either; same "not really a content word" shape as the pronoun
+        // case above.
+        if isFillerToken(b.normalized, language: language) {
+            return (false, nil, .unclassified)
+        }
+        // Phase 49.6 D-09 / CLASSIFY-01: a coordinator or negator inserted
+        // asserts a logical relation or a polarity the speaker never said
+        // — checked BEFORE `isInsertable` so a coordinator (already in
+        // `germanInsertable`/`englishInsertable` for `und`/`oder`/`aber`/
+        // `sondern`/`and`/`or`/`but`) is never blanket-inserted. Negators
+        // were already excluded from both `*Insertable` sets (see
+        // `ClosedListTests.testNoNegationTokenIsInsertable`) — this lock
+        // makes coordinators join them under the same D-09 criterion; the
+        // D-06 allowlist itself is untouched.
+        if FunctionWords.isConjunctionOrNegator(b.normalized, language: language) {
+            return (false, nil, .contentWordInsertion)
+        }
+        if FunctionWords.isInsertable(b.normalized, language: language) {
+            return (true, .functionWordInsertion, nil)
+        }
+        return (false, nil, .contentWordInsertion)
+    }
+
+    // MARK: - delete (D-05 — ZERO-AMBIGUITY ONLY)
+
+    private static func classifyDelete(
+        _ edit: Edit,
+        baseline: [Token],
+        language: String,
+        disfluencyIndices: Set<Int> = [],
+        clauseRelocationIndices: Set<Int> = []
+    ) -> (accepted: Bool, acceptClass: AcceptClass?, rejectClass: RejectionClass?) {
+        guard let a = edit.from else { return (false, nil, .unclassified) }
+
+        if a.kind == .punctuation {
+            // Quick task 260930-s19: a coupled sentence-terminal mark (see
+            // `clauseRelocationIndices`) is rejected before the pause-split
+            // and unconditional-accept arms.
+            if clauseRelocationIndices.contains(a.index) {
+                return (false, nil, .clauseRelocation)
+            }
+            // Quick task 260801-m8o: checked FIRST, before the unconditional
+            // punctuation accept below — a qualifying pause-split period gets
+            // its own class so `applyAtomicGroupCoupling` can exempt it
+            // specifically; every other punctuation delete (including a
+            // non-qualifying period) keeps the unchanged `punctuationOrCasing`
+            // behavior.
+            if isPauseSplitPeriod(a, baseline: baseline) {
+                return (true, .pauseSplitMerge, nil)
+            }
+            return (true, .punctuationOrCasing, nil)
+        }
+        // Quick task 260723-sx1, criterion B: consulted BEFORE the
+        // pronounDeleted lock (and before filler/repetition below) — the
+        // D-04 lock exists to prevent agent ERASURE, but in an adjacent-
+        // duplicate stutter/restart the agent (or the repeated content)
+        // survives via the adjacent surviving copy, so the sentence's
+        // meaning is unchanged, not erased.
+        if disfluencyIndices.contains(a.index) {
+            return (true, .disfluencyCollapse, nil)
+        }
+        // D-04: a pronoun may NEVER be deleted — checked before the filler
+        // test so a pronoun that somehow collides with a filler token still
+        // dies here.
+        if PronounPersonMap.isPronoun(a.normalized, language: language) {
+            return (false, nil, .pronounDeleted)
+        }
+        if isFillerToken(a.normalized, language: language) {
+            return (true, .fillerDeletion, nil)
+        }
+        // Verbatim repetition: the immediately preceding OR following
+        // BASELINE token has the same normalized value ("auch auch" ->
+        // "auch"). Adjacency is on the baseline stream via `Token.index`
+        // (baseline[i].index == i by construction — EditGuardTokenizer
+        // assigns indices sequentially).
+        let idx = a.index
+        let prevNormalized = idx > 0 ? baseline[idx - 1].normalized : nil
+        let nextNormalized = idx + 1 < baseline.count ? baseline[idx + 1].normalized : nil
+        if prevNormalized == a.normalized || nextNormalized == a.normalized {
+            return (true, .repetitionDeletion, nil)
+        }
+        // Everything else — `noch`, `doch`, `actually`, `like`, `well`,
+        // `right`, `I mean`, digits, content words, function words — dies
+        // here. No exception list; D-05 measured every one of these and
+        // the filler reading is the MINORITY reading for nearly all of
+        // them.
+        return (false, nil, .contentWordDeletion)
+    }
+
+    // MARK: - Quick task 260801-m8o: pause-split period predicate
+
+    /// Four-arm structural predicate recognising a Whisper pause-split
+    /// period — a false mid-clause sentence boundary the LLM correctly
+    /// deletes — as distinct from a genuine sentence terminator, an
+    /// abbreviation dot, or a glued/ellipsis form. Lexicon-free by
+    /// construction: tests inject `TestSpellLexicon.allKnown` (an
+    /// all-known stub), so a lexicon-based abbreviation check would
+    /// diverge from production; every arm below is purely structural
+    /// (token kind, text, whitespace, length, casing).
+    ///
+    /// ALL FOUR arms must hold. Each is forced by a distinct counterexample
+    /// shape (examples below are invented):
+    ///
+    /// - R1 (exact `.`): `testAtomicRevert_deletedQuestionMarkRestored` — a `?`
+    ///   deleted alone leaves "okay Then"; `?`/`!`/`,` are never pause
+    ///   splits, only `.` is.
+    /// - R2 (own trailing non-empty and all-whitespace): glued forms
+    ///   `a.m`, `notes.md`, `.git`, `3.5` all have EMPTY period
+    ///   trailing (no space before the next token) — never a pause split.
+    /// - R3 (previous baseline token is `.word`, `text.count >= 5`):
+    ///   "…die Tabelle **bzw.** diese
+    ///   Liste…" — an abbreviation dot followed by a lowercase word.
+    ///   Firing here would emit "bzw diese". Length is a lexicon-free
+    ///   abbreviation guard (abbreviations are overwhelmingly <= 4 chars:
+    ///   bzw, z, B, ca, usw, etc, ggf, Dr, Nr, vgl, u, a, d, h, e, g, i,
+    ///   vs, Mr, St). ACCEPTED COST: a genuine pause-split merge after a
+    ///   word shorter than 5 characters is a missed repair — today's
+    ///   coupled (safe) behavior.
+    /// - R4 (next baseline token is `.word`, first character lowercase):
+    ///   "…the garden. **I** watered…" and
+    ///   "…asking about. **So** perhaps…" — real sentence boundaries.
+    ///   Whisper capitalises after a period it means; a lowercase
+    ///   continuation is the pause-split signature. ACCEPTED COST: a
+    ///   genuine pause-split merge before a capitalised German noun
+    ///   continuation (German capitalises nouns, not just sentence starts)
+    ///   is also a missed repair — again the safe direction.
+    ///
+    /// R1 ALONE now excludes an ellipsis run such as
+    /// "another**...**attempt" —
+    /// since EDITGUARD-02 an ellipsis is ONE run token whose `text` is
+    /// "...", so it never satisfies `token.text == "."` structurally and
+    /// no separate ellipsis arm is needed. R2 still does its own job:
+    /// excluding glued single periods (`a.m`, `notes.md`, `.git`, `3.5`).
+    ///
+    /// Index arithmetic (`baseline[index - 1]` / `baseline[index + 1]`) is
+    /// safe because `EditGuardTokenizer` assigns baseline indices
+    /// sequentially (`baseline[i].index == i` by construction) — the same
+    /// invariant `classifyDelete`'s repetition check above already relies
+    /// on.
+    private static func isPauseSplitPeriod(_ token: Token, baseline: [Token]) -> Bool {
+        // R1: exactly a period — never `?`/`!`/`,`/other punctuation.
+        guard token.text == "." else { return false }
+        // R2: own trailing is non-empty and every character is horizontal
+        // whitespace — excludes glued forms (`a.m`, `notes.md`, `.git`,
+        // `3.5`). Ellipsis dots no longer reach here as separate
+        // single-character tokens — a run is ONE token whose text is
+        // "...", already excluded by R1 above.
+        guard !token.trailing.isEmpty, token.trailing.allSatisfy({ $0.isWhitespace }) else { return false }
+        let idx = token.index
+        // R3: previous baseline token exists, is a word, and is at least
+        // 5 characters (lexicon-free abbreviation guard).
+        guard idx > 0 else { return false }
+        let prev = baseline[idx - 1]
+        guard prev.kind == .word, prev.text.count >= 5 else { return false }
+        // R4: next baseline token exists, is a word, and starts lowercase
+        // (the pause-split signature — Whisper capitalises after a period
+        // it means).
+        guard idx + 1 < baseline.count else { return false }
+        let next = baseline[idx + 1]
+        guard next.kind == .word, let firstChar = next.text.first, firstChar.isLowercase else { return false }
+        return true
+    }
+
+    // MARK: - move (D-04 — MOVES ARE PERMITTED)
+
+    /// Quick task 260831-q2r: experiment-only seam. Defaults to `false`
+    /// (current production policy — punctuation moves rejected
+    /// unconditionally, see the doc comment on `classifyMove` below).
+    /// Flipped ONLY by the offline replay harness
+    /// (`.planning/quick/260831-q2r-punctuation-move-replay/`) to measure
+    /// the counterfactual of accepting punctuation moves; no production
+    /// call site ever sets this to `true`. `internal`, not `public` — not
+    /// reachable from outside the module, so no app target can flip it.
+    internal static var experimentalAllowPunctuationMove = false
+
+    /// Word moves are permitted (D-04), one edit at a time; a RUN of two or
+    /// more word moves that carries a clause across a clause or sentence
+    /// boundary is rejected as `clauseRelocation` — see
+    /// `clauseRelocationIndices` (quick task 260930-s19).
+    private static func classifyMove(
+        _ edit: Edit,
+        language: String,
+        clauseRelocationIndices: Set<Int> = []
+    ) -> (accepted: Bool, acceptClass: AcceptClass?, rejectClass: RejectionClass?) {
+        guard let a = edit.from, let b = edit.to else { return (false, nil, .unclassified) }
+
+        // Punctuation is never a genuine "move": a moved `.`
+        // / `,` / `—` is not a repositioning of the SAME mark the user
+        // dictated — punctuation is the most repetitive token class in any
+        // text (a single utterance can carry a dozen `.` tokens from pause-
+        // dot runs alone), so `EditDiff.pairMovesFirst`'s global identical-
+        // normalized-text matching pairs a rejected edit's stray punctuation
+        // token against a textually-identical but semantically-unrelated
+        // punctuation token anywhere else in the stream. Treating that as a
+        // `wordOrderRepair` injects a spurious mark at the mismatched
+        // target position — a genuine corruption (a spurious mid-sentence
+        // period, as in "...it is done. of course, but then..."). Reject unconditionally: the rejected move restores the
+        // baseline token at its own position and drops the unmatched
+        // candidate token, exactly like two independently-rejected
+        // delete/insert edits would — never a blanket accept.
+        //
+        // Quick task 260830-dc4 (the "und.," defect): that
+        // restoration is now DROPPED at rendering time, by
+        // `collapseMixedProvenancePunctuationRuns`, when it lands inside a
+        // punctuation run alongside a candidate-sourced mark — the
+        // restoration described above still happens (the edit's verdict in
+        // the forensics log is unchanged, still `unclassified`/rejected),
+        // only the RENDERING of an otherwise-orphaned restored mark next to
+        // a candidate mark changes.
+        if a.kind == .punctuation {
+            // Quick task 261003-au9: two narrow shapes are re-accepted
+            // afterwards by `applyPunctuationMoveExemption`.
+            // 260831-q2r experiment: when relaxed, fall through to the same
+            // accept path an ordinary word move takes below (`.wordOrderRepair`)
+            // instead of rejecting. Production behavior (`false`) is
+            // unchanged by this branch.
+            if !experimentalAllowPunctuationMove {
+                return (false, nil, .unclassified)
+            }
+        }
+        // A filler should be deleted (D-05), not relocated — moving a
+        // filler token is not a defined permitted class.
+        if isFillerToken(a.normalized, language: language) {
+            return (false, nil, .unclassified)
+        }
+        // Quick task 260930-s19: a member of a clause-relocating RUN of
+        // moves is rejected — see `clauseRelocationIndices`. A lone move is
+        // never a member.
+        if clauseRelocationIndices.contains(a.index) {
+            return (false, nil, .clauseRelocation)
+        }
+        // A pure positional move of a pronoun with UNCHANGED person is
+        // fine; a move by construction pairs tokens with identical
+        // `.normalized` text, so person cannot actually differ here — this
+        // check is defensive symmetry with the substitute path, not a
+        // reachable branch in practice.
+        if PronounPersonMap.isPronoun(a.normalized, language: language) {
+            let personA = PronounPersonMap.person(of: a.normalized, language: language)
+            let personB = PronounPersonMap.person(of: b.normalized, language: language)
+            if personA != personB {
+                return (false, nil, .pronounPersonChange)
+            }
+        }
+        // The mood-lock is a SENTENCE-level property, applied in the
+        // rebuild's second pass — NOT here, per edit. Do not re-implement
+        // that comparison in this function.
+        return (true, .wordOrderRepair, nil)
+    }
+
+    // MARK: - Quick task 260930-s19: clause-relocation bound
+
+    /// Characters a `.punctuation` token may consist of to count as a
+    /// clause-boundary mark for criterion A of `clauseRelocationIndices`.
+    /// Quotes, apostrophes, slashes and other symbols do not count.
+    private static let clauseBoundaryMarkCharacters: Set<Character> = [
+        ",", ";", ":", "\u{2014}", "\u{2013}", "\u{2026}", ".", "!", "?", "(", ")",
+    ]
+
+    /// Quick task 260930-s19: baseline token indices that belong to a
+    /// clause-relocating run of moves, or to a terminal mark coupled with
+    /// one. Computed once per `classify` call (the `disfluencyAcceptedIndices`
+    /// precedent) and consulted by `classifyMove`, `classifyDelete` and
+    /// `classifySubstitute`; it depends on `edits` and `baseline` only, so
+    /// every `rebuild` call site and the mood-lock re-invocations see
+    /// identical verdicts. A baseline token is the `from` of exactly one
+    /// edit, so indexing by baseline index is exact.
+    ///
+    /// **Run.** Members are `.move` edits whose `from.kind` is `.word` or
+    /// `.numeric`. Two members belong to one run when every baseline token
+    /// strictly between their `from.index` values is `.punctuation`
+    /// (whatever edit that token has). A run needs at least two members; a
+    /// lone move is never touched. Contiguity is judged on the baseline only
+    /// (the raw-side rule of `baselineSentenceIndex`): an LLM that relocates
+    /// a clause and also reorders words inside it scatters the members'
+    /// candidate positions, and a both-stream rule such as
+    /// `applyMoveRunCoupling`'s would split such a run into lone moves.
+    ///
+    /// **Criterion A (relocates a clause).** A baseline token strictly
+    /// between two consecutive members is a clause-boundary mark
+    /// (`clauseBoundaryMarkCharacters`).
+    ///
+    /// **Criterion B (crosses a raw sentence boundary).** Per member, the
+    /// candidate-order `.keep` bracket (`prevKeep`: the keep with the
+    /// largest `to.index` below the member's, `nextKeep`: the smallest
+    /// above) is a baseline interval because keeps are monotone in both
+    /// streams. If `prevKeep.from.index` exceeds the member's `from.index`
+    /// the member moved later and its jumped span is the open baseline
+    /// interval (member, `nextKeep.from.index`), to the end of the baseline
+    /// when there is no `nextKeep`; if `nextKeep.from.index` is below the
+    /// member's it moved earlier and the span is (`prevKeep.from.index`,
+    /// member), from the start when there is no `prevKeep`; otherwise it did
+    /// not jump. The run is rejected when any span contains a token in
+    /// `sentenceTerminalMarks` with a `.word` or `.numeric` baseline token
+    /// somewhere after it; a terminal mark followed only by punctuation ends
+    /// the utterance and cannot be crossed. Only baseline indices and
+    /// `from.sentenceIndex` are read; `to.sentenceIndex` never is.
+    ///
+    /// **Coupled terminal marks.** For each rejected run, let `o` be the
+    /// smallest `from.sentenceIndex` among its members and `start` the
+    /// baseline index of the first token of sentence `o`. An edit is a
+    /// coupled mark when its `from` is a terminal `.punctuation` token, it is
+    /// a `.delete` or a `.substitute` to a non-terminal mark, and its
+    /// `from.index` is `start - 1` or lies inside some member's jumped span,
+    /// except that a pause-split period (`isPauseSplitPeriod`) is excluded:
+    /// its merge is self-contained and restoring it would put a period before
+    /// the lowercase raw continuation. The mark ending the run's own sentence
+    /// needs no coupling because the sentence-coupled revert flips it. The
+    /// rule is explicit because atomic coupling reaches the period only when
+    /// it shares a keep-bounded cluster with the moves, which depends on
+    /// edit-array adjacency.
+    ///
+    /// **Why this is not one of the three bounds already rejected**
+    /// (`EditGuardFixtures`): a sentence-index bound (-32 % `wordOrderRepair`),
+    /// a fixed distance cap (legitimate moves span 0-89 tokens) and a local
+    /// anchor window (-21.6 %) each bounded every move, single-word moves
+    /// included. This rule bounds only multi-member runs that span a clause
+    /// mark or cross a raw terminal mark. In the planning-time scan, accepted
+    /// runs of two or more moves were rare; all but the defect itself were
+    /// good in-clause repairs that this rule leaves untouched.
+    ///
+    /// **Accepted costs.** A clause moved as a chunk without interior
+    /// punctuation inside its own raw sentence is not caught (had the LLM
+    /// moved only a few words around a clause, A and B would both stay
+    /// silent). Two independent single-word moves adjacent in the baseline
+    /// across a comma count as one run (zero instances among the corpus's
+    /// accepted moves). A single-word move across a sentence boundary stays
+    /// accepted; the mood lock remains the backstop for a fronted finite
+    /// verb. When a coupled mark's sentence is triggered, its
+    /// context-dependent edits revert with it.
+    private static func clauseRelocationIndices(edits: [Edit], baseline: [Token]) -> Set<Int> {
+        let members = edits.compactMap { edit -> (from: Token, to: Token)? in
+            guard edit.kind == .move, let from = edit.from, let to = edit.to,
+                  from.kind == .word || from.kind == .numeric else { return nil }
+            return (from, to)
+        }.sorted { $0.from.index < $1.from.index }
+        guard members.count >= 2 else { return [] }
+
+        var runs: [[(from: Token, to: Token)]] = []
+        for member in members {
+            if let last = runs.last?.last,
+               (last.from.index + 1..<member.from.index).allSatisfy({ baseline[$0].kind == .punctuation }) {
+                runs[runs.count - 1].append(member)
+            } else {
+                runs.append([member])
+            }
+        }
+        guard runs.contains(where: { $0.count >= 2 }) else { return [] }
+
+        let keeps = edits.compactMap { edit -> (from: Token, to: Token)? in
+            guard edit.kind == .keep, let from = edit.from, let to = edit.to else { return nil }
+            return (from, to)
+        }.sorted { $0.to.index < $1.to.index }
+        let lastContentIndex = baseline.lastIndex { $0.kind == .word || $0.kind == .numeric } ?? -1
+
+        var flagged = Set<Int>()
+        for run in runs where run.count >= 2 {
+            var fires = false
+            for (a, b) in zip(run, run.dropFirst()) {
+                let between = (a.from.index + 1..<b.from.index)
+                if between.contains(where: { isClauseBoundaryMark(baseline[$0]) }) { fires = true }
+            }
+            var spans: [Range<Int>] = []
+            for member in run {
+                let prevKeep = keeps.last { $0.to.index < member.to.index }
+                let nextKeep = keeps.first { $0.to.index > member.to.index }
+                let span: Range<Int>
+                if let prevKeep, prevKeep.from.index > member.from.index {
+                    span = member.from.index + 1..<(nextKeep?.from.index ?? baseline.count)
+                } else if let nextKeep, nextKeep.from.index < member.from.index {
+                    span = (prevKeep?.from.index ?? -1) + 1..<member.from.index
+                } else {
+                    continue
+                }
+                guard !span.isEmpty else { continue }
+                spans.append(span)
+                if span.contains(where: {
+                    baseline[$0].kind == .punctuation && sentenceTerminalMarks.contains(baseline[$0].text) && $0 < lastContentIndex
+                }) { fires = true }
+            }
+            guard fires else { continue }
+
+            for member in run { flagged.insert(member.from.index) }
+
+            let origin = run.map { $0.from.sentenceIndex }.min() ?? 0
+            guard let start = baseline.firstIndex(where: { $0.sentenceIndex == origin }) else { continue }
+            for edit in edits {
+                guard edit.kind == .delete || edit.kind == .substitute,
+                      let from = edit.from, from.kind == .punctuation,
+                      sentenceTerminalMarks.contains(from.text) else { continue }
+                if edit.kind == .substitute {
+                    guard let to = edit.to, to.kind == .punctuation, !sentenceTerminalMarks.contains(to.text) else { continue }
+                }
+                guard from.index == start - 1 || spans.contains(where: { $0.contains(from.index) }) else { continue }
+                if isPauseSplitPeriod(from, baseline: baseline) { continue }
+                flagged.insert(from.index)
+            }
+        }
+        return flagged
+    }
+
+    private static func isClauseBoundaryMark(_ token: Token) -> Bool {
+        token.kind == .punctuation && !token.text.isEmpty && token.text.allSatisfy { clauseBoundaryMarkCharacters.contains($0) }
+    }
+
+    // MARK: - Quick task 260723-sx1, criterion A: non-word repair
+
+    /// Orthographic-arm threshold (`nlev <= 0.35`): "old" and "new" are
+    /// close enough that `old` reads as ASR garble of `new`. Illustrative
+    /// values: planit/planet 0.167, gelauft/gelaufen 0.25 — both accept.
+    /// tavern/rascal 0.83 — rejects. Tuning rule: may only move in the
+    /// direction that keeps every R6 negative rejecting; any loosening
+    /// requires a NEW negative fixture pinning the new boundary first.
+    private static let nonWordRepairOrthographicThreshold = 0.35
+    /// Phonetic backstop (`phonetic keys equal AND nlev <= 0.50`): a wider
+    /// orthographic allowance when the two tokens also SOUND alike (per the
+    /// language-routed phonetic encoder below), covering ASR mishearings
+    /// that a pure edit-distance threshold would miss. rosana/rascal
+    /// (0.67) still rejects even under this backstop.
+    private static let nonWordRepairPhoneticBackstopThreshold = 0.50
+
+    /// "Known" for criterion A purposes: `dictProtected` counts as known
+    /// for BOTH arms of the substitute (a dictionary term is never
+    /// "repairable" in either direction — mirrors step 5's existing
+    /// dictProtect-on-`a` rule, extended here to `b` since criterion A can
+    /// evaluate either side), OR the injected `lexicon`'s platform/
+    /// augmentation-backed verdict.
+    private static func isKnownForRepair(
+        _ token: Token, language: String, dictProtectedLower: Set<String>, lexicon: any SpellLexicon
+    ) -> Bool {
+        if dictProtectedLower.contains(token.normalized) { return true }
+        return lexicon.isKnownWord(token.text, language: language)
+    }
+
+    /// Diacritic-fold + lowercase, then normalized Levenshtein distance;
+    /// close iff the orthographic threshold is met, OR the language-routed
+    /// phonetic keys collide AND the (still folded/lowercased) distance
+    /// meets the wider phonetic backstop. English uses `DoubleMetaphone`,
+    /// German uses `ColognePhonetic` (36.5 convention — English Metaphone
+    /// rules are wrong for German).
+    private static func isNonWordRepairClose(_ a: String, _ b: String, language: String) -> Bool {
+        let foldedA = foldForSimilarity(a)
+        let foldedB = foldForSimilarity(b)
+        let nlev = LevenshteinDistance.normalizedDistance(foldedA, foldedB)
+        if nlev <= nonWordRepairOrthographicThreshold { return true }
+        let isGerman = language.hasPrefix("de")
+        let keyA = isGerman ? ColognePhonetic.encode(a) : DoubleMetaphone.encode(a)
+        let keyB = isGerman ? ColognePhonetic.encode(b) : DoubleMetaphone.encode(b)
+        if !keyA.isEmpty, keyA == keyB, nlev <= nonWordRepairPhoneticBackstopThreshold {
+            return true
+        }
+        return false
+    }
+
+    private static func foldForSimilarity(_ s: String) -> String {
+        s.lowercased().folding(options: .diacriticInsensitive, locale: nil)
+    }
+
+    // MARK: - Quick task 261010-8dm
+
+    private static let compoundPartMinLength = 4
+    private static let compoundPartSwapMinDistance = 3
+
+    /// True for a German swap of three or more letters in a dictated token that
+    /// splits into two parts of four letters or more which the checker knows:
+    /// `Sonnenshine` -> `Sonnenschein`. A long shared prefix makes such a swap
+    /// look like a small edit, so the compound was read as a garble. A one- or
+    /// two-letter fix, or a split with an unknown part, stays repairable.
+    private static func isCompoundPartSwap(
+        _ a: Token, _ b: Token, language: String, lexicon: any SpellLexicon
+    ) -> Bool {
+        guard language.hasPrefix("de"), a.text.count >= 2 * compoundPartMinLength else { return false }
+        guard LevenshteinDistance.distance(foldForSimilarity(a.normalized), foldForSimilarity(b.normalized)) >= compoundPartSwapMinDistance else { return false }
+        let chars = Array(a.text)
+        for i in compoundPartMinLength...(chars.count - compoundPartMinLength) {
+            if lexicon.isKnownCompoundPart(String(chars[..<i])), lexicon.isKnownCompoundPart(String(chars[i...])) { return true }
+        }
+        return false
+    }
+
+    // MARK: - Quick task 261003-aua
+
+    /// String guards of step 8.5: German, letters only, no dictProtected word
+    /// on either side, folded source >= 10 characters, folded distance
+    /// exactly 1 with >= 3 shared characters at both ends, and not an affix
+    /// pair (shorter is a prefix of longer with at most 3 extra characters).
+    private static func isCompoundRepairShape(
+        _ a: Token, _ b: Token, language: String, dictProtectedLower: Set<String>
+    ) -> Bool {
+        guard language.hasPrefix("de") else { return false }
+        guard a.text.allSatisfy({ $0.isLetter }), b.text.allSatisfy({ $0.isLetter }) else { return false }
+        guard !dictProtectedLower.contains(a.normalized), !dictProtectedLower.contains(b.normalized) else { return false }
+        let fa = foldForSimilarity(a.normalized)
+        let fb = foldForSimilarity(b.normalized)
+        guard fa.count >= 10, LevenshteinDistance.distance(fa, fb) == 1 else { return false }
+        guard zip(fa, fb).prefix(while: { $0 == $1 }).count >= 3 else { return false }
+        guard zip(fa.reversed(), fb.reversed()).prefix(while: { $0 == $1 }).count >= 3 else { return false }
+        let (shorter, longer) = fa.count <= fb.count ? (fa, fb) : (fb, fa)
+        return !(longer.hasPrefix(shorter) && longer.count - shorter.count <= 3)
+    }
+
+    // MARK: - Quick task 260723-sx1, criterion C: prosodic-punctuation allowlist
+
+    /// PROSODIC/typographic marks, freely insertable/substitutable
+    /// (criterion C). Every OTHER `.punctuation`-kind token (`+ * = < > |
+    /// ^ ~ # $ % @ & _ §` …) is SYMBOL content — inserting or substituting
+    /// one changes meaning (`"C"` -> `"C++"`) and must NOT blanket-accept.
+    private static let prosodicPunctuation: Set<String> = [
+        ".", ",", ";", ":", "!", "?", "…",
+        "'", "’", "‘", "\"", "“", "”", "„", "«", "»",
+        "(", ")", "[", "]", "{", "}",
+        "-", "–", "—"
+    ]
+
+    /// EDITGUARD-02: a run token (`...`, `!!`) is prosodic iff EVERY
+    /// character is — membership must not be per-single-character, or an
+    /// ellipsis stops being a freely insertable/substitutable mark and an
+    /// in-place `...` -> `.` resolution stops being accepted.
+    private static func isProsodicPunctuation(_ text: String) -> Bool {
+        !text.isEmpty && text.allSatisfy { prosodicPunctuation.contains(String($0)) }
+    }
+
+    /// D-04: the per-sentence divergence gate's window. A punctuation run
+    /// advances sentenceIndex ONCE, so this window is a whole sentence even
+    /// when the baseline carried an ellipsis the candidate resolved to a
+    /// single period — pre-fix the baseline was three ahead and the window
+    /// silently covered a fragment of a different sentence.
+    internal static func candidateSentenceWindow(_ candidate: [Token], sentenceIndex: Int) -> [Token] {
+        candidate.filter { $0.sentenceIndex == sentenceIndex }
+    }
+
+    // MARK: - Quick task 260723-sx1, criterion B: adjacent-duplicate disfluency collapse
+
+    /// Baseline token indices belonging to an ACCEPTED adjacent-duplicate
+    /// disfluency collapse (a stutter/restart the candidate correctly
+    /// resolved down to one copy). Consulted by `classifyDelete` (the
+    /// `.delete` shape) and `classifySubstitute` (the pronoun-old-paired-
+    /// against-punctuation shape `EditDiff` sometimes produces instead).
+    ///
+    /// Algorithm (criterion B, verbatim): for every candidate block length
+    /// 1-3 and every position, take two STRICTLY ADJACENT baseline blocks A
+    /// then B of that length. They qualify iff, position-wise, EVERY pair
+    /// (A[k], B[k]) either has equal `normalized` text, is a same-lemma
+    /// near-duplicate (`InflectionRules.isAllowedInflection` OR shared
+    /// prefix >= 4 chars AND raw Levenshtein distance <= 2 — covers
+    /// furtherly/further), or is a pair of pronouns (the adjacent-pronoun-
+    /// stutter arm) — AND exactly one of {A[k], B[k]} was actually dropped
+    /// by the candidate (a `.delete`, or a `.substitute` pairing a WORD
+    /// against PUNCTUATION). A qualifying pair contributes its dropped
+    /// index. This is deliberately pairing-agnostic — whichever side
+    /// `EditDiff` happened to attribute the drop to, the same block
+    /// collapse qualifies (mirrors the doubled-word case where
+    /// the SECOND word — not the first — is the one actually dropped).
+    private static func disfluencyAcceptedIndices(
+        edits: [Edit], baseline: [Token], language: String
+    ) -> Set<Int> {
+        var dropped: Set<Int> = []
+        for edit in edits {
+            guard let a = edit.from, a.kind == .word else { continue }
+            switch edit.kind {
+            case .delete:
+                dropped.insert(a.index)
+            case .substitute:
+                if let b = edit.to, b.kind == .punctuation {
+                    dropped.insert(a.index)
+                }
+            default:
+                break
+            }
+        }
+        guard !dropped.isEmpty else { return [] }
+
+        var accepted: Set<Int> = []
+        let n = baseline.count
+        for length in 1...3 {
+            guard n >= 2 * length else { continue }
+            for i in 0...(n - 2 * length) {
+                let blockA = Array(baseline[i..<(i + length)])
+                let blockB = Array(baseline[(i + length)..<(i + 2 * length)])
+                guard blockA.allSatisfy({ $0.kind == .word }), blockB.allSatisfy({ $0.kind == .word }) else { continue }
+
+                var qualifies = true
+                var pairDrops: [Int] = []
+                for k in 0..<length {
+                    let x = blockA[k], y = blockB[k]
+                    guard disfluencyBlockAligns(x, y, language: language) else { qualifies = false; break }
+                    let xDropped = dropped.contains(x.index)
+                    let yDropped = dropped.contains(y.index)
+                    guard xDropped != yDropped else { qualifies = false; break } // exactly one dropped
+                    pairDrops.append(xDropped ? x.index : y.index)
+                }
+                if qualifies {
+                    accepted.formUnion(pairDrops)
+                }
+            }
+        }
+        return accepted
+    }
+
+    /// Position-wise alignment predicate for criterion B's block pairs —
+    /// (a) equal normalized text, (b) same-lemma near-duplicate, or (c)
+    /// both pronouns (the adjacent-pronoun-stutter arm — the surviving
+    /// adjacent pronoun keeps the sentence's subject, so this is not the
+    /// agent-erasing deletion D-04's `pronounDeleted` lock exists for).
+    private static func disfluencyBlockAligns(_ x: Token, _ y: Token, language: String) -> Bool {
+        if x.normalized == y.normalized { return true }
+        if InflectionRules.isAllowedInflection(x.normalized, y.normalized, language: language) { return true }
+        if x.normalized.count >= 4, y.normalized.count >= 4,
+           x.normalized.prefix(4) == y.normalized.prefix(4),
+           LevenshteinDistance.distance(x.normalized, y.normalized) <= 2 {
+            return true
+        }
+        if PronounPersonMap.isPronoun(x.normalized, language: language),
+           PronounPersonMap.isPronoun(y.normalized, language: language) {
+            return true
+        }
+        return false
+    }
+
+    // MARK: - Part C: rebuild + apply
+
+    /// Records WHICH INPUT a `WorkToken`'s `text` came from. Added for the
+    /// "und.," defect (quick task 260830-dc4,
+    /// `.planning/todos/resolved/editguard-splices-worse-than-both-inputs.md`):
+    /// `materialize` can render a punctuation run made of tokens from BOTH
+    /// sources adjacent to each other (a rejected `.move`/`.substitute`
+    /// restores a baseline mark right next to an accepted candidate mark),
+    /// synthesising a mark sequence present in neither input. The only
+    /// consumer of this field is `collapseMixedProvenancePunctuationRuns`
+    /// below, which uses it to detect exactly that shape and keep only the
+    /// candidate-sourced marks.
+    private enum TokenSource: Equatable {
+        /// Rendered from the LLM candidate stream (a keep, or an accepted
+        /// substitute/insert/move).
+        case candidate
+        /// Rendered from the rules-cleaned baseline stream via a restoration
+        /// (a rejected delete/move, or a rejected substitute that restores
+        /// the baseline token in place).
+        case restoredBaseline
+    }
+
+    /// An emitted token in the rebuilt output — a lightweight projection of
+    /// `Token` (no `index`, since restored/rebuilt tokens don't occupy a
+    /// stable position in either source stream).
+    private struct WorkToken {
+        let text: String
+        let normalized: String
+        let kind: TokenKind
+        let trailing: String
+        let sentenceIndex: Int
+        /// WHICH INPUT `text` came from. Non-defaulted deliberately: the
+        /// "und.," defect this field exists to fix was caused by
+        /// provenance being implicit, so every construction site must
+        /// declare it explicitly rather than silently inheriting a default.
+        let source: TokenSource
+        /// Opening/closing role of a straight `"` token, taken from the source
+        /// token this one renders: the candidate stream's role for
+        /// candidate-sourced tokens, the baseline stream's role for restored
+        /// ones (`straightQuoteRoles`). `nil` for every other token and for
+        /// quotes in a stream with an odd quote count. Non-defaulted for the
+        /// same reason as `source`: `deriveSeamSpacing` keys its vote on it,
+        /// so every construction site must declare which stream the role came
+        /// from instead of silently inheriting one (261001-opz).
+        let quoteRole: QuoteRole?
+        /// Set only when `text` was accepted via the casing-only substitute
+        /// path (`AcceptClass.punctuationOrCasing`, `a.normalized ==
+        /// b.normalized`) AND the candidate token was itself its sentence's
+        /// FIRST word (`materialize`'s `candidateFirstWordIndex` check) —
+        /// the token's ORIGINAL baseline spelling, kept so a later
+        /// restoration in front of this token (which changes whether it is
+        /// STILL genuinely sentence-initial after rebuild) can revert a
+        /// capitalization the LLM only applied because THIS token looked
+        /// sentence-initial in the candidate. Phase 44 Plan 11 fix: without
+        /// the candidate-sentence-initial gate, this flag was set for EVERY
+        /// accepted mid-sentence casing-only fix too (e.g. a legitimate
+        /// German mid-sentence noun capitalization, "welt"->"Welt"),
+        /// causing `revertSpuriousSentenceInitialCapitalization` to strip
+        /// it back to lowercase even though nothing was ever restored in
+        /// front of it — surfaced by `TextProcessingServiceTests
+        /// .testCleanupPath` once the guard was wired into the real
+        /// pipeline (Task 1). See `revertSpuriousSentenceInitialCapitalization`.
+        let baselineCasingAlternative: String?
+    }
+
+    private static let germanArticleTokens: Set<String> = [
+        "der", "die", "das", "den", "dem", "des",
+        "ein", "eine", "einen", "einem", "einer", "eines"
+    ]
+    private static let englishArticleTokens: Set<String> = ["a", "an", "the"]
+
+    private static func isArticleToken(_ normalized: String, language: String) -> Bool {
+        let prefix = language.prefix(2).lowercased()
+        return prefix == "en" ? englishArticleTokens.contains(normalized) : germanArticleTokens.contains(normalized)
+    }
+
+    /// Consistency pass (Rule 2 — critical for correctness, not in the
+    /// plan's literal Part B algorithm): a maximal run of consecutive
+    /// `.insert` edits is either ALL applied or ALL reverted. Without this,
+    /// the classifier's per-token independence lets a coherent inserted
+    /// phrase split — e.g. an inserted participle + auxiliary such as
+    /// `"gelaufen ist"` (D-06 negative fixture
+    /// `fx-ins-content-de-verb-phrase` has the same shape) has `"ist"`
+    /// independently accept (it's on the D-06 auxiliary allowlist) while
+    /// `"gelaufen"` rejects, producing `"...ist, ..."` — a Frankenstein fragment
+    /// that is neither the baseline nor a coherent repair. Required by
+    /// `fx-ins-content-de-verb-phrase`, `fx-ins-content-de-article-adjective`, and
+    /// `fx-ins-digit-de` (all in `EditGuardFixtureCoverageTests`'s required
+    /// set).
+    private static func applyInsertRunCoupling(edits: [Edit], verdicts: inout [ClassifiedEdit]) {
+        var i = 0
+        while i < edits.count {
+            guard edits[i].kind == .insert else { i += 1; continue }
+            var j = i
+            while j < edits.count, edits[j].kind == .insert { j += 1 }
+            let run = i..<j
+            let anyRejected = run.contains { !verdicts[$0].accepted }
+            if anyRejected {
+                for k in run where verdicts[k].accepted {
+                    verdicts[k] = ClassifiedEdit(
+                        kind: verdicts[k].kind, from: verdicts[k].from, to: verdicts[k].to,
+                        accepted: false, acceptClass: nil,
+                        rejectClass: RejectionClass.contentWordInsertion.rawValue
+                    )
+                }
+            }
+            i = j
+        }
+    }
+
+    /// Post-merge gate fix (bug 2): consistency pass, same shape as
+    /// `applyInsertRunCoupling` — a maximal run of consecutive `.move`
+    /// edits whose tokens are CONTIGUOUS in both the baseline stream and
+    /// the candidate stream (i.e. a genuine multi-token chunk that moved
+    /// together, not two unrelated moves that merely landed next to each
+    /// other in the edit list) is applied or reverted as a UNIT. Without
+    /// this, a filler token's rejected move (D-05: fillers are deleted, not
+    /// relocated) can leave its immediately-adjacent punctuation's move
+    /// independently ACCEPTED — the two halves of one bundle then land in
+    /// completely different places during restoration (the filler restores
+    /// near its baseline anchor; the punctuation, having "moved" to
+    /// wherever the candidate put it, stays there), producing malformed
+    /// output like a doubled comma or two words glued together with no
+    /// space (`fx-mov-filler-de`/`fx-mov-filler-en`).
+    private static func applyMoveRunCoupling(edits: [Edit], verdicts: inout [ClassifiedEdit]) {
+        var i = 0
+        while i < edits.count {
+            guard edits[i].kind == .move else { i += 1; continue }
+            var j = i
+            while j + 1 < edits.count,
+                  edits[j + 1].kind == .move,
+                  let prevFrom = edits[j].from, let nextFrom = edits[j + 1].from,
+                  nextFrom.index == prevFrom.index + 1,
+                  let prevTo = edits[j].to, let nextTo = edits[j + 1].to,
+                  nextTo.index == prevTo.index + 1
+            {
+                j += 1
+            }
+            let run = i...j
+            if run.count > 1 {
+                let anyRejected = run.contains { !verdicts[$0].accepted }
+                if anyRejected {
+                    for k in run where verdicts[k].accepted {
+                        verdicts[k] = ClassifiedEdit(
+                            kind: verdicts[k].kind, from: verdicts[k].from, to: verdicts[k].to,
+                            accepted: false, acceptClass: nil,
+                            rejectClass: RejectionClass.unclassified.rawValue
+                        )
+                    }
+                }
+            }
+            i = j + 1
+        }
+    }
+
+    /// Consistency pass (Rule 2): an accepted article/determiner
+    /// `functionWordSubstitution` immediately adjacent to a REJECTED
+    /// content-word substitution (`contentWordIdentityChange` or
+    /// `derivationalSuffixChange`) is reverted too. German articles carry
+    /// grammatical gender; when a noun's identity change is rejected (D-02a
+    /// blocks `Beobachter`->`Beobachtung`, masc->fem), keeping an
+    /// independently-accepted `Der`->`Die` gender flip would produce
+    /// `"Die Beobachter"` — grammatically broken AND not equal to either
+    /// the baseline or a coherent repair. Required by
+    /// `fx-sub-content-de-beobachter-beobachtung`.
+    private static func applyArticleAgreementCoupling(edits: [Edit], verdicts: inout [ClassifiedEdit], language: String) {
+        for i in edits.indices {
+            guard edits[i].kind == .substitute, verdicts[i].accepted,
+                  verdicts[i].acceptClass == AcceptClass.functionWordSubstitution.rawValue,
+                  let a = edits[i].from, let b = edits[i].to,
+                  isArticleToken(a.normalized, language: language),
+                  isArticleToken(b.normalized, language: language)
+            else { continue }
+
+            let neighborRejectsNounIdentity: Bool = [i - 1, i + 1].contains { neighbor in
+                guard edits.indices.contains(neighbor), edits[neighbor].kind == .substitute,
+                      !verdicts[neighbor].accepted else { return false }
+                return verdicts[neighbor].rejectClass == RejectionClass.contentWordIdentityChange.rawValue
+                    || verdicts[neighbor].rejectClass == RejectionClass.derivationalSuffixChange.rawValue
+            }
+
+            if neighborRejectsNounIdentity {
+                verdicts[i] = ClassifiedEdit(
+                    kind: verdicts[i].kind, from: verdicts[i].from, to: verdicts[i].to,
+                    accepted: false, acceptClass: nil,
+                    rejectClass: RejectionClass.contentWordIdentityChange.rawValue
+                )
+            }
+        }
+    }
+
+    /// Defect B fix (gap closure — the disfluency-not-corruption
+    /// class, plus a distinct, fully reproduced instance this fix directly closes; example invented):
+    /// baseline "In regards to the
+    /// budget..." / candidate "Regarding the budget..." —
+    /// `substitute(regards->Regarding)` passes D-02's lemma lock in
+    /// isolation (same lemma "regard", legitimate `inflectionFix`), but its
+    /// immediate baseline neighbours `"In"` and `"to"` are independently,
+    /// correctly REJECTED as `contentWordDeletion` (D-05's zero-ambiguity
+    /// policy has no reason to know "regards"->"Regarding" makes them
+    /// grammatically redundant). `materialize`'s restoration anchor chains
+    /// both rejected deletes to the FRONT of the output (each restored
+    /// token becomes a valid anchor for the next), landing directly in
+    /// front of "Regarding" — producing "In to Regarding the budget...",
+    /// neither the baseline nor a coherent repair.
+    ///
+    /// Fix: when a REJECTED `contentWordDeletion` sits immediately adjacent
+    /// (in edit-stream order — the same edits-array adjacency
+    /// `applyArticleAgreementCoupling` already uses) to an ACCEPTED
+    /// `.substitute`/`.insert` that is NOT itself
+    /// `punctuationOrCasing`/`numberFormChange` (a cosmetic edit never
+    /// causes this shape), revert that neighbour too — restoring the FULL
+    /// baseline phrase verbatim instead of a Frankenstein mix of restored
+    /// and rewritten fragments. Deliberately scoped to REJECTED-DELETE
+    /// neighbours only (not rejected-substitute neighbours, the milder
+    /// shape) — reverting on a
+    /// rejected-substitute neighbour too would ALSO catch genuine,
+    /// desirable `inflectionFix`/`functionWordSubstitution` accepts sitting
+    /// beside an unrelated rejected substitute elsewhere in the same
+    /// multi-edit sentence (e.g. a `passen`->
+    /// `passt` inflection fix, a flagship D-02 case, sitting directly beside an
+    /// independently-rejected `Termine`->`Termin`) — costing real yield to fix
+    /// a defect this file's own SC#3 adjudication already classified as
+    /// disfluent-but-not-meaning-corrupting and explicitly left open. This
+    /// narrower scope closes the fully reproduced "In to
+    /// Regarding" shape without that yield cost — verified byte-identical
+    /// `wordOrderRepair`/`inflectionFix`/`functionWordSubstitution` counts
+    /// on both the corpus replay and the fresh Qwen3.5 audit population
+    /// (gap-closure measurement).
+    private static func applyAdjacentDeletionSubstituteCoupling(edits: [Edit], verdicts: inout [ClassifiedEdit]) {
+        for i in edits.indices {
+            guard edits[i].kind == .delete, !verdicts[i].accepted,
+                  verdicts[i].rejectClass == RejectionClass.contentWordDeletion.rawValue
+            else { continue }
+
+            for neighbor in [i - 1, i + 1] where edits.indices.contains(neighbor) {
+                guard verdicts[neighbor].accepted,
+                      edits[neighbor].kind == .substitute || edits[neighbor].kind == .insert,
+                      verdicts[neighbor].acceptClass != AcceptClass.punctuationOrCasing.rawValue,
+                      verdicts[neighbor].acceptClass != AcceptClass.numberFormChange.rawValue
+                else { continue }
+                verdicts[neighbor] = ClassifiedEdit(
+                    kind: verdicts[neighbor].kind, from: verdicts[neighbor].from, to: verdicts[neighbor].to,
+                    accepted: false, acceptClass: nil,
+                    rejectClass: RejectionClass.unclassified.rawValue
+                )
+            }
+        }
+    }
+
+    /// Quick task 260723-rif (defect class A):
+    /// atomic revert groups. Fixes the general shape the four narrow
+    /// couplings above each patch ONE instance of: a keep-bounded run of
+    /// interacting edits where partial acceptance splices baseline and
+    /// candidate fragments into text that appears in NEITHER source
+    /// ("wanna to", "of for example", a lost "?" leaving "ready
+    /// So", a dangling "Es" before "Und dann").
+    ///
+    /// **Grouping.** A group is a connected component over: (a) each
+    /// maximal run of consecutive non-`.keep` edits in the FINAL `edits`
+    /// array (order-preserving, as `EditDiff.diff` returns it) — one
+    /// cluster per run; (b) every `.move` edit additionally bridges its own
+    /// cluster to whichever cluster's CANDIDATE-index interval contains
+    /// `move.to.index` — the move's second half, which `EditDiff
+    /// .pairMovesFirst` consumed from the ops stream, so the destination
+    /// gap has no edit of its own sitting there to make the connection
+    /// visible without this explicit bridge. A cluster's candidate-index
+    /// interval is derived from the `to.index` of its bounding `.keep`
+    /// edits (sentinels `-1`/`Int.max` at the string's own edges) — pure
+    /// interval containment, not a lookup, so it works whether or not any
+    /// edit actually sits at that destination index.
+    ///
+    /// **Reversion.** For every resulting group: if ANY member has
+    /// `accepted == false`, flip every ACCEPTED member to rejected
+    /// (`atomicGroupRevert`). Idempotent and monotone (accept -> reject
+    /// only, never the reverse) by construction — the cluster/group
+    /// structure is derived purely from `edits` (immutable within one
+    /// `rebuild` call), never from `verdicts`, so re-running after a later
+    /// verdict mutation (the mood-lock loop) is always safe and can only
+    /// discover MORE reasons to revert, never un-revert a prior flip.
+    ///
+    /// **Punctuation-only-group exemption (found via the golden-fixture
+    /// regression sweep, `fx-mov-punct-en-fullrecord-spuriousmove`):**
+    /// a group whose members are ALL punctuation-only (no
+    /// member has a non-nil `from`/`to` token with `kind != .punctuation`)
+    /// is NEVER reverted, even when it contains a rejection. `classifyMove`
+    /// already rejects EVERY punctuation `.move` unconditionally (comments,
+    /// `EditGuard.swift`) precisely because commas/dots/dashes are the most
+    /// repetitive token class in any text — a rejected punctuation move
+    /// sitting in the same keep-bounded gap as several UNRELATED, correctly
+    /// ACCEPTED punctuation edits (e.g. an ellipsis run "......" legitimately
+    /// collapsing to a quote mark + em-dash) is a coincidence of position,
+    /// not a genuine content interaction — the four described mechanisms
+    /// above ALL have at least one non-punctuation (word) member whose
+    /// rejection is the reason the group must not be spliced. Reverting a
+    /// punctuation-only group throws away independently-good punctuation
+    /// cleanup and reintroduces the ellipsis-glued-onto-a-quote defect
+    /// that was fixed earlier. This exemption is why `.move`
+    /// bridging in Step 2 still matters even for a punctuation-only move: it
+    /// can bridge INTO a content-bearing group (as `Es`/`Und zwar` does) —
+    /// eligibility is evaluated on the FINAL merged group, not the
+    /// originating cluster.
+    ///
+    /// **Crossed multi-pair substitute rendering — FIXED by 260724-j96
+    /// (formerly a documented residual of this fix, out of THIS function's
+    /// scope):** when a single keep-bounded gap contains TWO OR MORE
+    /// `.substitute` pairs produced by `EditDiff.pairAdjacentSubstitutes`'
+    /// STEM-PLAUSIBILITY ranking (not position), that ranking can cross the
+    /// pairs' relative order versus their baseline order (e.g. baseline
+    /// "fact check" / candidate "let's fact-check" pairs baseline "fact" to
+    /// candidate "fact-check" — the higher stem-overlap pair — leaving
+    /// "check" paired against "let's"). `materialize` renders a rejected
+    /// `.substitute` inline, at the CANDIDATE index of its own `to` token
+    /// (unlike a rejected `.delete`/`.move`, which restores via the
+    /// baseline-anchored `restorationTargets` mechanism and is therefore
+    /// order-safe) — so reverting BOTH crossed substitutes to rejected used
+    /// to still splice them out of baseline order ("check fact" instead of
+    /// "fact check"). This was NOT a partial-acceptance defect this
+    /// function's verdict propagation could fix — it required a rendering-
+    /// level fix. 260724-j96 fixes it with a gap-local rejected-substitute
+    /// remap inside `materialize` itself (its own doc comment, above
+    /// `byCandidateIndex`): within each gap, the i-th baseline-index-ordered
+    /// rejected substitute is reassigned to render at the i-th candidate-
+    /// index-ordered rejected-substitute slot, an identity remap when the
+    /// pairing was never crossed. `EditDiff.pairAdjacentSubstitutes` itself
+    /// remains byte-untouched — the fix is purely in how `materialize`
+    /// renders an already-rejected substitute pair.
+    ///
+    /// Quick task 260926-bbz: the final flip loop below additionally
+    /// exempts the utterance-final terminal mark — see
+    /// `isUtteranceFinalTerminalMarkInsert`'s doc comment.
+    ///
+    /// Quick task 260926-dbi: the final flip loop below also exempts an
+    /// exact-adjacent-stutter delete — see
+    /// `isExactAdjacentStutterDelete`'s doc comment for why this pass must
+    /// consult it too, not just `applySentenceCoupledRevert`.
+    private static func applyAtomicGroupCoupling(edits: [Edit], verdicts: inout [ClassifiedEdit], language: String) {
+        guard !edits.isEmpty else { return }
+
+        // Step 1: assign a cluster id to each maximal run of consecutive
+        // non-keep edits, and record each cluster's candidate-index
+        // interval (exclusive bounds), derived from the bounding `.keep`
+        // edits' `to.index` values — sentinels at the string's own edges.
+        var clusterID = [Int](repeating: -1, count: edits.count) // -1 == keep, no cluster
+        var clusterLo: [Int] = []
+        var clusterHi: [Int] = []
+
+        var currentID: Int?
+        var lastKeepCandidateIndex = -1
+        for i in edits.indices {
+            if edits[i].kind == .keep {
+                if let cid = currentID {
+                    clusterHi[cid] = edits[i].to?.index ?? Int.max
+                    currentID = nil
+                }
+                lastKeepCandidateIndex = edits[i].to?.index ?? lastKeepCandidateIndex
+            } else {
+                if currentID == nil {
+                    let newID = clusterLo.count
+                    clusterLo.append(lastKeepCandidateIndex)
+                    clusterHi.append(Int.max) // patched when the cluster closes, or left open at string end
+                    currentID = newID
+                }
+                clusterID[i] = currentID!
+            }
+        }
+
+        guard !clusterLo.isEmpty else { return } // every edit was a keep — nothing to group
+
+        // Step 2: union-find over clusters, bridged by `.move` destinations.
+        var parent = Array(clusterLo.indices)
+        func find(_ x: Int) -> Int {
+            var x = x
+            while parent[x] != x { parent[x] = parent[parent[x]]; x = parent[x] }
+            return x
+        }
+        func union(_ a: Int, _ b: Int) {
+            let ra = find(a), rb = find(b)
+            if ra != rb { parent[ra] = rb }
+        }
+        func clusterContaining(candidateIndex x: Int) -> Int? {
+            for cid in clusterLo.indices where clusterLo[cid] < x && x < clusterHi[cid] {
+                return cid
+            }
+            return nil
+        }
+
+        for i in edits.indices {
+            guard edits[i].kind == .move, let from = edits[i].from, let to = edits[i].to,
+                  // A punctuation move never bridges clusters: `classifyMove`
+                  // already rejects EVERY punctuation move unconditionally
+                  // (it is never a genuine content interaction — see this
+                  // function's "punctuation-only-group exemption" doc
+                  // comment), and identical punctuation marks recur so often
+                  // in ordinary prose (ellipsis runs especially) that a
+                  // punctuation move's destination landing inside some
+                  // UNRELATED content-bearing cluster is a coincidence of
+                  // matching text, not a genuine interaction — bridging on
+                  // it would let that unrelated cluster's rejection sweep up
+                  // this move's own, otherwise-independent punctuation
+                  // neighbours (confirmed via the golden-fixture regression
+                  // sweep on `fx-mov-punct-en-fullrecord-spuriousmove`).
+                  from.kind != .punctuation
+            else { continue }
+            let ownCluster = clusterID[i]
+            guard ownCluster != -1,
+                  let destCluster = clusterContaining(candidateIndex: to.index),
+                  destCluster != ownCluster
+            else { continue } // destination inside the move's own cluster (or no cluster there) — no-op
+            union(ownCluster, destCluster)
+        }
+
+        // Step 3: for every resulting group, if ANY member is rejected AND
+        // the group has at least one non-punctuation-only member (the
+        // "punctuation-only-group exemption" above), flip every accepted
+        // member to rejected.
+        func isPunctuationOnly(_ edit: Edit) -> Bool {
+            let fromIsPunctOrNil = edit.from.map { $0.kind == .punctuation } ?? true
+            let toIsPunctOrNil = edit.to.map { $0.kind == .punctuation } ?? true
+            return fromIsPunctOrNil && toIsPunctOrNil
+        }
+        var groupHasRejection = Set<Int>()
+        var groupHasContentMember = Set<Int>()
+        for i in edits.indices where clusterID[i] != -1 {
+            let root = find(clusterID[i])
+            // Quick task 261008-gb4 (F5 refinement): a `dictProtectedCasing`
+            // rejection reverts only its own casing token, not its cluster.
+            if !verdicts[i].accepted, verdicts[i].rejectClass != RejectionClass.dictProtectedCasing.rawValue {
+                groupHasRejection.insert(root)
+            }
+            if !isPunctuationOnly(edits[i]) { groupHasContentMember.insert(root) }
+        }
+        let groupsToRevert = groupHasRejection.intersection(groupHasContentMember)
+        guard !groupsToRevert.isEmpty else { return }
+        for i in edits.indices {
+            let cid = clusterID[i]
+            guard cid != -1, verdicts[i].accepted, groupsToRevert.contains(find(cid)),
+                  // Quick task 260801-m8o: a period classified by the
+                  // pause-split-merge predicate is exempt from this flip.
+                  // It is punctuation-only
+                  // and already independently accepted, so it contributes to
+                  // neither `groupHasRejection` nor `groupHasContentMember`
+                  // above — the group's revert eligibility (whether
+                  // `groupsToRevert` contains this group at all) is therefore
+                  // bit-identical to before this exemption existed. Every
+                  // OTHER member of the group still renders its BASELINE
+                  // token when reverted (a rejected substitute renders its
+                  // `from`, a rejected delete/move restores at its baseline
+                  // anchor, a rejected insert is dropped), so exempting only
+                  // the period-delete yields exactly "baseline minus one
+                  // period" — never a mix of baseline and candidate content.
+                  // The tier-1 neither-source checker strips punctuation
+                  // before building word bigrams, so this partial acceptance
+                  // is tier-1-clean by construction, not by measurement.
+                  verdicts[i].acceptClass != AcceptClass.pauseSplitMerge.rawValue,
+                  // Quick task 260926-bbz: the utterance-final terminal
+                  // mark is exempt from this flip too — see
+                  // `isUtteranceFinalTerminalMarkInsert`'s doc comment for
+                  // why both flip loops in this file consult it.
+                  !isUtteranceFinalTerminalMarkInsert(at: i, edits: edits, verdicts: verdicts),
+                  // Quick task 260926-dbi: an exact-adjacent-stutter delete
+                  // is exempt from this flip too — see
+                  // `isExactAdjacentStutterDelete`'s doc comment.
+                  !isExactAdjacentStutterDelete(at: i, edits: edits, language: language)
+            else { continue }
+            verdicts[i] = ClassifiedEdit(
+                kind: verdicts[i].kind, from: verdicts[i].from, to: verdicts[i].to,
+                accepted: false, acceptClass: nil,
+                rejectClass: RejectionClass.atomicGroupRevert.rawValue
+            )
+        }
+    }
+
+    /// Phase 49.6 (D-04): the raw-sentence key for
+    /// `applySentenceCoupledRevert`. Returns the baseline `sentenceIndex`
+    /// the edit at `edits[i]` belongs to, read ONLY from the raw (baseline)
+    /// side — never `to.sentenceIndex` (D-04: the candidate side is
+    /// fragile under an LLM sentence split/merge, per 260825-q1w).
+    ///
+    /// For `.keep`/`.substitute`/`.delete`/`.move`, `from` is always
+    /// non-nil and its `sentenceIndex` is the answer directly. A `.move`'s
+    /// `from` is its baseline ORIGIN token, so a move belongs to the raw
+    /// sentence it was moved OUT OF — its candidate destination is never
+    /// consulted (D-04 forbids the candidate side entirely).
+    ///
+    /// For a pure `.insert` (no baseline anchor of its own), scan FORWARD
+    /// from `i+1` for the first edit with a non-nil `from` and return ITS
+    /// `from.sentenceIndex`. In the order-preserving `edits` array, the
+    /// token immediately after an insertion point is the first raw token
+    /// the inserted word attaches to in reading order — the correct anchor
+    /// for a sentence-INITIAL insert (the LLM adding a word right after a
+    /// raw period), where the PRECEDING anchor would incorrectly resolve
+    /// to the previous sentence's terminal token. The preceding anchor
+    /// (scan BACKWARD from `i-1`) is used only as a fallback when no
+    /// forward anchor exists (end-of-text). Returns `nil` when neither
+    /// scan finds an anchored edit — the insert has no raw sentence and is
+    /// neither a trigger nor a revert-eligible member.
+    private static func baselineSentenceIndex(ofEditAt i: Int, in edits: [Edit]) -> Int? {
+        if let from = edits[i].from {
+            return from.sentenceIndex
+        }
+        var j = i + 1
+        while j < edits.count {
+            if let from = edits[j].from { return from.sentenceIndex }
+            j += 1
+        }
+        j = i - 1
+        while j >= 0 {
+            if let from = edits[j].from { return from.sentenceIndex }
+            j -= 1
+        }
+        return nil
+    }
+
+    /// Phase 49.6 (D-03): trigger classes for `applySentenceCoupledRevert`
+    /// — a rejected edit whose `rejectClass` is one of these is
+    /// content-bearing and fires the revert. Deliberately absent:
+    /// `unclassified` (rejected punctuation moves and unpairable edits
+    /// carry no content signal) and this pass's own derived class
+    /// (`sentenceCoupledRevert`) plus `atomicGroupRevert` (also derived) —
+    /// a derived verdict is never itself a trigger, which is what keeps
+    /// this pass idempotent (see `applySentenceCoupledRevert`'s doc
+    /// comment).
+    ///
+    /// Quick task 260930-s19: `clauseRelocation` is a trigger — the raw
+    /// sentence whose words were carried away (and the sentence whose end
+    /// mark was coupled) returns to raw, including the commas the LLM
+    /// inserted to make the relocated clause read.
+    ///
+    /// Quick task 261003-gp8: a lone word swap (`contentWordIdentityChange`)
+    /// is still a trigger; `applySentenceCoupledRevert` lets its sentence's
+    /// accepted `punctuationOrCasing` edits stand.
+    private static let sentenceRevertTriggerClasses: Set<String> = [
+        RejectionClass.contentWordIdentityChange.rawValue,
+        RejectionClass.contentWordInsertion.rawValue,
+        RejectionClass.contentWordDeletion.rawValue,
+        RejectionClass.derivationalSuffixChange.rawValue,
+        RejectionClass.negationChange.rawValue,
+        RejectionClass.digitValueChange.rawValue,
+        RejectionClass.numberInsertion.rawValue,
+        RejectionClass.pronounDeleted.rawValue,
+        RejectionClass.pronounPersonChange.rawValue,
+        RejectionClass.moodLockSentenceInitialVerb.rawValue,
+        RejectionClass.clauseRelocation.rawValue,
+    ]
+
+    /// Phase 49.6 (D-02): the revert-eligible (CONTEXT-DEPENDENT) accept
+    /// classes for `applySentenceCoupledRevert` — an accepted edit only
+    /// reverts if its `acceptClass` is one of these. The SELF-CONTAINED
+    /// survive classes (`fillerDeletion`, `repetitionDeletion`,
+    /// `nonWordRepair`, `compoundRepair`, `hyphenCompoundJoin`, `numberFormChange`) are
+    /// deliberately NOT coded here — anything not in this set survives, by
+    /// construction.
+    private static let sentenceRevertContextDependentClasses: Set<String> = [
+        AcceptClass.functionWordSubstitution.rawValue,
+        AcceptClass.functionWordInsertion.rawValue,
+        AcceptClass.wordOrderRepair.rawValue,
+        AcceptClass.punctuationOrCasing.rawValue,
+        AcceptClass.pauseSplitMerge.rawValue,
+        AcceptClass.disfluencyCollapse.rawValue,
+        AcceptClass.inflectionFix.rawValue,
+        AcceptClass.connectorSplit.rawValue,
+        AcceptClass.punctuationMove.rawValue,
+        AcceptClass.contractionExpansion.rawValue,
+        AcceptClass.listComma.rawValue,
+    ]
+
+    /// Quick task 260926-bbz: is the edit at `edits[i]` the LLM's
+    /// utterance-final terminal mark — an insert this guard must never let
+    /// a coupled revert sweep away, however it exempts one from both flip
+    /// loops below.
+    ///
+    /// **D-02's criterion:** 49.6 D-02 lists the SELF-CONTAINED survive
+    /// classes as the edits whose correctness can be judged from the edit's
+    /// OWN token alone, with no dependency on sentence context. A `.`/`?`/
+    /// `!` inserted directly after the LAST raw (baseline) token, with
+    /// nothing baseline-anchored after it, is exactly that: nothing further
+    /// in the raw utterance exists for the mark to be wrong ABOUT. **Why
+    /// D-15's shape cannot occur here:** D-15's boundary-coupling loop
+    /// exists because a restored mid-utterance mark can be followed by a
+    /// raw sentence N+1 whose first word needs its casing coupled back down
+    /// — that requires a sentence N+1 to exist. An utterance-final mark has
+    /// no sentence N+1; the shape D-15 guards against is structurally
+    /// absent.
+    ///
+    /// **Why both flip loops consult this (pass order, re-invocation):**
+    /// `applyAtomicGroupCoupling` runs before `applySentenceCoupledRevert`
+    /// at every `rebuild` call site. When the last raw word is itself a
+    /// rejected substitute, the final mark shares its keep-bounded cluster
+    /// and would be swept by atomic coupling before SCR ever sees it (the
+    /// audit measured some of the missing-mark defects this way) — an
+    /// SCR-only exemption would miss these. Symmetrically, on a mood-lock
+    /// re-invocation (`rebuild`'s second and third call sites), atomic
+    /// coupling treats SCR's own earlier flips as rejections; if SCR had
+    /// reverted an accepted last-word substitute (a casing fix or an
+    /// `inflectionFix`) on an earlier call, a later atomic-coupling pass
+    /// would then sweep the mark unless it independently knows to leave it
+    /// alone. One predicate, consulted by both loops, is immune to which
+    /// pass runs first or how many times either re-runs.
+    ///
+    /// **Why it is structural:** every clause below is derived from `edits`
+    /// alone, apart from clause (d)'s mood carve-out — so the predicate's
+    /// answer is idempotent across all three `rebuild` call sites and
+    /// immune to flip order inside a loop. The mood carve-out can only
+    /// WITHDRAW an already-granted exemption, never grant one: mood-lock
+    /// rejections only accumulate across the bounded 2-attempt loop, so the
+    /// accept-to-reject monotonicity every other coupling pass in this file
+    /// holds is preserved here too.
+    ///
+    /// **Accepted costs (measured against the live-corpus replay, quick
+    /// tasks 260926-bbz and 260930-s1c):** a mark that lands after an
+    /// LLM-INSERTED word (the existing 49.6 Shapes C/D — the LLM added a
+    /// whole clause the raw speech never anchors) is NOT exempt, because
+    /// clause (c) requires the anchor before the mark (past any delete run
+    /// and the `.` companion) to be a `.keep`/`.substitute` of the
+    /// baseline's own last word, not an accepted insert. A mark after a moved last word, a mark followed by
+    /// another edit and a multi-character run (`...`, `?!`, or a mark glued
+    /// to a following quote) are NEVER exempt either: `sentenceTerminalMarks`
+    /// holds only the three single-character forms, so a run token's `text`
+    /// never matches clause (a). A mark following a dangling FUNCTION word
+    /// the raw utterance trails off on is exempt (rare in bbz's
+    /// replay), and since 261002-6oh so is a mark after a restored dropped
+    /// tail, which can leave a function word dangling before the mark
+    /// (hand-read in the 260930-s1c and 261002-6oh replays) — this predicate
+    /// judges the edit, not the word's part of speech. A `?`'s mood rests entirely on whether the
+    /// LLM's own reading of the raw clause triggered
+    /// `moodLockSentenceInitialVerb` elsewhere in this `rebuild` call —
+    /// clause (d) is the only place this predicate looks outside the mark's
+    /// own edit.
+    ///
+    /// **Quick tasks 260930-s1c and 261002-6oh — two structural extensions.**
+    /// Clause (c′), shipped by 261002-6oh with `splitUtteranceFinalMarkCarrier`:
+    /// bbz required the edit before the mark to be the anchor itself and
+    /// excluded deletes. A run of word/numeric `.delete` edits (any verdict)
+    /// between the anchor and the mark is allowed, because the mark still
+    /// renders last whatever the verdicts are: a rejected delete restores at
+    /// the anchor's candidate slot, which lies below the mark's `to.index`,
+    /// and an accepted delete renders nothing. Every edit before the anchor
+    /// must have `from == nil` or a `from.index` below the anchor's, and
+    /// every delete in the run must have one above it, so a moved last word
+    /// (whose `from.index` is the maximum) is still excluded. The run is the
+    /// split's own output: `EditDiff` pairs a delete run and a final insert
+    /// in one gap into a `substitute`, so a native delete run before the
+    /// final insert has not been observed. Clause (b′), 260930-s1c: a `.`
+    /// insert directly before a final `?`/`!` insert (`etc.?`) is the final mark's companion and shares
+    /// its structural answer, with the anchor search starting before the
+    /// companion for both. Clause (d) withdraws both. Only `.` followed by
+    /// `?`/`!` qualifies; `..`, `?.` and a `.` after an LLM-inserted word do
+    /// not. `collapseDanglingPunctuation` needs a space between marks, so it
+    /// leaves `etc.?` intact.
+    private static func isUtteranceFinalTerminalMarkInsert(
+        at i: Int, edits: [Edit], verdicts: [ClassifiedEdit]
+    ) -> Bool {
+        guard isUtteranceFinalMarkPosition(at: i, edits: edits),
+              let finalMark = edits[edits.count - 1].to
+        else { return false }
+        // (d) mood carve-out: a `?`/`!` insert is withdrawn if this
+        // `rebuild` call's mood lock fired anywhere in the utterance — a
+        // mood-locked question would otherwise ship "Er kommt morgen?".
+        if moodMarks.contains(finalMark.text),
+           verdicts.contains(where: { $0.rejectClass == RejectionClass.moodLockSentenceInitialVerb.rawValue }) {
+            return false
+        }
+        return true
+    }
+
+    /// A single-character sentence-terminal mark `.insert`.
+    private static func isTerminalMarkInsert(_ edit: Edit) -> Bool {
+        guard edit.kind == .insert, let to = edit.to, to.kind == .punctuation else { return false }
+        return sentenceTerminalMarks.contains(to.text)
+    }
+
+    /// The structural clauses (a), (b′), (c′) of
+    /// `isUtteranceFinalTerminalMarkInsert`; reads `edits` only, so
+    /// `splitUtteranceFinalMarkCarrier` checks its own output against the
+    /// same clauses.
+    private static func isUtteranceFinalMarkPosition(at i: Int, edits: [Edit]) -> Bool {
+        // (a) a single-character sentence-terminal mark, inserted.
+        guard edits.indices.contains(i), isTerminalMarkInsert(edits[i]) else { return false }
+        // (b) the last edit in the array — nothing baseline-anchored, and
+        // no other insert or move, follows it. (b′) or the `.` companion
+        // directly before a final `?`/`!` insert.
+        let f = edits.count - 1
+        guard let finalMark = edits[f].to, isTerminalMarkInsert(edits[f]) else { return false }
+        let companionPresent = f >= 1
+            && isTerminalMarkInsert(edits[f - 1])
+            && edits[f - 1].to?.text == "."
+            && moodMarks.contains(finalMark.text)
+        guard i == f || (i == f - 1 && companionPresent) else { return false }
+        // (c, c′) walk back over word/numeric deletes to the anchor: a
+        // keep/substitute of a non-punctuation baseline token — never an
+        // insert or move, which also excludes a moved last word.
+        var j = companionPresent ? f - 2 : f - 1
+        let runEnd = j
+        while j >= 0, edits[j].kind == .delete, let from = edits[j].from, from.kind != .punctuation {
+            j -= 1
+        }
+        guard j >= 0,
+              edits[j].kind == .keep || edits[j].kind == .substitute,
+              let anchor = edits[j].from,
+              anchor.kind != .punctuation
+        else { return false }
+        for t in 0..<j {
+            if let from = edits[t].from, from.index >= anchor.index { return false }
+        }
+        if j < runEnd {
+            for t in (j + 1)...runEnd {
+                guard let from = edits[t].from, from.index > anchor.index else { return false }
+            }
+        }
+        return true
+    }
+
+    /// Quick task 261002-6oh (designed and replay-measured in 260930-s1c,
+    /// withheld there over the P5 finding below): a REJECTED edit that
+    /// carries the candidate's final terminal mark as its `to` half loses
+    /// the mark with the edit's own rejection, and no exemption from the
+    /// coupling passes can render it, so the mark needs an edit of its own.
+    /// Shapes seen: a substitute carrier plus a
+    /// trailing delete, a substitute carrier as the last edit, and a move of
+    /// a raw interior period; a fourth shape is a pure predicate gap
+    /// (clause b′).
+    ///
+    /// Runs at the top of `rebuild`, AFTER `classify`, on purpose. The split
+    /// delete keeps the carrier's verdict verbatim, so the gate never
+    /// accepts the word drop and the dropped word (or the raw interior
+    /// period, which `classifyDelete` would otherwise accept, shipping a
+    /// run-on the raw never had) renders exactly where it rendered before.
+    /// Splitting before `classify` would let `classifyDelete` re-judge both.
+    /// Only rejected carriers split: an accepted one already renders the
+    /// mark, and leaving it keeps `disfluencyCollapse` and the calibration
+    /// counts unchanged.
+    ///
+    /// Gates: (1) the candidate's last token is a single-character terminal
+    /// mark `m`. (2) The baseline is non-empty and does not already end in
+    /// one, so the mark is LLM-added and a double mark is impossible. (3)
+    /// The edit with `to == m` is rejected. (4a) A substitute carrier: a
+    /// word/numeric `from`, and every later edit a word/numeric delete. (4b)
+    /// A move carrier: a terminal mark `from` that is not contiguous in both
+    /// streams with a neighbouring move (`applyMoveRunCoupling`'s test), so
+    /// a clause relocated together with its period is never split; a word
+    /// move is never split. (5) The rewritten arrays satisfy
+    /// `isUtteranceFinalMarkPosition` at the new final insert; otherwise
+    /// (for example an LLM-inserted word before the mark, Shapes C/D) the
+    /// inputs come back unchanged.
+    ///
+    /// Output: `edits[k]` becomes a `.delete` of the carrier's `from`
+    /// carrying the carrier's `accepted`/`acceptClass`/`rejectClass`, and an
+    /// `.insert` of `m`, classified by `classifyInsert` (prosodic, so
+    /// accepted `punctuationOrCasing`), is appended. Consequences: for these
+    /// records `rebuild` returns a `classified` array one longer than its
+    /// input (the D-11 log and the harness verdict-line count see it), and a
+    /// split delete is logged with its carrier's reject class (for example
+    /// a `delete` carrying `contentWordIdentityChange`). Per-class reject
+    /// counts are unchanged; `punctuationOrCasing` accepts rise by one per
+    /// rendered mark. A rejected `.delete` and a rejected `.move` restore
+    /// through the same `restorationTargets` path in `materialize`.
+    ///
+    /// The rendered seam is the baseline's last word followed directly by
+    /// the candidate's final mark, an adjacency neither input holds. bbz
+    /// already ships it whenever the last raw word is a rejected substitute
+    /// (seen in the 260930-s1c corpus). The tier-2 checker
+    /// `EditGuardMergeAtomicityTests.neitherSourceViolations` sanctions
+    /// exactly that output-final adjacency (261002-6oh); every other seam
+    /// stays under its original allowance.
+    private static func splitUtteranceFinalMarkCarrier(
+        edits: [Edit], classified: [ClassifiedEdit],
+        baseline: [Token], candidate: [Token], language: String
+    ) -> (edits: [Edit], classified: [ClassifiedEdit]) {
+        guard let m = candidate.last, m.kind == .punctuation, sentenceTerminalMarks.contains(m.text),
+              let baselineLast = baseline.last,
+              !(baselineLast.kind == .punctuation && sentenceTerminalMarks.contains(baselineLast.text)),
+              let k = edits.firstIndex(where: { $0.to?.index == m.index }),
+              !classified[k].accepted,
+              let carrierFrom = edits[k].from
+        else { return (edits, classified) }
+
+        switch edits[k].kind {
+        case .substitute:
+            guard carrierFrom.kind != .punctuation else { return (edits, classified) }
+            for t in (k + 1)..<edits.count {
+                guard edits[t].kind == .delete, let from = edits[t].from, from.kind != .punctuation else {
+                    return (edits, classified)
+                }
+            }
+        case .move:
+            guard carrierFrom.kind == .punctuation, sentenceTerminalMarks.contains(carrierFrom.text) else {
+                return (edits, classified)
+            }
+            if let to = edits[k].to {
+                if k > 0, edits[k - 1].kind == .move,
+                   let a = edits[k - 1].from, let b = edits[k - 1].to,
+                   carrierFrom.index == a.index + 1, to.index == b.index + 1 {
+                    return (edits, classified)
+                }
+                if k + 1 < edits.count, edits[k + 1].kind == .move,
+                   let a = edits[k + 1].from, let b = edits[k + 1].to,
+                   a.index == carrierFrom.index + 1, b.index == to.index + 1 {
+                    return (edits, classified)
+                }
+            }
+        default:
+            return (edits, classified)
+        }
+
+        let insert = Edit(kind: .insert, from: nil, to: m)
+        var newEdits = edits
+        newEdits[k] = Edit(kind: .delete, from: carrierFrom, to: nil)
+        newEdits.append(insert)
+        guard isUtteranceFinalMarkPosition(at: newEdits.count - 1, edits: newEdits) else {
+            return (edits, classified)
+        }
+
+        var newClassified = classified
+        newClassified[k] = ClassifiedEdit(
+            kind: EditKind.delete.rawValue, from: classified[k].from, to: nil,
+            accepted: classified[k].accepted, acceptClass: classified[k].acceptClass,
+            rejectClass: classified[k].rejectClass
+        )
+        let verdict = classifyInsert(insert, language: language, candidate: candidate)
+        newClassified.append(ClassifiedEdit(
+            kind: EditKind.insert.rawValue, from: nil, to: m.text,
+            accepted: verdict.accepted, acceptClass: verdict.acceptClass?.rawValue,
+            rejectClass: verdict.rejectClass?.rawValue
+        ))
+        return (newEdits, newClassified)
+    }
+
+    /// Quick task 260926-dbi: per-language closed sets of words whose
+    /// adjacent exact double can be productive grammar filling two distinct
+    /// slots, rather than a stutter — a relative pronoun/complementizer
+    /// followed by an article or demonstrative ("eine Lösung die die Kosten
+    /// senkt", "said that that answer"), a pronoun whose object and
+    /// subject/possessive forms coincide ("told you you were", "ob sie sie
+    /// kennt", "check it it works"), past perfect / pseudo-cleft
+    /// copula ("had had", "what it is is a"), and an adverb followed by a
+    /// new clause ("do so so").
+    /// Consulted by `isExactAdjacentStutterDelete` clause (c). Selection is
+    /// `language == "de"` for the German set, anything else the English
+    /// set — the same convention `EditGuardTokenizer.numericValue` uses.
+    private static let legitimateAdjacentDoubleForms: [String: Set<String>] = [
+        "en": ["that", "had", "is", "was", "you", "it", "her", "so"],
+        "de": ["der", "die", "das", "den", "dem", "des", "denen", "deren", "dessen", "sie", "es", "ihr", "ist", "war"]
+    ]
+
+    /// Quick task 260926-dbi: is the `.delete` at `edits[i]` an exact
+    /// adjacent-duplicate stutter/restart the candidate correctly resolved
+    /// down to one copy — one this guard must never let a coupled revert
+    /// put back, however it exempts one from both flip loops below.
+    ///
+    /// **49.6 D-02's criterion, applied to the exact-duplicate subset:** D-02
+    /// lists the SELF-CONTAINED survive classes as the edits whose
+    /// correctness can be judged from the edit's OWN token alone, with no
+    /// dependency on sentence context, and placed `disfluencyCollapse` in
+    /// the CONTEXT-DEPENDENT revert set because that class also covers
+    /// near-duplicates (`furtherly`/`further`), inflection pairs, and
+    /// pronoun pairs, whose correctness depends on which variant the
+    /// sentence needs. An EXACT duplicate next to a KEPT identical copy is
+    /// judgeable from the deleted token plus that neighbour alone: the word
+    /// itself is certain to survive in the output, because a `.keep` is
+    /// never flipped by either coupling pass and always renders — so
+    /// deleting its exact duplicate neighbour can never erase the word from
+    /// the sentence, only the stutter.
+    ///
+    /// **Why both flip loops consult this (pass order, re-invocation):**
+    /// `applyAtomicGroupCoupling` runs before `applySentenceCoupledRevert`
+    /// at every `rebuild` call site (mirrors
+    /// `isUtteranceFinalTerminalMarkInsert`'s reasoning) — in the observed
+    /// defect the stutter delete sat in one
+    /// keep-bounded cluster with rejected `contentWordDeletion`s and was
+    /// flipped to `atomicGroupRevert` before `applySentenceCoupledRevert`
+    /// ever saw it; an SCR-only exemption would miss that shape. Symmetrically,
+    /// on a mood-lock re-invocation (`rebuild`'s second and third call
+    /// sites), atomic coupling treats SCR's own earlier flips as
+    /// rejections, so a delete this predicate spared on an earlier call
+    /// could still be swept later unless both passes independently know to
+    /// leave it alone.
+    ///
+    /// **Rejected §6.4 alternatives (one sentence each):** reclassifying
+    /// exact duplicates as `repetitionDeletion` would fix
+    /// `applySentenceCoupledRevert` only, because `applyAtomicGroupCoupling`
+    /// flips every accepted class except two named exemptions, and it would
+    /// also move the pronoun-stutter path behind the D-04 lock and change
+    /// per-class counts; removing `disfluencyCollapse` from
+    /// `sentenceRevertContextDependentClasses` entirely would release
+    /// near-duplicates, inflection pairs, and pronoun pairs too, which D-02
+    /// correctly treats as context-dependent. Neither is done — the accept
+    /// class stays `disfluencyCollapse`, no new class is added.
+    ///
+    /// **No verdict dependence at all:** every clause below reads `edits`
+    /// and `language` only — never `verdicts` — which makes the predicate
+    /// idempotent across the three `rebuild` call sites and independent of
+    /// flip order.
+    ///
+    /// **The legitimate-double exclusion (clause (c)):** a doubled form is
+    /// NOT exempt when it is in `legitimateAdjacentDoubleForms` for the
+    /// language, or is a number word (`EditGuardTokenizer.numericValue`
+    /// non-nil) — a planning-time scan of the staged corpus
+    /// found the LLM sometimes wrongly collapsed a legitimate double (`that`, `is`)
+    /// among exact-duplicate deletes, so the LLM's own deletion does
+    /// not by itself certify a stutter for these forms; see
+    /// `260926-dbi-PLAN.md`'s `<objective>` for the full evidence table and
+    /// family list.
+    ///
+    /// **Accepted costs:** intensifier/interjection reduplication (`very
+    /// very`, `really really`, `no no`, `like like`) is not excluded — the
+    /// LLM kept every corpus occurrence, so there is no measured defect to
+    /// fix, and collapsing one would only drop emphasis, not propositional
+    /// content, if the LLM ever did delete one. Particle-plus-preposition
+    /// doubles ("sign in in the app") are not excluded either: both corpus
+    /// `in in` occurrences are genuine stutters and are two of the measured
+    /// fixes. A triple ("for for for") collapses by one copy only, because
+    /// only the delete whose baseline neighbour is a `.keep` qualifies — the
+    /// other delete's neighbour is itself a deleted token, so clause (b)
+    /// never fires for it. A German finite verb doubled after a fronted
+    /// clause ("hat hat") is not excluded beyond `ist`/`war`.
+    ///
+    /// **`to` (260930-s1f):** an infinitive or stranded-preposition `to to`
+    /// is not excluded. In the union corpus the gate baseline held mostly
+    /// stutters and one legitimate double, which the LLM split with
+    /// punctuation (a `.substitute`, which clause (a) never matches) instead
+    /// of deleting. The exclusion restored the stutter in the one coupled
+    /// revert it touched. A wrong collapse of a legitimate `to to`
+    /// joins two phrases without removing an argument, tense or value.
+    /// Retention rule for the remaining members: stutters must outnumber
+    /// legitimate doubles, there must be at least 2 stutters, and the LLM
+    /// must never have been measured deleting a copy of a legitimate double.
+    /// Word-to-punctuation substitute drops that `disfluencyAcceptedIndices`
+    /// also counts are out of scope — clause (a) requires an actual
+    /// `.delete`.
+    private static func isExactAdjacentStutterDelete(at i: Int, edits: [Edit], language: String) -> Bool {
+        // (a) a `.delete` of a baseline word token.
+        guard edits[i].kind == .delete,
+              let deleted = edits[i].from,
+              deleted.kind == .word
+        else { return false }
+        // (b) some `.keep` edit anchors a baseline word immediately adjacent
+        // (Token.index +/- 1 — baseline adjacency, never edits-array
+        // adjacency, because an accepted insert can sit between) with equal
+        // `normalized` text.
+        let hasKeptDuplicateNeighbor = edits.contains { candidate in
+            guard candidate.kind == .keep,
+                  let kept = candidate.from,
+                  kept.kind == .word,
+                  abs(kept.index - deleted.index) == 1
+            else { return false }
+            return kept.normalized == deleted.normalized
+        }
+        guard hasKeptDuplicateNeighbor else { return false }
+        // (c) the doubled form is not a legitimate double for this
+        // language, and is not a number word.
+        let exclusionSet = legitimateAdjacentDoubleForms[language == "de" ? "de" : "en"] ?? []
+        guard !exclusionSet.contains(deleted.normalized) else { return false }
+        guard EditGuardTokenizer.numericValue(deleted, language: language) == nil else { return false }
+        return true
+    }
+
+    /// Quick task 261003-gp8: is the rejected edit at `edits[i]` a lone word
+    /// swap — one word replaced by one other word, rejected as
+    /// `contentWordIdentityChange`? Both tokens are `.word`, their
+    /// normalized forms differ, and neither side is a D-09 coordinator or
+    /// negator (a clause-relation or polarity change), a pronoun, a number
+    /// word or contains a digit (the last two are classified by other rules
+    /// today; the checks keep the carve-out closed if that changes). The
+    /// swap's keep-bounded cluster (the run of non-keep edits around it) may
+    /// hold punctuation edits but no other `.word` token, so the swap is
+    /// one token for one token; a swap that shares its cluster with a word
+    /// insert or delete (`wanna` -> `want to`) never qualifies.
+    private static func isLoneWordSwapTrigger(at i: Int, edits: [Edit], verdicts: [ClassifiedEdit], language: String) -> Bool {
+        guard edits[i].kind == .substitute,
+              verdicts[i].rejectClass == RejectionClass.contentWordIdentityChange.rawValue,
+              let a = edits[i].from, let b = edits[i].to,
+              a.kind == .word, b.kind == .word,
+              a.normalized != b.normalized,
+              !FunctionWords.isConjunctionOrNegator(a.normalized, language: language),
+              !FunctionWords.isConjunctionOrNegator(b.normalized, language: language),
+              !PronounPersonMap.isPronoun(a.normalized, language: language),
+              !PronounPersonMap.isPronoun(b.normalized, language: language),
+              EditGuardTokenizer.numericValue(a, language: language) == nil,
+              EditGuardTokenizer.numericValue(b, language: language) == nil,
+              !a.text.contains(where: { $0.isNumber }),
+              !b.text.contains(where: { $0.isNumber })
+        else { return false }
+        var lo = i
+        while lo > 0, edits[lo - 1].kind != .keep { lo -= 1 }
+        var hi = i
+        while hi + 1 < edits.count, edits[hi + 1].kind != .keep { hi += 1 }
+        for k in lo...hi where k != i {
+            for token in [edits[k].from, edits[k].to] {
+                if let token, token.kind == .word { return false }
+            }
+        }
+        return true
+    }
+
+    /// Quick task 261003-gp8: does raw sentence `s` hold a terminal-mark
+    /// change — any non-keep edit whose `from` or `to` is a punctuation token
+    /// made only of `.`, `?` or `!`? Such a sentence stays fully coupled: a
+    /// mood or sentence-boundary decision is never released. The one
+    /// exception is a `.` insert at the utterance-final position
+    /// (`isUtteranceFinalMarkPosition`), which 260926-bbz already spares from
+    /// both flip loops and which carries no mood. Reads `edits` only.
+    private static func sentenceHasTerminalMarkChange(_ s: Int, edits: [Edit]) -> Bool {
+        for k in edits.indices {
+            guard edits[k].kind != .keep,
+                  baselineSentenceIndex(ofEditAt: k, in: edits) == s
+            else { continue }
+            if edits[k].kind == .insert, edits[k].to?.text == ".",
+               isUtteranceFinalMarkPosition(at: k, edits: edits) { continue }
+            for token in [edits[k].from, edits[k].to] {
+                if let token, token.kind == .punctuation, !token.text.isEmpty,
+                   token.text.allSatisfy({ ".?!".contains($0) }) { return true }
+            }
+        }
+        return false
+    }
+
+    /// Phase 49.6 (EDITGUARD-03, D-01..D-06): the sixth coupling pass —
+    /// the raw-SENTENCE coupled revert. Audit finding 3: German
+    /// verb-position clauses shipped text worse than either raw
+    /// or the LLM proposal because `applyAtomicGroupCoupling` only groups
+    /// adjacency-bounded runs of consecutive non-keep edits, and exempts
+    /// punctuation-only groups: a rejected content-bearing edit can sit
+    /// several `.keep`-separated tokens away from an accepted
+    /// context-dependent edit in the SAME raw sentence, and the two never
+    /// land in the same atomic-group cluster.
+    ///
+    /// **Unit (D-01/D-04):** the whole RAW (baseline) sentence containing
+    /// the rejected edit — see `baselineSentenceIndex`'s doc comment.
+    ///
+    /// **Trigger (D-03):** `sentenceRevertTriggerClasses`.
+    /// **Revert set (D-02):** `sentenceRevertContextDependentClasses`.
+    /// Unlike `applyAtomicGroupCoupling`, this pass does NOT exempt
+    /// punctuation-only groups (D-02): the July exemption guarded a
+    /// glued-ellipsis mechanism 49.5's run tokenization removed, and
+    /// shielding it here would leave two of those defects unfixed.
+    ///
+    /// **Algorithm:** (a) collect the `baselineSentenceIndex` of every
+    /// edit whose verdict is rejected with a trigger-class `rejectClass`,
+    /// into a `Set<Int>`; (b) if empty, no-op; (c) for every edit that is
+    /// NOT a `.keep`, is currently ACCEPTED with a revert-set
+    /// `acceptClass`, and whose `baselineSentenceIndex` is in that trigger
+    /// set, flip it to rejected with `rejectClass: sentenceCoupledRevert`,
+    /// using the same `ClassifiedEdit` reconstruction idiom
+    /// `applyAtomicGroupCoupling` uses.
+    ///
+    /// **No run-on cap (D-05):** a raw sentence with no terminal period
+    /// can be a whole utterance; this pass does not subdivide it or cap
+    /// how many edits it reverts — accepted, measured by plan 04's replay.
+    ///
+    /// **Boundary coupling (D-15, gap plan 06):** plan 04's replay bar
+    /// found a residual: when this pass restores a single-character
+    /// terminal mark (`.`/`!`/`?`, `sentenceTerminalMarks`) at the end of
+    /// a TRIGGERED raw sentence N, the immediately following edit — raw
+    /// sentence N+1's first word token, if it is an accepted
+    /// `punctuationOrCasing` casing substitute — is coupled and reverted
+    /// with it, even though N+1 itself carries no trigger. Without this,
+    /// the restored period/mark is followed by an un-reverted lowercase
+    /// word (`…done. what…`, `…later. because…`). The membership check is
+    /// `sentenceTerminalMarks` (single-character set) — a multi-character
+    /// run such as `...`/`!!`/`??` is NEVER a member, so an ellipsis (or
+    /// any run) boundary does NOT couple the next sentence's casing (the
+    /// two ellipsis-form rows in the same export were correctly labelled
+    /// REVERT-TO-RAW, not REGRESSION). ADJACENCY in `edits` (index `i` the
+    /// terminal-mark edit, `i + 1` the next sentence's first-word
+    /// substitute) is what makes "first word token of raw sentence N+1"
+    /// unambiguous: nothing can sit between the terminal mark and that
+    /// word in either stream, so an accepted insert between them
+    /// (`. So what`) deliberately does NOT couple — the inserted word
+    /// changes the casing context and the LLM's lowercase is then
+    /// correct. This step does not gate on which class the terminal-mark
+    /// edit itself carried (`punctuationOrCasing` for `.`->`,`,
+    /// `pauseSplitMerge` for a merge-delete, `unclassified` for a
+    /// rejected punctuation move, or this pass's own
+    /// `sentenceCoupledRevert`) — the observable fact is that the mark is
+    /// restored (`!verdicts[i].accepted`) while its sentence is in
+    /// `triggered`; nor does it require the mark to have been flipped in
+    /// THIS call, so it stays idempotent across the three call sites.
+    ///
+    /// **Idempotence/monotonicity:** derived purely from `edits`
+    /// (immutable within one `rebuild` call) plus each verdict's OWN
+    /// class — its own output class (`sentenceCoupledRevert`) is never a
+    /// trigger, so re-running this pass after a later verdict mutation
+    /// (the mood-lock loop) can only find MORE edits to revert, never
+    /// un-revert a prior flip — the same accept-to-reject-only contract
+    /// every other coupling pass in this file holds. Called immediately
+    /// after `applyAtomicGroupCoupling` at all three `rebuild` call sites
+    /// (initial pass + both mood-lock re-invocations), so it sees that
+    /// pass's flips: because `applyAtomicGroupCoupling` treats ANY
+    /// rejection in a group as a group rejection, a later mood-lock
+    /// re-invocation of THIS pass may additionally revert a SURVIVE-class
+    /// edit that sits in the same keep-bounded run as an edit this pass
+    /// flipped on an earlier call — an accepted consequence: the direction
+    /// is always toward raw, and the replay reports it.
+    ///
+    /// Quick task 260926-bbz: the main flip loop below additionally exempts
+    /// the utterance-final terminal mark — see
+    /// `isUtteranceFinalTerminalMarkInsert`'s doc comment.
+    ///
+    /// Quick task 260926-dbi: the main flip loop below also exempts an
+    /// exact-adjacent-stutter delete — see
+    /// `isExactAdjacentStutterDelete`'s doc comment.
+    ///
+    /// Quick task 261003-gp8 (lone word swap): a triggered raw sentence whose
+    /// ONLY trigger is a lone word swap (`isLoneWordSwapTrigger`) and which
+    /// holds no terminal-mark change (`sentenceHasTerminalMarkChange`) keeps
+    /// its accepted `punctuationOrCasing` edits; the swap itself stays
+    /// rejected. Before, one rejected swapped word returned the whole raw
+    /// sentence and threw away the commas and capitals the cleanup got right.
+    /// Only `punctuationOrCasing` is released, because a function word,
+    /// inflection, word order or sentence merge can be conditioned on the
+    /// swapped word (an observed shape: an article case that followed the
+    /// swapped verb), and a casing edit that lowers a capitalised word's first
+    /// letter is not released either (a German noun, or a sentence start
+    /// whose capital belonged to a reverted move). Nothing else changes: the
+    /// D-15 boundary loop and the au9 `punctuationMove` loop below still read
+    /// `triggered`, and mood-lock and sentence-boundary decisions stay
+    /// coupled through the terminal-mark exclusion. The six D-06 shapes are
+    /// pinned by `EditGuardCoupledRevertTests` and keep their output.
+    /// `applyAtomicGroupCoupling` runs first at every call site, so any
+    /// accepted edit in the swap's own keep-bounded cluster is already
+    /// reverted and no released mark sits next to a reverted word. The set of
+    /// qualifying sentences is recomputed from `verdicts` on each call;
+    /// rejections only accumulate, so a sentence can leave it (a second
+    /// trigger appears) but never re-enter, and the pass stays monotone
+    /// toward raw.
+    private static func applySentenceCoupledRevert(edits: [Edit], verdicts: inout [ClassifiedEdit], language: String) {
+        guard !edits.isEmpty else { return }
+
+        var triggered = Set<Int>()
+        var triggerEdits: [Int: [Int]] = [:]
+        for i in edits.indices {
+            guard !verdicts[i].accepted,
+                  let rejectClass = verdicts[i].rejectClass,
+                  sentenceRevertTriggerClasses.contains(rejectClass),
+                  let sentenceIndex = baselineSentenceIndex(ofEditAt: i, in: edits)
+            else { continue }
+            triggered.insert(sentenceIndex)
+            triggerEdits[sentenceIndex, default: []].append(i)
+        }
+        guard !triggered.isEmpty else { return }
+
+        var loneSwapSentences = Set<Int>()
+        for (s, list) in triggerEdits where list.count == 1 {
+            if isLoneWordSwapTrigger(at: list[0], edits: edits, verdicts: verdicts, language: language),
+               !sentenceHasTerminalMarkChange(s, edits: edits) {
+                loneSwapSentences.insert(s)
+            }
+        }
+
+        for i in edits.indices {
+            guard edits[i].kind != .keep,
+                  verdicts[i].accepted,
+                  let acceptClass = verdicts[i].acceptClass,
+                  sentenceRevertContextDependentClasses.contains(acceptClass),
+                  let sentenceIndex = baselineSentenceIndex(ofEditAt: i, in: edits),
+                  triggered.contains(sentenceIndex),
+                  !(loneSwapSentences.contains(sentenceIndex) && acceptClass == AcceptClass.punctuationOrCasing.rawValue
+                    && !(edits[i].kind == .substitute && edits[i].from?.text.first?.isUppercase == true
+                         && edits[i].to?.text.first?.isLowercase == true)),
+                  // Quick task 260926-bbz: the utterance-final terminal
+                  // mark survives this pass too — see
+                  // `isUtteranceFinalTerminalMarkInsert`'s doc comment.
+                  !isUtteranceFinalTerminalMarkInsert(at: i, edits: edits, verdicts: verdicts),
+                  // Quick task 260926-dbi: an exact-adjacent-stutter delete
+                  // survives this pass too — see
+                  // `isExactAdjacentStutterDelete`'s doc comment.
+                  !isExactAdjacentStutterDelete(at: i, edits: edits, language: language)
+            else { continue }
+            verdicts[i] = ClassifiedEdit(
+                kind: verdicts[i].kind, from: verdicts[i].from, to: verdicts[i].to,
+                accepted: false, acceptClass: nil,
+                rejectClass: RejectionClass.sentenceCoupledRevert.rawValue
+            )
+        }
+
+        // Phase 49.6 gap plan 06 (D-15): boundary coupling — see the
+        // "Boundary coupling" doc-comment paragraph above. A restored
+        // single-character terminal mark ending a TRIGGERED raw sentence N
+        // takes raw sentence N+1's first-word `punctuationOrCasing` casing
+        // substitute down with it, whether or not N+1 itself has any
+        // trigger of its own.
+        //
+        // 49.6 code review WR-03: the adjacency check bridges FORWARD past
+        // any edit that RENDERS NOTHING in the output stream, rather than
+        // hard-coding `j = i + 1` — mirroring `materialize`'s own
+        // `emittedKindAt` rule for "what actually renders next": a
+        // `.delete` NEVER occupies a candidate slot regardless of its
+        // verdict (accepted or rejected, it has no `to` — see
+        // `emittedKindAt`'s `case .delete: break`), and a REJECTED
+        // `.insert`/`.move` occupies its slot but renders nothing there
+        // (accepted, they render; rejected, they are true drops). Bridging
+        // past these means an accepted filler deletion, or a rejected
+        // insert/move, sitting between the mark and the next sentence's
+        // first word can no longer defeat the coupling. An ACCEPTED insert
+        // is deliberately NOT bridged — the loop stops there and does not
+        // couple (see the doc comment's `. So what` example): it changes
+        // the casing context for real, so the LLM's lowercase next word is
+        // then correct.
+        for i in edits.indices {
+            guard edits[i].kind != .keep,
+                  let markToken = edits[i].from,
+                  markToken.kind == .punctuation,
+                  sentenceTerminalMarks.contains(markToken.text),
+                  !verdicts[i].accepted,
+                  triggered.contains(markToken.sentenceIndex)
+            else { continue }
+            let n = markToken.sentenceIndex
+            var j = i + 1
+            while j < edits.count {
+                if edits[j].kind == .delete { j += 1; continue }
+                if (edits[j].kind == .insert || edits[j].kind == .move), !verdicts[j].accepted { j += 1; continue }
+                break
+            }
+            guard j < edits.count,
+                  edits[j].kind == .substitute,
+                  verdicts[j].accepted,
+                  verdicts[j].acceptClass == AcceptClass.punctuationOrCasing.rawValue,
+                  let nextWordToken = edits[j].from,
+                  nextWordToken.kind == .word,
+                  nextWordToken.sentenceIndex == n + 1
+            else { continue }
+            verdicts[j] = ClassifiedEdit(
+                kind: verdicts[j].kind, from: verdicts[j].from, to: verdicts[j].to,
+                accepted: false, acceptClass: nil,
+                rejectClass: RejectionClass.sentenceCoupledRevert.rawValue
+            )
+        }
+
+        // Quick task 261003-au9: an ACCEPTED `punctuationMove` of a terminal
+        // mark reverts with the recase of the word after it. The mark sits at
+        // its baseline position in `edits`, so the next word is found through
+        // the CANDIDATE index; a rejected insert/move there occupies a slot
+        // but renders nothing, exactly as in the pass above.
+        var editByCandidate: [Int: Int] = [:]
+        for (k, e) in edits.enumerated() { if let t = e.to { editByCandidate[t.index] = k } }
+        for i in edits.indices {
+            guard edits[i].kind == .move, verdicts[i].accepted,
+                  verdicts[i].acceptClass == AcceptClass.punctuationMove.rawValue,
+                  let mark = edits[i].to, sentenceTerminalMarks.contains(mark.text)
+            else { continue }
+            var slot = mark.index + 1
+            while let j = editByCandidate[slot], (edits[j].kind == .insert || edits[j].kind == .move), !verdicts[j].accepted { slot += 1 }
+            guard let j = editByCandidate[slot], edits[j].kind == .substitute, !verdicts[j].accepted,
+                  let f = edits[j].from, let t = edits[j].to,
+                  f.kind == .word, t.kind == .word, f.normalized == t.normalized, f.text != t.text,
+                  t.text.first?.isUppercase == true
+            else { continue }
+            verdicts[i] = ClassifiedEdit(
+                kind: verdicts[i].kind, from: verdicts[i].from, to: verdicts[i].to,
+                accepted: false, acceptClass: nil,
+                rejectClass: RejectionClass.sentenceCoupledRevert.rawValue
+            )
+        }
+    }
+
+    /// The candidate-stream walk (Part C step 1-5, 7): emits accepted
+    /// candidate-side tokens in candidate order, restores rejected
+    /// delete/move tokens near their nearest surviving baseline anchor, and
+    /// never mutates `verdicts` itself.
+    private static func materialize(
+        baseline: [Token],
+        candidate: [Token],
+        edits: [Edit],
+        verdicts: [ClassifiedEdit]
+    ) -> [WorkToken] {
+        var byCandidateIndex: [Int: (Edit, ClassifiedEdit)] = [:]
+        for (i, edit) in edits.enumerated() {
+            if let to = edit.to {
+                byCandidateIndex[to.index] = (edit, verdicts[i])
+            }
+        }
+
+        // Gap-local rejected-substitute remap (260724-j96): a rejected
+        // `.substitute` renders inline at the CANDIDATE index of its own
+        // `to` token — unlike a rejected `.delete`/`.move`, which restores
+        // via the baseline-anchored `restorationTargets` mechanism below and
+        // is therefore order-safe regardless of pairing. When a single
+        // keep-bounded gap holds 2+ `.substitute` pairs,
+        // `EditDiff.pairAdjacentSubstitutes`' STEM-PLAUSIBILITY ranking can
+        // cross the pairs' relative order versus their baseline order (e.g.
+        // baseline "fact check" / candidate "let's fact-check" pairs
+        // baseline "fact" to candidate "fact-check" — the higher stem-
+        // overlap pair — leaving "check" paired against "let's"). If both
+        // are then rejected, rendering each at its OWN candidate slot
+        // reproduces the crossed (candidate) order instead of baseline
+        // order — a neither-source splice ("check fact" instead of "fact
+        // check"). Crossing is GAP-LOCAL: `pairAdjacentSubstitutes` only
+        // forms pairs within one keep-bounded delete/insert run, and keeps
+        // (the LCS backbone) are monotonic in both streams, so a rejected
+        // substitute can only be order-crossed against another rejected
+        // substitute in the SAME gap.
+        //
+        // Fix: within each gap, collect the REJECTED `.substitute` edits
+        // only (accepted ones emit real candidate text and need no
+        // baseline-order constraint). Sort their baseline `from` tokens by
+        // `from.index` ascending and their candidate slots by `to.index`
+        // ascending, then assign the i-th baseline token to the i-th slot.
+        // When the pairing was never crossed this is the identity
+        // assignment (each token maps back to its own slot) — output
+        // byte-identical, which is what keeps the blast radius exactly the
+        // crossed-gap records. The resulting map is threaded through all
+        // three consumers of a rejected substitute below: the candidate
+        // walk (renders the reassigned token, not `edit.from`),
+        // `baselineAnchorCandidateIndex`/`baselineSurvives` (a restored
+        // baseline index must anchor at the slot where its token NOW
+        // renders, or a stale entry misplaces `.delete`/`.move`
+        // restorations), and `emittedKindAt` (reports the reassigned
+        // token's kind).
+        var gapID = [Int](repeating: -1, count: edits.count)
+        do {
+            var currentGap: Int?
+            var gapCount = 0
+            for i in edits.indices {
+                if edits[i].kind == .keep {
+                    currentGap = nil
+                } else {
+                    if currentGap == nil {
+                        currentGap = gapCount
+                        gapCount += 1
+                    }
+                    gapID[i] = currentGap!
+                }
+            }
+        }
+        var gapRejectedSubstitutes: [Int: [(from: Token, to: Token)]] = [:]
+        for i in edits.indices {
+            guard edits[i].kind == .substitute, !verdicts[i].accepted,
+                  let from = edits[i].from, let to = edits[i].to,
+                  gapID[i] != -1
+            else { continue }
+            gapRejectedSubstitutes[gapID[i], default: []].append((from, to))
+        }
+        var substituteRestoreToken: [Int: Token] = [:] // candidate to.index -> reassigned baseline token
+        for (_, group) in gapRejectedSubstitutes {
+            let byBaseline = group.sorted { $0.from.index < $1.from.index }
+            let bySlot = group.sorted { $0.to.index < $1.to.index }
+            for k in bySlot.indices {
+                substituteRestoreToken[bySlot[k].to.index] = byBaseline[k].from
+            }
+        }
+
+        // Which candidate index is each sentence's FIRST word, in the
+        // ORIGINAL (pre-rebuild) candidate stream — used below to scope
+        // `baselineCasingAlternative` to tokens that genuinely LOOKED
+        // sentence-initial to the LLM, not to every mid-sentence
+        // casing-only accept (a legitimate German mid-sentence noun
+        // capitalization repair, e.g. "welt"->"Welt", is never candidate-
+        // sentence-initial and must never be a spurious-capitalization
+        // revert candidate — see `revertSpuriousSentenceInitialCapitalization`).
+        var candidateFirstWordIndex: [Int: Int] = [:]
+        let candidateQuoteRoles = straightQuoteRoles(candidate)
+        let baselineQuoteRoles = straightQuoteRoles(baseline)
+        for t in candidate where t.kind == .word {
+            if candidateFirstWordIndex[t.sentenceIndex] == nil {
+                candidateFirstWordIndex[t.sentenceIndex] = t.index
+            }
+        }
+
+        // Which baseline indices "survive" verbatim (keep, or a rejected
+        // substitute restoring the baseline token in place), and which
+        // candidate index anchors them for restoration purposes.
+        var baselineSurvives = [Bool](repeating: false, count: baseline.count)
+        var baselineAnchorCandidateIndex: [Int: Int] = [:] // -1 == front-of-output
+        for (i, edit) in edits.enumerated() {
+            guard edit.kind == .keep, let a = edit.from, let b = edit.to else { continue }
+            baselineSurvives[a.index] = true
+            baselineAnchorCandidateIndex[a.index] = b.index
+        }
+        // Rejected substitutes: anchor the token that ACTUALLY renders at
+        // each slot per the gap-local remap above (identity when the
+        // pairing wasn't crossed) — see the remap's doc comment for why
+        // this must use the reassigned token, not `edit.from`.
+        for (slotIndex, token) in substituteRestoreToken {
+            baselineSurvives[token.index] = true
+            baselineAnchorCandidateIndex[token.index] = slotIndex
+        }
+
+        var restorationsAfter: [Int: [WorkToken]] = [:]
+        var restorationsAtFront: [WorkToken] = []
+
+        let restorationTargets: [(bIdx: Int, token: Token)] = edits.enumerated().compactMap { i, edit in
+            let v = verdicts[i]
+            guard !v.accepted, let a = edit.from else { return nil }
+            switch edit.kind {
+            case .delete, .move: return (a.index, a)
+            default: return nil
+            }
+        }.sorted { $0.bIdx < $1.bIdx }
+
+        for (bIdx, a) in restorationTargets {
+            let restored = WorkToken(text: a.text, normalized: a.normalized, kind: a.kind, trailing: a.trailing, sentenceIndex: a.sentenceIndex, source: .restoredBaseline, quoteRole: baselineQuoteRoles[a.index], baselineCasingAlternative: nil)
+
+            var anchor: Int?
+            var scan = bIdx - 1
+            while scan >= 0 {
+                if baselineSurvives[scan] { anchor = scan; break }
+                scan -= 1
+            }
+
+            let targetCandidateIndex: Int
+            if let anchorIdx = anchor, let candIdx = baselineAnchorCandidateIndex[anchorIdx] {
+                targetCandidateIndex = candIdx
+            } else {
+                targetCandidateIndex = -1
+            }
+
+            if targetCandidateIndex == -1 {
+                restorationsAtFront.append(restored)
+            } else {
+                restorationsAfter[targetCandidateIndex, default: []].append(restored)
+            }
+            baselineAnchorCandidateIndex[bIdx] = targetCandidateIndex
+            baselineSurvives[bIdx] = true
+        }
+
+        // Precompute what each candidate index actually EMITS (nothing for
+        // a rejected insert/move — those are true "drops"). Used by
+        // `trailingFor` below to decide, for every emitted token, whether
+        // the position immediately following it in candidate is UNCHANGED
+        // (in which case candidate's own trailing is already correct and
+        // must be preserved verbatim — this is what protects abbreviations
+        // like "a.m" and a leading "..." from a fabricated space) or was
+        // DROPPED (in which case the gap needs bridging: no space before
+        // whatever punctuation now follows, one space before a word).
+        var emittedKindAt: [Int: TokenKind] = [:]
+        for (i, edit) in edits.enumerated() {
+            guard let to = edit.to else { continue }
+            let v = verdicts[i]
+            switch edit.kind {
+            case .keep:
+                emittedKindAt[to.index] = to.kind
+            case .substitute:
+                emittedKindAt[to.index] = v.accepted ? to.kind : (substituteRestoreToken[to.index]?.kind ?? edit.from?.kind ?? to.kind)
+            case .insert, .move:
+                if v.accepted { emittedKindAt[to.index] = to.kind }
+            case .delete:
+                break
+            }
+        }
+
+        func trailingFor(candidateIndex i: Int, ownTrailing: String) -> String {
+            // EDITGUARD-01: a queued restoration no longer force-spaces the token before it — the seam is derived once by deriveSeamSpacing after the collapse pass decides what actually survives.
+            // Nothing dropped immediately after `i` — candidate's own
+            // structure at this seam is unchanged, so its own trailing is
+            // already correct. Preserve it verbatim.
+            if i + 1 >= candidate.count || emittedKindAt[i + 1] != nil {
+                return ownTrailing
+            }
+            // A drop occurred — find the next position that will actually
+            // emit something and bridge the gap: no space before
+            // punctuation, one space before a word/number.
+            var next = i + 1
+            while next < candidate.count, emittedKindAt[next] == nil {
+                next += 1
+            }
+            guard next < candidate.count, let kind = emittedKindAt[next] else { return "" }
+            return kind == .punctuation ? "" : " "
+        }
+
+        var output: [WorkToken] = []
+        output.append(contentsOf: restorationsAtFront)
+
+        for i in 0..<candidate.count {
+            if let (edit, v) = byCandidateIndex[i] {
+                switch edit.kind {
+                case .keep:
+                    if let b = edit.to {
+                        output.append(WorkToken(text: b.text, normalized: b.normalized, kind: b.kind, trailing: trailingFor(candidateIndex: i, ownTrailing: b.trailing), sentenceIndex: b.sentenceIndex, source: .candidate, quoteRole: candidateQuoteRoles[b.index], baselineCasingAlternative: nil))
+                    }
+                case .substitute:
+                    if v.accepted, let a = edit.from, let b = edit.to {
+                        let isCasingOnly = v.acceptClass == AcceptClass.punctuationOrCasing.rawValue
+                            && a.kind != .punctuation && a.normalized == b.normalized && a.text != b.text
+                            && candidateFirstWordIndex[b.sentenceIndex] == b.index
+                        output.append(WorkToken(
+                            text: b.text, normalized: b.normalized, kind: b.kind, trailing: trailingFor(candidateIndex: i, ownTrailing: b.trailing), sentenceIndex: b.sentenceIndex,
+                            source: .candidate, quoteRole: candidateQuoteRoles[b.index], baselineCasingAlternative: isCasingOnly ? a.text : nil
+                        ))
+                    } else if let a = edit.from, let b = edit.to {
+                        // Gap-local remap (260724-j96): render the token
+                        // reassigned to THIS slot, not necessarily this
+                        // edit's own `a` — see `substituteRestoreToken`'s
+                        // doc comment above. Falls back to `a` when no
+                        // remap entry exists (defensive; every rejected
+                        // substitute's own slot is always populated).
+                        let renderToken = substituteRestoreToken[i] ?? a
+                        // Whitespace-provenance fix (quick task 260801-9n7,
+                        // widened by quick task 260831-gd9): this branch restores the
+                        // BASELINE token's `text` (via `renderToken`) and
+                        // must restore its `trailing` with it — reverting a
+                        // span means reverting it completely, whitespace
+                        // included. 9n7 first found the empty-candidate-
+                        // trailing half of this: a baseline mark that carried
+                        // a genuine inter-sentence separator (the "." in
+                        // "...saved. So...", baseline trailing " ")
+                        // silently inherited a candidate glue (the LLM's
+                        // "saved—to", trailing "") whenever the candidate-
+                        // derived trailing came back empty — gluing two
+                        // sentences together ("saved.So"). gd9 found the
+                        // MIRROR case (e.g. "in.stalled"): a baseline mark glued to its next
+                        // word with NO separator (baseline trailing "")
+                        // inherited the candidate's non-empty trailing
+                        // instead, fabricating a space the baseline never had
+                        // ("in.stalled" -> "in. stalled"). Both are the same
+                        // defect — using the candidate's trailing at all for
+                        // a restored mark — so the fix is unconditional: a
+                        // restored punctuation token always renders with its
+                        // OWN baseline trailing, never the candidate's.
+                        // Source-faithful BY CONSTRUCTION either way: it can
+                        // never fabricate a separator the baseline didn't
+                        // have, nor drop one it did, which is exactly what
+                        // protects legitimate punct-glued-to-word source text
+                        // like "a.m"/"z.B"/"(word" (their own baseline
+                        // trailing is ALSO empty, so this is a no-op there).
+                        // Scoped to `.punctuation` only — the sibling restore
+                        // paths (`restorationTargets`, front-of-output) are
+                        // already baseline-anchored and deliberately
+                        // untouched; a restored WORD's candidate-derived
+                        // trailing is not this defect's shape.
+                        let restoredTrailing = renderToken.kind == .punctuation
+                            ? renderToken.trailing
+                            : trailingFor(candidateIndex: i, ownTrailing: b.trailing)
+                        output.append(WorkToken(text: renderToken.text, normalized: renderToken.normalized, kind: renderToken.kind, trailing: restoredTrailing, sentenceIndex: b.sentenceIndex, source: .restoredBaseline, quoteRole: baselineQuoteRoles[renderToken.index], baselineCasingAlternative: nil))
+                    }
+                case .insert:
+                    if v.accepted, let b = edit.to {
+                        output.append(WorkToken(text: b.text, normalized: b.normalized, kind: b.kind, trailing: trailingFor(candidateIndex: i, ownTrailing: b.trailing), sentenceIndex: b.sentenceIndex, source: .candidate, quoteRole: candidateQuoteRoles[b.index], baselineCasingAlternative: nil))
+                    }
+                    // rejected insert -> omit entirely; `trailingFor` on
+                    // the PRECEDING emitted token already bridges this gap.
+                case .move:
+                    if v.accepted, let b = edit.to {
+                        output.append(WorkToken(text: b.text, normalized: b.normalized, kind: b.kind, trailing: trailingFor(candidateIndex: i, ownTrailing: b.trailing), sentenceIndex: b.sentenceIndex, source: .candidate, quoteRole: candidateQuoteRoles[b.index], baselineCasingAlternative: nil))
+                    }
+                    // rejected move -> omit here; restored separately at
+                    // its baseline anchor, and the gap this leaves is
+                    // bridged the same way as a rejected insert.
+                case .delete:
+                    break // deletes never populate byCandidateIndex (no `to`)
+                }
+            }
+            if let after = restorationsAfter[i] {
+                output.append(contentsOf: after)
+            }
+        }
+
+        return revertSpuriousSentenceInitialCapitalization(deriveSeamSpacing(collapseMixedProvenancePunctuationRuns(bridgeGluedWordTokens(output)), baseline: baseline, candidate: candidate))
+    }
+
+    /// Post-process (SC#3 gap closure, bug 2):
+    /// a restored token (a rejected `.delete`/`.move`, or a rejected
+    /// `.substitute` restoring the baseline token) carries its ORIGINAL
+    /// baseline `trailing`, calibrated against whatever followed it in the
+    /// SOURCE baseline text — not necessarily what ends up next to it in the
+    /// REBUILT output. Root-caused via a "habenUnd" artifact (example
+    /// invented): baseline "...Ordner haben, und dann..." — "haben"'s own baseline
+    /// trailing is `""` (a comma, its own separate token, followed
+    /// immediately with no space). The clause "da wir ... Ordner haben"
+    /// was rejected and restored, but the comma immediately after "haben"
+    /// was, independently and correctly, an ACCEPTED punctuation deletion
+    /// (a legitimate cosmetic edit) — so it never made it into the output.
+    /// "haben" ends up directly adjacent to whatever candidate token
+    /// actually followed ("und"), with no bridging separator, producing
+    /// "habenund". This is a general OUTPUT-adjacency defect (any token
+    /// whose trailing was calibrated against a neighbor that didn't survive
+    /// to sit next to it), not a defect specific to this one shape (the same
+    /// mechanism produces glued pairs such as "HausTür", "usfUnd"
+    /// or "baldda").
+    ///
+    /// Rather than special-casing every code path that can produce this
+    /// (the restoration-insertion loop above, `trailingFor`'s candidate-walk
+    /// bridging, front-of-output restorations), this pass repairs the FINAL
+    /// adjacency directly, once, over the fully-assembled output: any
+    /// WORD/NUMERIC token immediately followed (empty `trailing`) by another
+    /// WORD/NUMERIC token gets a bridging space inserted. The tokenizer's
+    /// lossless contract (`EditGuardTokenizer`) guarantees a word token's
+    /// trailing is empty ONLY when the source text had it immediately
+    /// followed by punctuation (its own separate token) or by nothing (end
+    /// of string) — never by another word — so this condition can only ever
+    /// fire on a genuine restoration/bridging defect, never on untouched
+    /// candidate structure. Punctuation-adjacent trailing is left
+    /// untouched: the tokenizer's contract already gets that case right
+    /// wherever nothing was dropped, and touching it risks breaking
+    /// abbreviations like "a.m" (see `trailingFor`'s own doc comment).
+    private static func bridgeGluedWordTokens(_ tokens: [WorkToken]) -> [WorkToken] {
+        guard tokens.count > 1 else { return tokens }
+        var result = tokens
+        for i in 0..<(result.count - 1) {
+            guard result[i].trailing.isEmpty,
+                  result[i].kind != .punctuation,
+                  result[i + 1].kind != .punctuation
+            else { continue }
+            result[i] = WorkToken(
+                text: result[i].text, normalized: result[i].normalized, kind: result[i].kind,
+                trailing: " ", sentenceIndex: result[i].sentenceIndex,
+                source: result[i].source, quoteRole: result[i].quoteRole, baselineCasingAlternative: result[i].baselineCasingAlternative
+            )
+        }
+        return result
+    }
+
+    /// Post-process (quick task 260830-dc4, the "und.," defect —
+    /// `.planning/todos/resolved/editguard-splices-worse-than-both-inputs.md`):
+    /// runs between `bridgeGluedWordTokens` and `deriveSeamSpacing` in the
+    /// post-pass chain — order is LOAD-BEARING. Running this AFTER
+    /// `deriveSeamSpacing` would be too late: that pass derives the spacing
+    /// of every seam it is GIVEN, so running it first would spend a
+    /// derivation on seams this pass then removes, and leave the seam that
+    /// survives the collapse never derived at all (see its own doc comment,
+    /// "which decides WHICH tokens survive").
+    ///
+    /// A punctuation RUN (2+ adjacent punctuation tokens) can be assembled
+    /// from tokens sourced from BOTH inputs: a rejected `.move`/`.substitute`
+    /// restores a baseline mark at its own anchor immediately next to an
+    /// accepted candidate mark. The rendered sequence is then a
+    /// character-level interleaving of both sources that exists in NEITHER
+    /// the baseline nor the candidate — worse than either input, and
+    /// invisible to any check that only looks at one input at a time. Walk
+    /// every maximal run of consecutive punctuation tokens; a run that is
+    /// entirely single-source is left untouched — this is what protects a
+    /// literal ellipsis, a "?!" pair, an abbreviation-then-comma, and the
+    /// pre-existing SPACED same-source case `collapseDanglingPunctuation`
+    /// already owns (a keep plus an accepted insert are both
+    /// candidate-sourced, so that shape never enters the mixed branch here).
+    ///
+    /// For a genuinely mixed run, keep only the CANDIDATE-sourced tokens and
+    /// drop the restored baseline ones. Candidate-sourced marks win rather
+    /// than restored ones: punctuation is explicitly excluded from
+    /// `multisetInvariantHolds` ("this invariant is about WORDS, not
+    /// formatting") and `classifyDelete` already discards baseline
+    /// punctuation unconditionally, so dropping a restored mark cannot
+    /// change meaning-bearing content — and the candidate mark is the one
+    /// that actually won classification for this span. Dropping the
+    /// candidate mark instead would leave only the baseline's own
+    /// (still-incomplete) punctuation, a form present in neither input
+    /// either (see the quick task's PLAN.md diagnosis for why "und." is not
+    /// an acceptable output any more than "und.," is).
+    ///
+    /// A mixed run always contains at least one candidate-sourced token by
+    /// definition (it is not single-source), so a run can never be emptied
+    /// by this pass. The surviving tokens' LAST element inherits the run's
+    /// ORIGINAL final token's `trailing`, so no separator before the next
+    /// word is ever lost even when the dropped tokens were not the run's
+    /// last element.
+    ///
+    /// Invariant-safety: `multisetInvariantHolds` (its own doc comment,
+    /// below) excludes punctuation entirely, so dropping a punctuation token
+    /// can never trip it. `renderingInvariantHolds` only fires between two
+    /// NON-punctuation tokens; this pass always leaves at least one
+    /// punctuation token standing between the run's word/numeric neighbours
+    /// (a mixed run has 2+ tokens and at least one candidate-sourced token
+    /// always survives), so it can never trip that check either.
+    ///
+    /// Quick task 261008-gb4 (F3): a restored DOUBLE quotation mark is not
+    /// dropped from a mixed run unless a candidate-sourced double quotation
+    /// mark sits in the same run. A coupled revert restores both marks of a
+    /// quoted word; the closing one lands in a run with the kept comma or
+    /// period and was dropped as "restored", so the pasted text carried an
+    /// unbalanced quote. A
+    /// quote is not a competing mark, so keeping it makes no form that
+    /// exists in neither input; a candidate quote in the run still wins, so
+    /// no doubled quote is synthesised. Single quotes and apostrophes are
+    /// unchanged. The invariant argument above still holds: a mixed run
+    /// keeps at least one candidate-sourced token.
+    ///
+    /// The exemption applies only when it leaves an even number of double
+    /// quotation marks in the output. A quoted span whose opening mark was
+    /// legitimately deleted while its closing mark was restored (the two
+    /// delete verdicts diverged across a sentence boundary) would otherwise ship an orphan closing quote
+    /// that the old collapse dropped; there the old behaviour stands.
+    private static func collapseMixedProvenancePunctuationRuns(_ tokens: [WorkToken]) -> [WorkToken] {
+        func quoteCount(_ t: [WorkToken]) -> Int { t.filter { doubleQuotationMarks.contains($0.text) }.count }
+        let keeping = collapseMixedProvenancePunctuationRuns(tokens, keepRestoredDoubleQuotes: true)
+        if quoteCount(keeping) % 2 == 0 { return keeping }
+        return collapseMixedProvenancePunctuationRuns(tokens, keepRestoredDoubleQuotes: false)
+    }
+
+    private static func collapseMixedProvenancePunctuationRuns(
+        _ tokens: [WorkToken], keepRestoredDoubleQuotes: Bool
+    ) -> [WorkToken] {
+        guard tokens.count > 1 else { return tokens }
+        var result: [WorkToken] = []
+        var i = 0
+        while i < tokens.count {
+            guard tokens[i].kind == .punctuation else {
+                result.append(tokens[i])
+                i += 1
+                continue
+            }
+            var runEnd = i
+            while runEnd + 1 < tokens.count, tokens[runEnd + 1].kind == .punctuation {
+                runEnd += 1
+            }
+            let run = Array(tokens[i...runEnd])
+            if run.count < 2 || run.allSatisfy({ $0.source == run[0].source }) {
+                result.append(contentsOf: run)
+            } else {
+                let candidateHasDoubleQuote = run.contains { $0.source == .candidate && doubleQuotationMarks.contains($0.text) }
+                var survivors = run.filter {
+                    $0.source == .candidate
+                        || (keepRestoredDoubleQuotes && !candidateHasDoubleQuote && doubleQuotationMarks.contains($0.text))
+                }
+                if let originalLastTrailing = run.last?.trailing, let last = survivors.last {
+                    survivors[survivors.count - 1] = WorkToken(
+                        text: last.text, normalized: last.normalized, kind: last.kind,
+                        trailing: originalLastTrailing, sentenceIndex: last.sentenceIndex,
+                        source: last.source, quoteRole: last.quoteRole, baselineCasingAlternative: last.baselineCasingAlternative
+                    )
+                }
+                result.append(contentsOf: survivors)
+            }
+            i = runEnd + 1
+        }
+        return result
+    }
+
+    /// The six double quotation mark characters (F3 of 261008-gb4).
+    private static let doubleQuotationMarks: Set<String> = ["\"", "\u{201C}", "\u{201D}", "\u{201E}", "\u{00AB}", "\u{00BB}"]
+
+    /// Opening or closing role of a straight quotation mark (261001-opz).
+    enum QuoteRole { case opening, closing }
+
+    /// Roles for the straight `"` tokens of ONE stream, keyed by `Token.index`:
+    /// alternating opening, closing by occurrence order, and only when the
+    /// stream holds an even, non-zero number of them (an odd count means
+    /// parity carries no information, so every quote stays untagged and keeps
+    /// the untagged seam vote).
+    ///
+    /// Why only U+0022: of the six CLEAN-01 quote characters it is the only
+    /// one that opens and closes in the same text; curly and angle quotes
+    /// already differ by character, and the planning corpus held 0 cases of an
+    /// ambiguous one. Known limits, none observed in the corpus: a stray
+    /// inch mark (`5"`) or nested dictated straight quotes in an even-count
+    /// stream make parity assign the wrong roles; `'` used as a quotation mark
+    /// folds into the previous word in the tokenizer and is not covered; mixed
+    /// curly conventions in one dictation; and `applySegmented`'s per-sentence
+    /// windows, where a pair split across segments has an odd count per
+    /// window and stays untagged.
+    static func straightQuoteRoles(_ tokens: [Token]) -> [Int: QuoteRole] {
+        let quotes = tokens.filter { $0.kind == .punctuation && $0.text == "\"" }
+        guard !quotes.isEmpty, quotes.count % 2 == 0 else { return [:] }
+        var roles: [Int: QuoteRole] = [:]
+        for (ordinal, token) in quotes.enumerated() {
+            roles[token.index] = ordinal % 2 == 0 ? .opening : .closing
+        }
+        return roles
+    }
+
+    /// Seam-vote key component: the normalized text, plus the quote role when
+    /// there is one, so an opening and a closing straight quote vote apart.
+    private static func seamKey(_ normalized: String, _ role: QuoteRole?) -> String {
+        switch role {
+        case .opening: return normalized + "\u{1}o"
+        case .closing: return normalized + "\u{1}c"
+        case nil: return normalized
+        }
+    }
+
+    /// EDITGUARD-01: for every adjacent token pair in ONE input stream, the set of
+    /// SPACED-vs-GLUED observations for that pair (`true` == the left token carried a
+    /// separator). Keyed on `normalized` text so casing never forks an adjacency, and
+    /// on the straight-quote role (`seamKey`) so an opening and a closing `"` never
+    /// share a key.
+    private static func observedAdjacencySpacing(_ tokens: [Token]) -> [String: Set<Bool>] {
+        guard tokens.count > 1 else { return [:] }
+        let roles = straightQuoteRoles(tokens)
+        var result: [String: Set<Bool>] = [:]
+        for i in 0..<(tokens.count - 1) {
+            let key = seamKey(tokens[i].normalized, roles[tokens[i].index]) + "\u{0}" + seamKey(tokens[i + 1].normalized, roles[tokens[i + 1].index])
+            result[key, default: []].insert(!tokens[i].trailing.isEmpty)
+        }
+        return result
+    }
+
+    /// EDITGUARD-01: the FINAL spacing authority for every output seam. Runs after
+    /// `collapseMixedProvenancePunctuationRuns` (which decides WHICH tokens survive —
+    /// running spacing derivation before that would space seams the collapse then
+    /// removes) and before `revertSpuriousSentenceInitialCapitalization` (casing, not
+    /// spacing). P4-safe by construction: a seam ends up spaced only if some input
+    /// occurrence of that same normalized pair is spaced, or the pair appears in NO
+    /// input at all (P4 abstains on exactly those). Never writes a non-horizontal-
+    /// whitespace separator, so a dictated line break is preserved and never
+    /// fabricated or destroyed.
+    ///
+    /// Straight-quote roles (261001-opz). A straight `"` is one token whether it
+    /// opens or closes, so one untagged key covered two seams that need opposite
+    /// spacing, and a contested key fell through to the kind rule or to the
+    /// baseline's vote. Kind-rule direction: identical inputs rendered
+    /// `open"Save As"` and `" now"`. Baseline-fallback direction: the LLM's `it,"`
+    /// against a baseline `,"` that occurs only before an opening quote gave
+    /// `it, " and`. Both are
+    /// keyed here on `seamKey(normalized, quoteRole)`, with each output token's
+    /// role carried from the stream it was rendered from. P4 could not see this:
+    /// it keys untagged pairs, so a contested pair passes either way, and its
+    /// glue-before-punctuation allowance exempts a word glued to a following mark.
+    ///
+    /// P4 safety with roles: a found tagged key's observations are a subset of
+    /// the untagged pair's. When a tagged key is absent while its untagged pair
+    /// was observed, the kind rule applies as for any unobserved pair, so a
+    /// space before a word at such a seam falls outside P4's allowance
+    /// (`EditGuardMaterializeInvariantTests.testAdjacencySpacingFidelity_P4`) and
+    /// can contradict `EditGuardSeamSpacingTests
+    /// .testUnanimousAdjacencySpacingIsPreserved_acrossCorpus`, which keys
+    /// untagged pairs. Producing that seam needs one adjacent in no source, so no
+    /// fixture is expected to reach it. Out of scope: other contested seams (the
+    /// dotted-name `.`, `100|%`).
+    private static func deriveSeamSpacing(_ tokens: [WorkToken], baseline: [Token], candidate: [Token]) -> [WorkToken] {
+        guard tokens.count > 1 else { return tokens }
+        let candidateSpacing = observedAdjacencySpacing(candidate)
+        let baselineSpacing = observedAdjacencySpacing(baseline)
+        var result = tokens
+        for i in 0..<(tokens.count - 1) {
+            let key = seamKey(tokens[i].normalized, tokens[i].quoteRole) + "\u{0}" + seamKey(tokens[i + 1].normalized, tokens[i + 1].quoteRole)
+            let spaced: Bool
+            if let c = candidateSpacing[key], c.count == 1 {
+                spaced = c.first!
+            } else if let b = baselineSpacing[key], b.count == 1 {
+                spaced = b.first!
+            } else {
+                spaced = tokens[i + 1].kind != .punctuation
+            }
+            let current = result[i].trailing
+            let newTrailing: String
+            if !spaced {
+                // A dictated line break is never destroyed by a glued vote
+                // (review 49.5 WR-01): only a space can be removed.
+                newTrailing = current.contains("\n") ? current : ""
+            } else if current.isEmpty {
+                newTrailing = " "
+            } else {
+                newTrailing = current
+            }
+            if newTrailing != current {
+                result[i] = WorkToken(
+                    text: result[i].text, normalized: result[i].normalized, kind: result[i].kind,
+                    trailing: newTrailing, sentenceIndex: result[i].sentenceIndex,
+                    source: result[i].source, quoteRole: result[i].quoteRole, baselineCasingAlternative: result[i].baselineCasingAlternative
+                )
+            }
+        }
+        return result
+    }
+
+    /// Fail-closed safety net (bug 2, belt-and-suspenders alongside
+    /// `bridgeGluedWordTokens`): the rebuilt output must never glue two
+    /// word/numeric tokens together with no separator.
+    /// `bridgeGluedWordTokens` repairs the identified general mechanism for
+    /// this; this check exists for defense in depth — any residual case
+    /// (this one, or one a future change reintroduces) is safer to fail the
+    /// WHOLE guard result closed on (falling back to `rulesCleaned`, same as
+    /// `multisetInvariantHolds`) than to risk pasting malformed text at the
+    /// user's cursor. Never used to loosen or bypass any other check.
+    ///
+    /// Deliberately does NOT also check for "doubled punctuation" (two
+    /// identical adjacent punctuation marks with empty trailing between
+    /// them) — that shape is indistinguishable from a legitimate literal
+    /// ellipsis ("...", now ONE run token by construction) or a
+    /// repeated "!!"/"??" the user actually said; a first version of this
+    /// check flagged the ROADMAP-named "scratch" and digit-group corruption
+    /// fixtures as false positives purely because their sentences end in
+    /// "...". The doubled-comma failure mode this phase already knows about
+    /// (44-10's `fx-mov-filler-de/en`) is handled by `applyMoveRunCoupling`,
+    /// not this general net.
+    private static func renderingInvariantHolds(_ tokens: [WorkToken]) -> Bool {
+        guard tokens.count > 1 else { return true }
+        for i in 0..<(tokens.count - 1) {
+            if tokens[i].trailing.isEmpty, tokens[i].kind != .punctuation, tokens[i + 1].kind != .punctuation {
+                return false
+            }
+        }
+        return true
+    }
+
+    /// Post-process: a token accepted via the casing-only substitute path
+    /// (`baselineCasingAlternative != nil`) may have been capitalized by
+    /// the LLM only because it LOOKED sentence-initial in the candidate.
+    /// Once restoration puts a rejected delete/move back in front of it,
+    /// it is no longer genuinely sentence-initial — revert to its baseline
+    /// spelling. Never touches the ACTUAL first word of a sentence.
+    ///
+    /// **Linear-adjacency fix (quick task 260719-8am):** this pass runs
+    /// LAST, over the fully-assembled output of the post-pass chain
+    /// (`bridgeGluedWordTokens`, then
+    /// `collapseMixedProvenancePunctuationRuns`, then `deriveSeamSpacing`)
+    /// — the true rendered structure, after every restoration,
+    /// rejection, and rebuild decision has already been applied. The OLD
+    /// test asked "is `t.sentenceIndex` the candidate's first-word-of-
+    /// sentence?", a question keyed on the CANDIDATE's own sentence
+    /// structure — which can disagree with what actually ends up adjacent
+    /// to a token in the REBUILT output once a rejected move/delete/insert
+    /// shifts what precedes it. Root cause of the mid-sentence capital corruption: a
+    /// rejected sentence split left "now" immediately after "ready
+    /// and" in the output, but "now" still carried its candidate
+    /// `sentenceIndex` from the (rejected) split, so the OLD test still
+    /// treated it as sentence-initial and let it keep the capital. The
+    /// FIXED test asks the only question that matters for casing: is this
+    /// token genuinely sentence-initial in the OUTPUT, i.e. is it the
+    /// first emitted token, or does a sentence-terminal mark (".", "!",
+    /// "?") immediately precede it in the output array? Otherwise revert.
+    private static let sentenceTerminalMarks: Set<String> = [".", "!", "?"]
+
+    private static func revertSpuriousSentenceInitialCapitalization(_ tokens: [WorkToken]) -> [WorkToken] {
+        guard !tokens.isEmpty else { return tokens }
+        return tokens.enumerated().map { i, t in
+            guard t.kind == .word, let alt = t.baselineCasingAlternative,
+                  let firstChar = t.text.first, firstChar.isUppercase,
+                  let altFirst = alt.first, altFirst.isLowercase
+            else { return t }
+            let isGenuinelySentenceInitial = i == 0 ||
+                (tokens[i - 1].kind == .punctuation && sentenceTerminalMarks.contains(tokens[i - 1].text))
+            guard !isGenuinelySentenceInitial else { return t }
+            return WorkToken(text: alt, normalized: t.normalized, kind: t.kind, trailing: t.trailing, sentenceIndex: t.sentenceIndex, source: t.source, quoteRole: t.quoteRole, baselineCasingAlternative: nil)
+        }
+    }
+
+
+    /// Part C step 6: the rebuilt token multiset must equal
+    /// `baselineMultiset - acceptedDeletions + acceptedInsertions`, with
+    /// accepted substitutions swapped. Punctuation is excluded — this
+    /// invariant is about WORDS, not formatting. `.move` always
+    /// contributes exactly one occurrence regardless of verdict (accepted
+    /// -> lands at the target; rejected -> restored at the origin) since a
+    /// move never changes token count.
+    private static func multisetInvariantHolds(edits: [Edit], verdicts: [ClassifiedEdit], output: [WorkToken]) -> Bool {
+        var expected: [String: Int] = [:]
+        for (i, edit) in edits.enumerated() {
+            let v = verdicts[i]
+            switch edit.kind {
+            case .keep:
+                if let t = edit.to, t.kind != .punctuation { expected[t.normalized, default: 0] += 1 }
+            case .substitute:
+                let t = v.accepted ? edit.to : edit.from
+                if let t, t.kind != .punctuation { expected[t.normalized, default: 0] += 1 }
+            case .insert:
+                if v.accepted, let t = edit.to, t.kind != .punctuation { expected[t.normalized, default: 0] += 1 }
+            case .delete:
+                if !v.accepted, let t = edit.from, t.kind != .punctuation { expected[t.normalized, default: 0] += 1 }
+            case .move:
+                let t = v.accepted ? edit.to : edit.from
+                if let t, t.kind != .punctuation { expected[t.normalized, default: 0] += 1 }
+            }
+        }
+        var actual: [String: Int] = [:]
+        for t in output where t.kind != .punctuation {
+            actual[t.normalized, default: 0] += 1
+        }
+        return expected == actual
+    }
+
+    /// Post-merge gate fix (bug 3): true iff exactly one of `from`/`to` is a
+    /// mood-indicating terminal mark (`?`/`!`) — i.e. the substitute
+    /// introduces OR removes a question/exclamation mark, as opposed to a
+    /// mood-neutral punctuation change (e.g. `.`->`,`, which is unrelated to
+    /// D-04's mood-lock and must NOT be swept up by this pass).
+    private static let moodMarks: Set<String> = ["?", "!"]
+
+    private static func isMoodMarkChange(from: String, to: String) -> Bool {
+        moodMarks.contains(from) != moodMarks.contains(to)
+    }
+
+    /// Quick task 261008-gb4 (F1): the closed set of interjections the mood
+    /// lock reads past. A baseline sentence that opens with one of these and a
+    /// comma (`Ja, wir müssen ...`) is compared by the first word AFTER the
+    /// comma; without the comma there is no skip (`So if ...` keeps `So`).
+    private static let moodLockLeadingInterjections: Set<String> = [
+        "ja", "nein", "okay", "ok", "also", "gut", "so", "yes", "no", "well"
+    ]
+
+    /// The baseline word the mood lock compares for `sentenceIndex`: the
+    /// sentence's first word, or, behind a leading interjection plus comma,
+    /// the first word after that comma together with the skipped interjection.
+    private static func moodLockBaselineFirst(
+        _ baseline: [Token], sentenceIndex: Int
+    ) -> (word: Token, skippedInterjection: String?)? {
+        guard let firstIndex = baseline.firstIndex(where: { $0.sentenceIndex == sentenceIndex && $0.kind == .word }) else { return nil }
+        let first = baseline[firstIndex]
+        let commaIndex = firstIndex + 1
+        if moodLockLeadingInterjections.contains(first.normalized),
+           baseline.indices.contains(commaIndex),
+           baseline[commaIndex].sentenceIndex == sentenceIndex,
+           baseline[commaIndex].kind == .punctuation, baseline[commaIndex].text == ",",
+           let after = baseline[(commaIndex + 1)...].first(where: { $0.sentenceIndex == sentenceIndex && $0.kind == .word }) {
+            return (after, first.normalized)
+        }
+        return (first, nil)
+    }
+
+    /// The index in the rebuilt stream the mood lock compares for
+    /// `sentenceIndex`. When the baseline skipped an interjection and the
+    /// rebuilt sentence still opens with it, that word and a directly
+    /// following comma are skipped too (the LLM may have deleted the comma);
+    /// otherwise, and when nothing follows, the first word's index.
+    private static func moodLockRebuiltFirstIndex(
+        _ tokens: [WorkToken], sentenceIndex: Int, skippedInterjection: String?
+    ) -> Int? {
+        guard let first = tokens.firstIndex(where: { $0.sentenceIndex == sentenceIndex && $0.kind == .word }) else { return nil }
+        guard let skipped = skippedInterjection, tokens[first].normalized == skipped else { return first }
+        var next = first + 1
+        if tokens.indices.contains(next), tokens[next].sentenceIndex == sentenceIndex,
+           tokens[next].kind == .punctuation, tokens[next].text == "," {
+            next += 1
+        }
+        guard next < tokens.count else { return first }
+        return tokens[next...].firstIndex(where: { $0.sentenceIndex == sentenceIndex && $0.kind == .word }) ?? first
+    }
+
+    /// Quick task 260825-q1w (D-C, landmine 5): the mood lock's `violates`
+    /// check compares `moodLockBaselineFirst(baseline, sentenceIndex:)` against
+    /// the rebuilt stream's `moodLockRebuiltFirstIndex` BY SENTENCE INDEX. A
+    /// candidate-side sentence SPLIT shifts every later candidate sentence
+    /// index by one, so the check can silently compare two DIFFERENT
+    /// sentences — the root cause of an observed false positive
+    /// (a no-reorder split before "Does" tripped the lock because the shifted comparison landed on an
+    /// unrelated later baseline sentence).
+    ///
+    /// This is the fix's ONE guard: a mood-flip violation requires a
+    /// REORDER. A verb that still sits directly behind the same word it sat
+    /// behind when dictated has not been fronted, no matter which sentence
+    /// index the comparison happened to land on — so both German mood
+    /// fixtures (`fx-mov-func-en-moodlock`, `fx-mov-func-de-moodlock`) stay
+    /// blocked by MECHANISM (the verb's baseline left-neighbour changed),
+    /// not by a language check, and a split does not buy a genuine
+    /// verb-fronting reorder a free pass (a split+reorder still loses its
+    /// baseline left-neighbour, so this returns `false` for that shape too).
+    ///
+    /// - Parameters:
+    ///   - rebuiltIndex: the verb's index in `tokens` (the in-progress
+    ///     rebuilt stream).
+    ///   - tokens: the in-progress rebuilt stream.
+    ///   - baseline: the original baseline token stream.
+    /// - Returns: `true` when the verb is still in baseline word order (no
+    ///   revert should count as a violation for this occurrence).
+    /// A baseline negative contraction matches its host (`Don't` stands where
+    /// the rebuilt `Do` stands), so an accepted `contractionExpansion` at a
+    /// sentence start is not a fronted verb.
+    private static func verbKeptBaselineOrder(
+        rebuiltIndex: Int, tokens: [WorkToken], baseline: [Token]
+    ) -> Bool {
+        let verb = tokens[rebuiltIndex]
+        let outputPrev = tokens[..<rebuiltIndex].last { $0.kind != .punctuation }
+        for (idx, t) in baseline.enumerated() where t.kind != .punctuation && (t.normalized == verb.normalized || negativeContractionHosts[t.normalized] == verb.normalized) {
+            let baselinePrev = baseline[..<idx].last { $0.kind != .punctuation }
+            if baselinePrev?.normalized == outputPrev?.normalized {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Quick task 261030-orz (`dann` and `so` dropped, see
+    /// `particleInversion` above): sentence-opening words after which a fronted finite
+    /// verb changes the meaning of the sentence.
+    private static let particleInversionLeaders: Set<String> = ["also", "ja", "doch", "und", "aber"]
+
+    private typealias RunToken = (normalized: String, kind: TokenKind, text: String)
+
+    /// A sentence that opens with a run of leader words and commas.
+    /// `leaders` are the consumed leader words in order, `postIndex` is the
+    /// position of the first token after the run, `endIndex` the end
+    /// (exclusive) of the sentence in the same stream.
+    private struct ParticleRun {
+        let leaders: [String]
+        let postIndex: Int
+        let endIndex: Int
+    }
+
+    /// Every sentence in `toks` that opens with a leader run and has a
+    /// non-punctuation token after it. Sentence starts are found from the
+    /// terminal marks in the stream itself, not from `sentenceIndex`: a
+    /// candidate-side sentence split shifts the candidate's indices against
+    /// the baseline's, and the rebuilt stream mixes both (spike 021, item 99).
+    private static func particleRuns(_ toks: [RunToken]) -> [ParticleRun] {
+        var runs: [ParticleRun] = []
+        for start in toks.indices {
+            if start > 0 {
+                let prev = toks[start - 1]
+                guard prev.kind == .punctuation, [".", "!", "?"].contains(prev.text) else { continue }
+            }
+            var leaders: [String] = []
+            var i = start
+            while i < toks.count {
+                let t = toks[i]
+                if t.kind == .punctuation, t.text == "," {
+                    i += 1
+                } else if t.kind == .word, particleInversionLeaders.contains(t.normalized) {
+                    leaders.append(t.normalized)
+                    i += 1
+                } else {
+                    break
+                }
+            }
+            guard !leaders.isEmpty, i < toks.count, toks[i].kind != .punctuation else { continue }
+            var end = i
+            while end < toks.count, !(toks[end].kind == .punctuation && [".", "!", "?"].contains(toks[end].text)) { end += 1 }
+            runs.append(ParticleRun(leaders: leaders, postIndex: i, endIndex: end))
+        }
+        return runs
+    }
+
+    /// Quick task 261030-orz: rejects a German word-order move that puts a
+    /// finite-or-modal verb directly behind a sentence-opening particle run
+    /// in place of the dictated word (`Also ich habe` -> `Also habe ich`).
+    /// A rebuilt sentence is paired with the baseline sentence that has the
+    /// same leader run and holds the word now behind it later on. It fires
+    /// only when that word is a dictated one moved forward, so an accepted
+    /// inflection repair right there (`ein` -> `eine`) is left alone, and not
+    /// when some baseline sentence with that leader run already opens with it.
+    /// Same two bounded attempts per sentence as the mood lock.
+    private static func applyParticleInversionLock(
+        baseline: [Token], candidate: [Token], edits: [Edit],
+        verdicts: inout [ClassifiedEdit], tokens: inout [WorkToken], language: String
+    ) {
+        if language.prefix(2).lowercased() == "en" { return }
+        let baselineToks: [RunToken] = baseline.map { (normalized: $0.normalized, kind: $0.kind, text: $0.text) }
+        let baselineRuns = particleRuns(baselineToks)
+        if baselineRuns.isEmpty { return }
+
+        var attempts: [Int: Int] = [:]
+        for _ in 0..<(2 * (baselineRuns.count + 1)) {
+            let rebuiltToks: [RunToken] = tokens.map { (normalized: $0.normalized, kind: $0.kind, text: $0.text) }
+            var hit: (baselineSentence: Int, candidateSentence: Int)?
+            for run in particleRuns(rebuiltToks) {
+                let verb = tokens[run.postIndex]
+                guard verb.kind == .word else { continue }
+                let sameLeaders = baselineRuns.filter { $0.leaders == run.leaders }
+                if sameLeaders.contains(where: { baseline[$0.postIndex].normalized == verb.normalized }) { continue }
+                guard let match = sameLeaders.first(where: { m in
+                    baseline[m.postIndex..<m.endIndex].contains { $0.kind == .word && $0.normalized == verb.normalized }
+                }) else { continue }
+                let s = baseline[match.postIndex].sentenceIndex
+                guard attempts[s, default: 0] < 2,
+                      FiniteVerbCues.isFiniteOrModal(verb.normalized, language: language),
+                      !verbKeptBaselineOrder(rebuiltIndex: run.postIndex, tokens: tokens, baseline: baseline)
+                else { continue }
+                hit = (s, verb.sentenceIndex)
+                break
+            }
+            guard let hit else { return }
+            let attempt = attempts[hit.baselineSentence, default: 0]
+            attempts[hit.baselineSentence] = attempt + 1
+
+            for i in edits.indices {
+                let touchesSentence = edits[i].to?.sentenceIndex == hit.candidateSentence || edits[i].from?.sentenceIndex == hit.baselineSentence
+                guard touchesSentence, verdicts[i].accepted else { continue }
+                if attempt == 0 {
+                    guard edits[i].kind == .move else { continue }
+                } else {
+                    guard edits[i].kind != .keep else { continue }
+                }
+                verdicts[i] = ClassifiedEdit(
+                    kind: verdicts[i].kind, from: verdicts[i].from, to: verdicts[i].to,
+                    accepted: false, acceptClass: nil,
+                    rejectClass: RejectionClass.particleInversion.rawValue
+                )
+            }
+            applyAtomicGroupCoupling(edits: edits, verdicts: &verdicts, language: language)
+            applySentenceCoupledRevert(edits: edits, verdicts: &verdicts, language: language)
+            tokens = materialize(baseline: baseline, candidate: candidate, edits: edits, verdicts: verdicts)
+        }
+    }
+
+    /// Diffs already computed (`edits`) and classified (`classified`)
+    /// elsewhere — `rebuild` reconstructs the final text from the baseline
+    /// plus only the approved edits, and runs the mood-lock second pass
+    /// (D-04 exception 1).
+    ///
+    /// Extends the plan's documented `-> String?` shape to `(text:
+    /// classified:)?` — the mood-lock pass can flip a `.move` from
+    /// accepted to `moodLockSentenceInitialVerb` reject AFTER `classify`
+    /// runs, and D-11's forensics log needs the FINAL verdict, not the
+    /// stale pre-mood-lock one. Also takes `language`, absent from the
+    /// plan's literal signature but required by the mood-lock's
+    /// `FiniteVerbCues` lookup and the article-agreement coupling pass —
+    /// both necessary for correctness, documented as a deviation in
+    /// `44-10-SUMMARY.md`.
+    ///
+    /// Quick task 261002-6oh: before any coupling pass, a rejected carrier
+    /// of the candidate's final terminal mark is split into a delete that
+    /// keeps the carrier's verdict plus an appended insert of the mark — see
+    /// `splitUtteranceFinalMarkCarrier`; the returned `classified` array is
+    /// then one longer than the input.
+    ///
+    /// - Returns: `nil` when the multiset invariant fails to hold after
+    ///   every pass — `apply` treats `nil` as fail-closed
+    ///   (`failClosedReason == "rebuildInvariant"`).
+    public static func rebuild(
+        baseline: [Token],
+        candidate: [Token],
+        edits: [Edit],
+        classified: [ClassifiedEdit],
+        language: String
+    ) -> (text: String, classified: [ClassifiedEdit], restoredMarkContinuations: [RestoredMarkContinuation])? {
+        guard edits.count == classified.count else { return nil }
+
+        let (edits, classified) = splitUtteranceFinalMarkCarrier(
+            edits: edits, classified: classified, baseline: baseline, candidate: candidate, language: language
+        )
+        var verdicts = classified
+        applyInsertRunCoupling(edits: edits, verdicts: &verdicts)
+        applyMoveRunCoupling(edits: edits, verdicts: &verdicts)
+        applyArticleAgreementCoupling(edits: edits, verdicts: &verdicts, language: language)
+        applyAdjacentDeletionSubstituteCoupling(edits: edits, verdicts: &verdicts)
+        applyAtomicGroupCoupling(edits: edits, verdicts: &verdicts, language: language)
+        applySentenceCoupledRevert(edits: edits, verdicts: &verdicts, language: language)
+
+        var tokens = materialize(baseline: baseline, candidate: candidate, edits: edits, verdicts: verdicts)
+
+        // Mood-lock second pass (D-04 exception 1). Bounded to 2 attempts
+        // per sentence: first drop only this sentence's accepted MOVEs,
+        // then (if still violating) drop every non-keep edit in the
+        // sentence. NOT a terminal-punctuation check — see FiniteVerbCues'
+        // and D-04's doc comments for why that would miss both observed
+        // reorder corruptions.
+        let sentenceIndices = Set(baseline.map(\.sentenceIndex)).union(candidate.map(\.sentenceIndex))
+        for sentenceIndex in sentenceIndices.sorted() {
+            // Quick task 261008-gb4 (F1): a baseline sentence opening with an
+            // interjection and a comma (`Ja, ...`) is compared by the word
+            // after the comma, so a fronted verb behind `Ja,` no longer
+            // slips past a lock that only saw `Ja`. The skip is keyed to the
+            // baseline; the rebuilt stream skips the same interjection (and
+            // its comma, if the LLM kept it). Residue: a baseline without
+            // the comma gets no skip.
+            guard let (baselineFirst, skippedInterjection) = moodLockBaselineFirst(baseline, sentenceIndex: sentenceIndex) else { continue }
+            let baselineIsFiniteOrModal = FiniteVerbCues.isFiniteOrModal(baselineFirst.normalized, language: language)
+            var moodLockFiredForSentence = false
+
+            for attempt in 0..<2 {
+                guard let rebuiltIndex = moodLockRebuiltFirstIndex(tokens, sentenceIndex: sentenceIndex, skippedInterjection: skippedInterjection) else { break }
+                let rebuiltFirst = tokens[rebuiltIndex]
+                let violates = FiniteVerbCues.isFiniteOrModal(rebuiltFirst.normalized, language: language) && !baselineIsFiniteOrModal
+                guard violates else { break }
+                if verbKeptBaselineOrder(rebuiltIndex: rebuiltIndex, tokens: tokens, baseline: baseline) { break }
+                moodLockFiredForSentence = true
+
+                for i in edits.indices {
+                    let touchesSentence = edits[i].from?.sentenceIndex == sentenceIndex || edits[i].to?.sentenceIndex == sentenceIndex
+                    guard touchesSentence, verdicts[i].accepted else { continue }
+                    if attempt == 0 {
+                        guard edits[i].kind == .move else { continue }
+                    } else {
+                        guard edits[i].kind != .keep else { continue }
+                    }
+                    verdicts[i] = ClassifiedEdit(
+                        kind: verdicts[i].kind, from: verdicts[i].from, to: verdicts[i].to,
+                        accepted: false, acceptClass: nil,
+                        rejectClass: RejectionClass.moodLockSentenceInitialVerb.rawValue
+                    )
+                }
+                applyAtomicGroupCoupling(edits: edits, verdicts: &verdicts, language: language)
+                applySentenceCoupledRevert(edits: edits, verdicts: &verdicts, language: language)
+                tokens = materialize(baseline: baseline, candidate: candidate, edits: edits, verdicts: verdicts)
+            }
+
+            // Post-merge gate fix (bug 3): attempt 0 dropping only the
+            // sentence's accepted MOVEs is often sufficient to fix the
+            // sentence-initial violation on its own — the loop then breaks
+            // WITHOUT ever reaching attempt 1, which is the only place that
+            // would also revert a co-occurring accepted terminal-punctuation
+            // substitute. But a verb-fronting reorder and a "."->"?"/"!"
+            // punctuation change are the SAME mood-flip corruption's two
+            // halves (D-04's "You can stay" -> "Can you stay" / "Er kommt
+            // morgen." -> "Kommt er morgen?" both retarget mood); once the
+            // move that caused the violation is reverted, an accepted
+            // punctuation substitute that INTRODUCED a question/exclamation
+            // mark in this sentence is now orphaned — it "repairs" a mood
+            // flip that no longer exists post-revert — and must revert too,
+            // regardless of which attempt actually fixed the violation.
+            if moodLockFiredForSentence {
+                var punctuationReverted = false
+                for i in edits.indices {
+                    guard edits[i].kind == .substitute, verdicts[i].accepted,
+                          let a = edits[i].from, let b = edits[i].to,
+                          a.kind == .punctuation, b.kind == .punctuation,
+                          a.sentenceIndex == sentenceIndex || b.sentenceIndex == sentenceIndex,
+                          isMoodMarkChange(from: a.text, to: b.text)
+                    else { continue }
+                    verdicts[i] = ClassifiedEdit(
+                        kind: verdicts[i].kind, from: verdicts[i].from, to: verdicts[i].to,
+                        accepted: false, acceptClass: nil,
+                        rejectClass: RejectionClass.moodLockSentenceInitialVerb.rawValue
+                    )
+                    punctuationReverted = true
+                }
+                if punctuationReverted {
+                    applyAtomicGroupCoupling(edits: edits, verdicts: &verdicts, language: language)
+                    applySentenceCoupledRevert(edits: edits, verdicts: &verdicts, language: language)
+                    tokens = materialize(baseline: baseline, candidate: candidate, edits: edits, verdicts: verdicts)
+                }
+            }
+        }
+
+        // Runs after the mood lock so that sentences the mood lock already
+        // handles (an interjection plus comma, F1) keep its class.
+        applyParticleInversionLock(
+            baseline: baseline, candidate: candidate, edits: edits,
+            verdicts: &verdicts, tokens: &tokens, language: language
+        )
+
+        guard multisetInvariantHolds(edits: edits, verdicts: verdicts, output: tokens) else {
+            return nil
+        }
+        guard renderingInvariantHolds(tokens) else {
+            return nil
+        }
+
+        // Observed defect: a
+        // rejected removal of a terminal mark restores it ahead of a word
+        // the LLM continued in lowercase, and the finishing capitalizer then
+        // uppercased that word. A mark the LLM agreed with is never listed,
+        // so it still starts a capitalized sentence. The same
+        // happens when the LLM replaced the terminal mark by a comma and the
+        // gate rejected that substitution.
+        var editByBaselineIndex: [Int: Int] = [:]
+        for (i, edit) in edits.enumerated() {
+            if let from = edit.from { editByBaselineIndex[from.index] = i }
+        }
+        var continuations: [RestoredMarkContinuation] = []
+        for (i, edit) in edits.enumerated() {
+            let replacedByNonTerminalMark = edit.kind == .substitute
+                && edit.to?.kind == .punctuation
+                && !(edit.to?.text == "." || edit.to?.text == "!" || edit.to?.text == "?")
+            guard edit.kind == .delete || edit.kind == .move || replacedByNonTerminalMark, !verdicts[i].accepted,
+                  let mark = edit.from, mark.kind == .punctuation,
+                  mark.text == "." || mark.text == "!" || mark.text == "?",
+                  mark.index >= 1, mark.index + 1 < baseline.count else { continue }
+            let following = baseline[mark.index + 1]
+            guard following.kind == .word, following.text.first?.isLowercase == true,
+                  let followingEdit = editByBaselineIndex[following.index],
+                  edits[followingEdit].kind == .keep || edits[followingEdit].kind == .substitute,
+                  let candidateWord = edits[followingEdit].to,
+                  candidateWord.text.first?.isLowercase == true else { continue }
+            continuations.append(RestoredMarkContinuation(
+                precedingWord: baseline[mark.index - 1].text, mark: mark.text, followingWord: following.text
+            ))
+        }
+
+        let text = tokens.map { $0.text + $0.trailing }.joined()
+        return (text, verdicts, continuations)
+    }
+}

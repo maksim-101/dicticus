@@ -1,0 +1,168 @@
+#!/bin/bash
+# Build, Sign, and Notarize Dicticus.app and package as a styled DMG.
+#
+# Usage:
+#   ./scripts/build-dmg.sh   with the variables below set, for example through a secret
+#   manager: op run --env-file=.env.build -- ./scripts/build-dmg.sh
+#
+# Output: Dicticus.dmg + Dicticus.dmg.sha256 (D-07 sidecar, shasum -c format) in the project root
+#
+# Requirements:
+#   - Xcode, xcodegen, create-dmg (brew install create-dmg)
+#   - Apple Developer ID Application certificate in Keychain
+#   - Environment variables: DEVELOPER_TEAM_ID, APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, SPARKLE_PRIVATE_KEY
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")/macOS"
+OUTPUT_DIR="$(dirname "$SCRIPT_DIR")"
+DMG_NAME="Dicticus.dmg"
+
+# Verify environment variables
+if [ -z "${DEVELOPER_TEAM_ID:-}" ] || [ -z "${APPLE_ID:-}" ] || [ -z "${APPLE_APP_SPECIFIC_PASSWORD:-}" ] || [ -z "${SPARKLE_PRIVATE_KEY:-}" ]; then
+    echo "ERROR: Missing required environment variables."
+    echo "Expected: DEVELOPER_TEAM_ID, APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, SPARKLE_PRIVATE_KEY"
+    echo "Set them in .env.build (see env.build.example) and inject them, for example with 'op run --env-file=.env.build -- $0'."
+    exit 1
+fi
+
+echo "=== Step 1: Generate Xcode project ==="
+cd "$PROJECT_DIR"
+# DEVELOPER_TEAM_ID is passed to xcodegen for the project.yml reference
+export DEVELOPER_TEAM_ID
+xcodegen generate
+
+echo "=== Step 2: Build Release .app (Unsigned) ==="
+# Build unsigned. Step 3 does the real Developer ID signing with --deep --force.
+# This avoids xcodebuild's provisioning-profile requirement triggered by the
+# com.apple.security.application-groups entitlement under manual signing,
+# and keeps SPM resource bundles (KeyboardShortcuts, GRDB) from trying to
+# sign with a Developer ID identity that doesn't apply to them.
+xcodebuild -scheme Dicticus \
+    -configuration Release \
+    -derivedDataPath build \
+    CODE_SIGN_IDENTITY="" \
+    CODE_SIGNING_REQUIRED=NO \
+    CODE_SIGNING_ALLOWED=NO \
+    build
+
+APP_DIR="build/Build/Products/Release"
+
+# Verify the .app exists
+if [ ! -d "$APP_DIR/Dicticus.app" ]; then
+    echo "ERROR: Dicticus.app not found at $APP_DIR/"
+    exit 1
+fi
+
+# Phase 51 D-08: the appcast gates on this value, so a wrong target must stop the release before signing.
+MIN_OS="$(plutil -extract LSMinimumSystemVersion raw "$APP_DIR/Dicticus.app/Contents/Info.plist")"
+if [ "$MIN_OS" != "26.0" ]; then
+    echo "ERROR: LSMinimumSystemVersion is '$MIN_OS', expected 26.0 (Phase 51 D-08)"
+    exit 1
+fi
+
+# The linker's debug map names every source and object file by its absolute path, which would
+# publish the builder's account name. -S drops only that; function names stay for crash reports.
+strip -S "$APP_DIR/Dicticus.app/Contents/MacOS/Dicticus"
+PATHS_LEFT=0
+LC_ALL=C grep -aqF -e "${HOME%/}/" -e "$OUTPUT_DIR/" "$APP_DIR/Dicticus.app/Contents/MacOS/Dicticus" || PATHS_LEFT=$?
+if [ "$PATHS_LEFT" -ne 1 ]; then   # 0: found, 2: could not search
+    echo "ERROR: the app still contains paths of this computer, or could not be searched"
+    exit 1
+fi
+
+# Ensure the Developer ID key is present (D-02/D-03). The local guard, where it exists,
+# restores a missing key; without it the identity must already be in a keychain.
+if [ -f "$SCRIPT_DIR/_signing-guard.sh" ]; then
+    # shellcheck source=scripts/_signing-guard.sh
+    # shellcheck disable=SC1091
+    source "$SCRIPT_DIR/_signing-guard.sh"
+else
+    echo "No signing guard found; the Developer ID Application identity must already be in a keychain."
+fi
+
+# Re-sign the entire app bundle (including embedded frameworks) with the real identity.
+echo "=== Step 3: Re-sign app bundle with Developer ID ==="
+codesign --force --deep --sign "Developer ID Application" \
+    --options runtime \
+    --entitlements "Dicticus/Dicticus.entitlements" \
+    "$APP_DIR/Dicticus.app"
+
+echo "=== Step 4: Verify signing and entitlements ==="
+codesign -vvv --deep --strict "$APP_DIR/Dicticus.app"
+codesign -d --entitlements :- "$APP_DIR/Dicticus.app" 2>/dev/null || echo "WARNING: Could not read entitlements"
+
+echo "=== Step 5: Create styled DMG ==="
+# Remove existing DMG if present
+rm -f "$OUTPUT_DIR/$DMG_NAME"
+
+# Stage only Dicticus.app
+STAGING_DIR=$(mktemp -d)
+cp -R "$APP_DIR/Dicticus.app" "$STAGING_DIR/"
+trap "rm -rf '$STAGING_DIR'" EXIT
+
+EXIT_CODE=0
+create-dmg \
+    --volname "Dicticus" \
+    --window-size 660 400 \
+    --icon-size 128 \
+    --icon "Dicticus.app" 180 200 \
+    --app-drop-link 480 200 \
+    --no-internet-enable \
+    --hide-extension "Dicticus.app" \
+    "$OUTPUT_DIR/$DMG_NAME" \
+    "$STAGING_DIR/" || EXIT_CODE=$?
+
+if [ $EXIT_CODE -ne 0 ] && [ ! -f "$OUTPUT_DIR/$DMG_NAME" ]; then
+    echo "ERROR: create-dmg failed (exit code $EXIT_CODE)"
+    exit 1
+fi
+
+echo "=== Step 6: Notarize DMG ==="
+xcrun notarytool submit "$OUTPUT_DIR/$DMG_NAME" \
+    --apple-id "$APPLE_ID" \
+    --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+    --team-id "$DEVELOPER_TEAM_ID" \
+    --wait
+
+echo "=== Step 7: Staple Notarization Ticket ==="
+xcrun stapler staple "$OUTPUT_DIR/$DMG_NAME"
+
+echo "=== Step 7b: Generate DMG SHA-256 sidecar ==="
+# D-07: user-trust convention (Gatekeeper + Sparkle EdDSA already cover tampering).
+# Run from $OUTPUT_DIR so the check-file carries the bare "Dicticus.dmg" name and
+# `shasum -c` works unmodified from the release directory. Under `set -euo pipefail`
+# a failed self-check aborts the script — fail-closed for the release artifact too.
+cd "$OUTPUT_DIR"
+shasum -a 256 "$DMG_NAME" > "$DMG_NAME.sha256"
+shasum -c "$DMG_NAME.sha256"
+cd "$SCRIPT_DIR"
+echo "  Wrote $DMG_NAME.sha256:"
+cat "$OUTPUT_DIR/$DMG_NAME.sha256"
+
+echo "=== Step 8: Generate Sparkle Appcast Metadata ==="
+SIGN_UPDATE_TOOL="$PROJECT_DIR/build/SourcePackages/artifacts/sparkle/Sparkle/bin/sign_update"
+if [ ! -f "$SIGN_UPDATE_TOOL" ]; then
+    echo "WARNING: Sparkle sign_update tool not found at $SIGN_UPDATE_TOOL"
+else
+    # sign_update prints an <enclosure> tag for the appcast.xml
+    # It requires the private key as a string (passed via env or stdin)
+    echo "Sparkle Enclosure Metadata:"
+    echo "$SPARKLE_PRIVATE_KEY" | "$SIGN_UPDATE_TOOL" "$OUTPUT_DIR/$DMG_NAME"
+fi
+echo "Built LSMinimumSystemVersion: $(plutil -extract LSMinimumSystemVersion raw "$APP_DIR/Dicticus.app/Contents/Info.plist")"
+
+echo "=== Done ==="
+echo "DMG created and notarized: $OUTPUT_DIR/$DMG_NAME"
+echo ""
+echo "To install:"
+echo "  1. Double-click $DMG_NAME to mount"
+echo "  2. Drag Dicticus.app to Applications"
+echo "  3. Open Dicticus from Applications (no Gatekeeper override needed)"
+echo ""
+echo "Next Steps for Update Distribution:"
+echo "  1. Publish the release: the GitHub release vX.Y.Z that update checks download from (gh release upload vX.Y.Z $DMG_NAME $DMG_NAME.sha256)."
+echo "  2. Paste the sha256 line above into the release notes (\"SHA-256: <hash>  $DMG_NAME\"; verify with: shasum -c $DMG_NAME.sha256)."
+echo "  3. Add an <item> for this version to appcast.xml on the gh-pages branch of the repository that serves the update feed,"
+echo "     with the Sparkle metadata printed above and the enclosure URL .../releases/download/vX.Y.Z/$DMG_NAME."
+echo "  4. The new appcast <item> must carry <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion> (Phase 51 D-08) and, while the app is built for Apple Silicon only, <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>."

@@ -1,0 +1,17 @@
+Claude
+Claude Code
+Claude Desktop
+Gemini
+Gemma
+Sonnet
+Opus
+Tauri
+Vercel
+NGINX
+Ollama
+Tailscale
+Xcode
+Zed
+Zigbee
+MacWhisper
+Dicticus

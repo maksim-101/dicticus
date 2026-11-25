@@ -1,0 +1,14 @@
+<!-- Single-flat-color version of the waveform glyph, for Icon Composer's
+     mono / tinted / clear appearance variants (fill is overridden by the
+     system tint there; white is a neutral source). Same geometry as glyph-wave.svg. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="1024" height="1024">
+  <g fill="#FFFFFF">
+    <rect x="18.5"  y="84" width="13" height="40"  rx="6.5"/>
+    <rect x="43.5"  y="65" width="13" height="78"  rx="6.5"/>
+    <rect x="68.5"  y="45" width="13" height="118" rx="6.5"/>
+    <rect x="93.5"  y="29" width="13" height="150" rx="6.5"/>
+    <rect x="118.5" y="45" width="13" height="118" rx="6.5"/>
+    <rect x="143.5" y="69" width="13" height="70"  rx="6.5"/>
+    <rect x="168.5" y="85" width="13" height="38"  rx="6.5"/>
+  </g>
+</svg>

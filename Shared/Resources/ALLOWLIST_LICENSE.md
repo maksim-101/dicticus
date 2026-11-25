@@ -1,0 +1,19 @@
+# Allowlist Attribution
+
+The files `allowlist-en.txt` and `allowlist-de.txt` are derived from the hermitdave/FrequencyWords corpus (https://github.com/hermitdave/FrequencyWords), an OpenSubtitles-derived per-language frequency list.
+
+Source: https://github.com/hermitdave/FrequencyWords (commit `master`, files `content/2018/en/en_50k.txt` and `content/2018/de/de_50k.txt`).
+
+License: Creative Commons Attribution-ShareAlike 4.0 International (CC-BY-SA 4.0). Full license: https://creativecommons.org/licenses/by-sa/4.0/
+
+Methodology: top 1000 lemmas per language, lowercased, filtered to entries matching `^[a-zäöüß]+$` with length ≥ 2. For English, the K1 morphological variants `remind`, `apply`, `applies`, `applied`, `applying` are appended to ensure coverage of the live-capture hallucination cases (per Phase 27 RESEARCH §6.4). Additionally, `germinate` is appended to protect the real English word from a fuzzy dictionary match.
+
+## Brand-matcher lexicon (`lexicon-en.txt`, `lexicon-de.txt`)
+
+The files `lexicon-en.txt` and `lexicon-de.txt` are the comprehensive common-word guard for the Phase 36.5 brand-name matcher (BMATCH-02). The matcher only fires on tokens ABSENT from these lexicons; a curated stoplist provably failed, so a comprehensive list is required. Since quick 260926-bcc, the same lexicon also backs `DictionaryService`'s fuzzy-pass real-word veto (Guard A), and the small `allowlist-{en,de}.txt` above is retained as a subset.
+
+Source: hermitdave/FrequencyWords (https://github.com/hermitdave/FrequencyWords, commit `master`), files `content/2018/en/en_full.txt` and `content/2018/de/de_full.txt` — OpenSubtitles 2018 per-language surface-form frequency lists (inflected forms included naturally).
+
+License: Creative Commons Attribution-ShareAlike 4.0 International (CC-BY-SA 4.0). Full license: https://creativecommons.org/licenses/by-sa/4.0/ — share-alike applies to these data files / derivative word lists, NOT to the app source code.
+
+Methodology (reproducible via `scripts/build-brand-lexicon.sh`): take the top `EN_CAP=300000` / `DE_CAP=250000` frequency-sorted lines, strip the trailing count field (keep the word only), lowercase, NFC-normalize, filter (EN: `^[a-z'-]+$` — letters plus apostrophe/hyphen; DE: `^[a-zäöüß]+$` — letters plus umlauts ä/ö/ü plus eszett ß, NEVER ASCII-stripped), drop length-1 tokens, de-duplicate, byte-sort (`LC_ALL=C`), then interleave words of 16 or more bytes with shorter ones so no two stand on adjacent lines (the matcher loads a set, so order carries no meaning). Personal names that a publish check reports are removed from the shipped files. EN fallback documented in the script header: SCOWL (Kevin Atkinson, MIT-like permissive) if `en_full` shows EN false-positives in the 36.5-05 scale test.

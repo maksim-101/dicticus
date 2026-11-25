@@ -1,0 +1,186 @@
+// OverlayProbe — diagnostic for the live transcript overlay (Phase 51).
+//
+// Verification instrument: every overlay_show must be paired with exactly one overlay_hide
+// carrying the same seq, and each dictation with a preview writes one preview_session row.
+//
+// PROBE ONLY — no retry, no fallback, no user-facing alert. Records sequence numbers,
+// reasons, counts, timings, AX geometry and identifiers (bundle id, element role).
+// NEVER the preview text or any document text (privacy).
+//
+// COMPILED OUT unless built with `-D DEBUG_RECORDER` (same gate as LlmLifecycleProbe).
+//
+// Output: ~/Library/Application Support/Dicticus/DebugRecordings/
+//   overlay-YYYY-MM-DD.jsonl
+// Retention: 14 days, purged once per launch.
+
+#if DEBUG_RECORDER
+
+import Foundation
+
+public actor OverlayProbe {
+
+    public static let shared = OverlayProbe()
+
+    nonisolated let directoryURL: URL
+    private let retentionDays: Int = 14
+    private var hasPurgedThisLaunch = false
+
+    private init() {
+        self.directoryURL = DebugRecorder.recordingsDirectory()
+    }
+
+    func recordShow(
+        seq: Int,
+        anchorSource: String,
+        flipped: Bool,
+        frame: [Double],
+        visibleFrame: [Double],
+        bundleId: String?,
+        candidates: CaretAnchor.Candidates
+    ) {
+        let trace = candidates.trace
+        write([
+            "event": "overlay_show",
+            "seq": seq,
+            "anchor_source": anchorSource,
+            "flipped": flipped,
+            "frame": frame,
+            "visible_frame": visibleFrame,
+            "bundle_id": bundleId ?? NSNull(),
+            "caret_source": trace?.caretSource ?? NSNull(),
+            "caret_ax": Self.array(candidates.caret),
+            "range_ax": Self.array(trace?.rangeRect),
+            "prev_char_ax": Self.array(trace?.previousCharacterRect),
+            "sel_loc": trace?.selectionLocation ?? NSNull(),
+            "sel_len": trace?.selectionLength ?? NSNull(),
+            "line_start": trace?.lineStart ?? NSNull(),
+            "element_role": trace?.elementRole ?? NSNull(),
+            "element_ax": Self.array(candidates.element),
+            "window_ax": Self.array(candidates.window)
+        ])
+    }
+
+    private nonisolated static func array(_ r: CGRect?) -> Any {
+        // Raw AX bounds come from other apps; a NaN or infinity would make JSONSerialization raise.
+        guard let r else { return NSNull() }
+        let values = [r.origin.x, r.origin.y, r.size.width, r.size.height].map { Double($0) }
+        return values.allSatisfy(\.isFinite) ? values : NSNull()
+    }
+
+    /// `stabilizerConflicts` / `stabilizerGaps` are counts of preview alignment fallbacks (plan 51-10).
+    public func recordHide(seq: Int, reason: String, shownMs: Double, stabilizerConflicts: Int, stabilizerGaps: Int) {
+        write([
+            "event": "overlay_hide",
+            "seq": seq,
+            "reason": reason,
+            "shown_ms": shownMs,
+            "stabilizer_conflicts": stabilizerConflicts,
+            "stabilizer_gaps": stabilizerGaps
+        ])
+    }
+
+    public func recordSession(
+        seq: Int,
+        ticks: Int,
+        published: Int,
+        cancelledInFlight: Bool,
+        drainMs: Double,
+        decodeMsP50: Double,
+        decodeMsMax: Double,
+        skippedNoVoice: Int = 0,
+        overBudget: Bool = false
+    ) {
+        write([
+            "event": "preview_session",
+            "seq": seq,
+            "ticks": ticks,
+            "published": published,
+            "cancelled_in_flight": cancelledInFlight,
+            "drain_ms": drainMs,
+            "decode_ms_p50": decodeMsP50,
+            "decode_ms_max": decodeMsMax,
+            "skipped_no_voice": skippedNoVoice,
+            "over_budget": overBudget
+        ])
+    }
+
+    func recordSession(stats: LivePreviewSession.Stats, seq: Int) {
+        let ms = stats.decodeDurations.map { Self.milliseconds($0) }.sorted()
+        recordSession(
+            seq: seq,
+            ticks: stats.ticks,
+            published: stats.published,
+            cancelledInFlight: stats.cancelledInFlight,
+            drainMs: Self.milliseconds(stats.drainDuration),
+            decodeMsP50: ms.isEmpty ? 0 : ms[ms.count / 2],
+            decodeMsMax: ms.last ?? 0,
+            skippedNoVoice: stats.skippedNoVoice,
+            overBudget: stats.overBudget
+        )
+    }
+
+    nonisolated static func milliseconds(_ d: Duration) -> Double {
+        Double(d.components.seconds) * 1000 + Double(d.components.attoseconds) / 1e15
+    }
+
+    // MARK: - Plumbing (mirrors LlmLifecycleProbe)
+
+    private func write(_ fields: [String: Any]) {
+        ensureDirectory()
+        purgeIfNeeded()
+        var obj = fields
+        obj["ts"] = Self.iso8601Timestamp()
+        appendJsonl(obj)
+    }
+
+    private func ensureDirectory() {
+        try? FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+    }
+
+    private func currentJsonlURL() -> URL {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.timeZone = TimeZone(secondsFromGMT: 0)
+        return directoryURL.appendingPathComponent("overlay-\(f.string(from: Date())).jsonl")
+    }
+
+    private func appendJsonl(_ obj: [String: Any]) {
+        guard var data = try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys]) else { return }
+        data.append(0x0A)
+        let url = currentJsonlURL()
+        let fm = FileManager.default
+        if fm.fileExists(atPath: url.path) {
+            if let h = try? FileHandle(forWritingTo: url) {
+                defer { try? h.close() }
+                try? h.seekToEnd()
+                try? h.write(contentsOf: data)
+            }
+        } else {
+            try? data.write(to: url)
+        }
+    }
+
+    private func purgeIfNeeded() {
+        guard !hasPurgedThisLaunch else { return }
+        hasPurgedThisLaunch = true
+        let cutoff = Date().addingTimeInterval(-Double(retentionDays * 86_400))
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(
+            at: directoryURL, includingPropertiesForKeys: [.contentModificationDateKey]
+        ) else { return }
+        for entry in entries where entry.lastPathComponent.hasPrefix("overlay-") {
+            if let mod = try? entry.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate,
+               mod < cutoff {
+                try? fm.removeItem(at: entry)
+            }
+        }
+    }
+
+    private nonisolated static func iso8601Timestamp(_ date: Date = Date()) -> String {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f.string(from: date)
+    }
+}
+
+#endif

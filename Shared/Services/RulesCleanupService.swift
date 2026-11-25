@@ -1,0 +1,150 @@
+import Foundation
+
+/// Phase 20 D-02 Action 2: deterministic rules-first cleanup.
+///
+/// Thin orchestrator over the three Phase 20 rule utilities. Composition
+/// order is fixed and order-sensitive (locked by RulesCleanupServiceTests):
+///
+///   1. `FillerWordRemover.strip` — remove conservative ship-list fillers.
+///      Runs FIRST so a leading `"ähm, …"` is gone before self-correction
+///      examines the comma-prefixed connector window.
+///   2. `SelfCorrectionResolver.resolve` — drop reparandum tokens before a
+///      comma-prefixed connector. Runs after filler so the backward window
+///      sees only content tokens.
+///   3. `SwissNumberFormatter.foldCurrencyUnits` — collapse spoken-out
+///      `"X Franken Y Rappen"` (and EUR/USD/GBP analogs) to canonical
+///      glyph-prefixed decimal form. Runs LAST so it operates on already-
+///      cleaned digit sequences.
+///   4. Whitespace collapse — `\s+` → single space, then trim.
+///
+/// Idempotency invariant (D-03): `clean(clean(x)) == clean(x)` for every
+/// fixture in `RulesCleanup.fixtures.json`. Each utility is individually
+/// idempotent, and whitespace collapse trivially is.
+///
+/// Pure transform — no `@MainActor`, no `@Published`, no I/O. Thread-safe
+/// to call from any context.
+public final class RulesCleanupService {
+
+    public init() {}
+
+    // Media-bleed artifact regex — strips a trailing standalone "Yeah" / "Mm-hmm" / "Mhm"
+    // that appears after auto-stop fires too late. Pattern is $-anchored (no backtracking risk).
+    // try! is correct: pattern is a compile-time constant validated in spike ArtifactStrip.
+    private static let artifactRegex = try! NSRegularExpression(
+        pattern: #"(?:\s+(?:yeah|mm-hmm|mhm))(?<trail>[.!?]?)\s*$"#,
+        options: [.caseInsensitive])
+
+    private static func stripTrailingArtifact(_ s: String) -> String {
+        let r = NSRange(s.startIndex..<s.endIndex, in: s)
+        guard let m = artifactRegex.firstMatch(in: s, options: [], range: r) else { return s }
+        guard let range = Range(m.range, in: s) else { return s }
+        var head = String(s[s.startIndex..<range.lowerBound])
+        // Preserve terminal punctuation if head lacks one and the artifact carried it.
+        if let trailRange = Range(m.range(withName: "trail"), in: s),
+           !s[trailRange].isEmpty,
+           let last = head.last, !".!?".contains(last) {
+            head += String(s[trailRange])
+        }
+        return head
+    }
+
+    // Slice 60: a period Whisper writes at a thinking pause, continued in lowercase
+    // ("check the files. in the other folder"), is a pause mark, not a sentence end. The
+    // period becomes a comma so the LLM gets one utterance and a rejected LLM output no
+    // longer ships the false break. The token before the period must be an ordinary word:
+    // no abbreviation, no digit, no trailing dot (an ellipsis), at least two letters.
+    private static let pausePeriodRegex = try! NSRegularExpression(
+        pattern: #"(\S+)\. (?=\p{Ll})"#, options: [])
+
+    private static let abbreviations: Set<String> = [
+        "bzw", "etc", "usw", "ca", "vs", "z.b", "e.g", "i.e", "d.h", "evtl", "ggf", "inkl",
+        "nr", "dr", "bspw", "max", "min", "resp", "vgl", "sog", "u.a", "o.ä", "st", "mr", "mrs",
+    ]
+
+    static func joinPausePeriods(_ s: String) -> String {
+        let r = NSRange(s.startIndex..<s.endIndex, in: s)
+        let matches = pausePeriodRegex.matches(in: s, options: [], range: r)
+        guard !matches.isEmpty else { return s }
+        var out = ""
+        var cursor = s.startIndex
+        for m in matches {
+            guard let whole = Range(m.range, in: s), let tokenRange = Range(m.range(at: 1), in: s) else { continue }
+            let token = String(s[tokenRange])
+            let letters = token.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count
+            let plain = token.trimmingCharacters(in: CharacterSet(charactersIn: "(\"'“”‘’[")).lowercased()
+            // A token with a dot of its own ("U.S.A", "a.m", "z.B", "bit..") is an
+            // abbreviation or an ellipsis, whatever the list says.
+            let isWord = letters >= 2
+                && !token.contains(where: \.isNumber)
+                && !token.contains(".")
+                && !Self.abbreviations.contains(plain)
+            guard isWord else { continue }
+            // Replace ". " with ", " and keep the token.
+            out += s[cursor..<tokenRange.upperBound]
+            out += ", "
+            cursor = whole.upperBound
+        }
+        out += s[cursor...]
+        return out
+    }
+
+    /// Run the rules-first cleanup pipeline.
+    ///
+    /// - Parameters:
+    ///   - text: post-ITN, pre-LLM input.
+    ///   - language: BCP-47-ish code; first 2 chars used for filler /
+    ///     self-correction language gating. Currency-fold is language-
+    ///     agnostic by design (the tokens themselves disambiguate).
+    ///   - skipSelfCorrection: when true, the SelfCorrectionResolver step
+    ///     is bypassed. Set by `TextProcessingService` in AI-cleanup mode
+    ///     so the V3 LLM prompt can decide for itself whether a
+    ///     self-correction is a genuine repair or part of the user's
+    ///     intended phrasing — the resolver's deterministic comma-prefixed
+    ///     drop conflicts with V3's "preserve self-corrections" rule.
+    /// - Returns: cleaned text.
+    public func clean(_ text: String, language: String, skipSelfCorrection: Bool = false) -> String {
+        var result = FillerWordRemover.strip(text, language: language)
+        if !skipSelfCorrection {
+            result = SelfCorrectionResolver.resolve(result, language: language)
+        }
+        // Slice 60: after the self-correction resolver (which anchors on commas) and before
+        // the LLM sees the text.
+        result = Self.joinPausePeriods(result)
+        // Currency-fold is gated on `de` (Swiss/German speakers say
+        // "Franken Rappen" / "Euro Cent"). The en-mode contract is that
+        // German-flavored input passes through untouched — see
+        // `RulesCleanupServiceTests.testLanguageGatingEnglishLeavesGermanFlavoredInputUntouched`.
+        // The downstream `SwissNumberFormatter.format` (Step 3b in
+        // TextProcessingService) still runs language-agnostically per
+        // the existing Swiss-toggle gating.
+        if language.prefix(2).lowercased() != "en" {
+            result = SwissNumberFormatter.foldCurrencyUnits(result)
+        }
+        // Whitespace collapse — a run of whitespace → single space, except that a run holding
+        // line breaks keeps them (quick 261003-p7e: a dictated line break must survive); trim.
+        var collapsed = ""
+        var run = ""
+        func flushRun(atEdge: Bool) {
+            let breaks = run.filter { $0.isNewline }.count
+            if breaks > 0 {
+                collapsed += String(repeating: "\n", count: breaks)
+            } else if !run.isEmpty && !atEdge {
+                collapsed += " "
+            }
+            run = ""
+        }
+        for ch in result {
+            if ch.isWhitespace {
+                run.append(ch)
+            } else {
+                flushRun(atEdge: collapsed.isEmpty)
+                collapsed.append(ch)
+            }
+        }
+        flushRun(atEdge: true)
+        // Trailing-artifact strip — AI mode only (clean(...) is invoked only in
+        // the aiCleanup branch of TextProcessingService; plain mode is unaffected).
+        let stripped = RulesCleanupService.stripTrailingArtifact(collapsed)
+        return stripped.trimmingCharacters(in: .whitespaces)
+    }
+}

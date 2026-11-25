@@ -1,0 +1,21 @@
+<!-- Dicticus app-icon foreground glyph: edge-to-edge waveform, crisp (variant B).
+     viewBox 0..200; scales to any size. Vertical cyan gradient, NO glow baked in —
+     apply glow / specular / Liquid-Glass in Icon Composer on this layer.
+     Foreground occupies ~62% width / ~75% height of the icon canvas. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="1024" height="1024">
+  <defs>
+    <linearGradient id="cy" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8BE9F5"/>
+      <stop offset="1" stop-color="#2A93B5"/>
+    </linearGradient>
+  </defs>
+  <g fill="url(#cy)">
+    <rect x="18.5"  y="84" width="13" height="40"  rx="6.5"/>
+    <rect x="43.5"  y="65" width="13" height="78"  rx="6.5"/>
+    <rect x="68.5"  y="45" width="13" height="118" rx="6.5"/>
+    <rect x="93.5"  y="29" width="13" height="150" rx="6.5"/>
+    <rect x="118.5" y="45" width="13" height="118" rx="6.5"/>
+    <rect x="143.5" y="69" width="13" height="70"  rx="6.5"/>
+    <rect x="168.5" y="85" width="13" height="38"  rx="6.5"/>
+  </g>
+</svg>

@@ -1,0 +1,644 @@
+// DebugRecorder — local-only engineering diagnostics for the cleanup pipeline.
+//
+// COMPILED OUT in any build that doesn't pass `-D DEBUG_RECORDER` (i.e. the
+// public `Dicticus` scheme used by `scripts/build-dmg.sh` and the GitHub
+// Release artifact). The whole file becomes empty when the flag is absent;
+// no symbols, no JSON encoder, no Application Support directory access.
+//
+// Captures full LLM payloads (assembled prompt, raw pre-gate output, sampler
+// params, per-step intermediates and latencies) to JSONL on disk for offline
+// replay of failures like the "T"/"W" degenerate-collapse bug. Distinct from
+// HistoryService, which persists user-facing transcripts only.
+//
+// Output: ~/Library/Application Support/Dicticus/DebugRecordings/cleanup-YYYY-MM-DD.jsonl
+// Retention: 14 days, purged once per launch.
+
+#if DEBUG_RECORDER
+
+import Foundation
+
+// MARK: - Record schema
+
+public struct DebugCleanupRecord: Codable, Sendable {
+    public let ts: String
+    public let session_id: String
+    public let lang: String
+    public let lang_used: String            // Phase 25.1-01: alias of `lang` so jq queries against either field name produce correct results (closes 25-04 §Gap 1)
+    public let mode: String
+    public let model: ModelInfo
+    public let sampler: SamplerInfo
+    public let steps: Steps
+    /// LLM context targeting hints (input-side dictionary key matches). Narrowed in Phase 27: no longer overloaded with actually-applied replacements — see dictionary_replacements.
+    public let dictionary_context_keys: [String]
+    public let dictionary_replacements: [DictionaryReplacementEntry]
+    public let dictionary_blocked: [DictionaryBlockedEntry]
+    public let anomaly: Anomaly
+    public let emission_counter: Int        // Phase 25.1-01: monotonic per process — multi-day capture can prove dual-emission fired on every cycle (closes 25-04 §Gap 2)
+    public let prompt_version: String       // Phase 28 R3 (Plan 28-01): prompt variant tag for JSONL analysis; defaults to "v19d" on new records.
+    /// Phase 38 Plan 01 (CTXFMT-02): the frontmost app's bundle ID captured
+    /// at hotkey press-time. Local-only diagnostics — never sent to any
+    /// network endpoint. `nil` when absent (e.g. no frontmost app, iOS, or
+    /// pre-Phase-38 JSONL).
+    public let detected_bundle_id: String?
+    /// Phase 38 Plan 01 (D-10, CTXFMT-01): the raw value of the
+    /// `DictationContext` resolved for this run. `nil` on pre-Phase-38 JSONL.
+    public let resolved_context: String?
+    /// Slice 54: the frontmost app's declared `LSApplicationCategoryType`, which the
+    /// resolver reads before the terminal fallback. `nil` when absent or on older JSONL.
+    public let app_category: String?
+    /// Slice 60: the file name of the dictation's retained audio under `DebugRecordings/audio`
+    /// (Debug-Recorder build on macOS). `nil` elsewhere and on older JSONL.
+    public let audio_file: String?
+    /// Quick task 260805-qme: every rewrite `BrandMatcher` made at Step 1b,
+    /// so a fuzzy/phonetic brand rewrite is attributable in the JSONL instead
+    /// of showing up as an unexplained raw→shipped divergence with empty
+    /// `dictionary_replacements`. Optional (not required) following the same
+    /// backward-compat idiom as `GateEntry.edits`/`detected_bundle_id` (Phase
+    /// 44 Plan 11 / Phase 38): pre-existing JSONL on disk predates this field
+    /// and must keep decoding without throwing, and every existing
+    /// labeled-argument construction site must keep compiling unmodified.
+    public let brand_rewrites: [BrandRewriteEntry]?
+    /// Quick task 260930-s1e: Guard A near-matches the real-word veto suppressed.
+    /// ratio <= 0.25 means the veto changed the output; above 0.25 the ratio cap
+    /// would have blocked it anyway. Same entry shape as dictionary_blocked.
+    /// Optional so JSONL written before 260930-s1e decodes to nil.
+    public let lexicon_vetoed: [DictionaryBlockedEntry]?
+    /// Quick task 261003-jej: WhisperKit's per-token log-probabilities and
+    /// per-word confidence for this dictation. Prompt/special tokens are excluded, so the values
+    /// are not comparable to segment avgLogprob; `p` is exp(mean lp) as in WhisperKit's
+    /// WordTiming.probability. Absent means no trace was captured (iOS, tests, older builds).
+    public let asr_tokens: AsrTokenTrace?
+    /// Quick task 261003-p7e (Step 3a.9): tracked mark kinds that the command pass added and the
+    /// AI step then cut below that count. nil: not checked (plain mode, no LLM run, no mark added);
+    /// []: checked, none short; otherwise the short kinds.
+    public let dictated_mark_shortfall: [String]?
+    /// Quick task 261017-g3j (Step 3a.10): replacements the post-gate exact pass made over the user's
+    /// own entries. nil: the pass did not run (plain mode, no LLM run); []: ran, nothing replaced.
+    public let post_gate_dict_replacements: [DictionaryReplacementEntry]?
+
+    // Phase 27 WR-02: custom decoder tolerates pre-Phase-27 JSONL where the
+    // dictionary_replacements / dictionary_blocked keys are absent. Both
+    // default to `[]` on missing-key, matching the encode-as-`[]` contract
+    // pinned by DebugCleanupRecordCodableTests.testDebugCleanupRecordCodableRoundTrip_DefaultEmpty.
+    // Synthesized encoder (Codable) is unchanged and continues to emit the
+    // fields explicitly — only decode is relaxed.
+    private enum CodingKeys: String, CodingKey {
+        case ts, session_id, lang, lang_used, mode, model, sampler, steps
+        case dictionary_context_keys, dictionary_replacements, dictionary_blocked
+        case anomaly, emission_counter, prompt_version
+        case detected_bundle_id, resolved_context, app_category, audio_file, brand_rewrites, lexicon_vetoed, asr_tokens, dictated_mark_shortfall
+        case post_gate_dict_replacements
+    }
+
+    public init(
+        ts: String,
+        session_id: String,
+        lang: String,
+        lang_used: String,
+        mode: String,
+        model: ModelInfo,
+        sampler: SamplerInfo,
+        steps: Steps,
+        dictionary_context_keys: [String],
+        dictionary_replacements: [DictionaryReplacementEntry],
+        dictionary_blocked: [DictionaryBlockedEntry],
+        anomaly: Anomaly,
+        emission_counter: Int,
+        prompt_version: String = "v19d",
+        detected_bundle_id: String? = nil,
+        resolved_context: String? = nil,
+        app_category: String? = nil,
+        audio_file: String? = nil,
+        brand_rewrites: [BrandRewriteEntry]? = nil,
+        lexicon_vetoed: [DictionaryBlockedEntry]? = nil,
+        asr_tokens: AsrTokenTrace? = nil,
+        dictated_mark_shortfall: [String]? = nil,
+        post_gate_dict_replacements: [DictionaryReplacementEntry]? = nil
+    ) {
+        self.ts = ts
+        self.session_id = session_id
+        self.lang = lang
+        self.lang_used = lang_used
+        self.mode = mode
+        self.model = model
+        self.sampler = sampler
+        self.steps = steps
+        self.dictionary_context_keys = dictionary_context_keys
+        self.dictionary_replacements = dictionary_replacements
+        self.dictionary_blocked = dictionary_blocked
+        self.anomaly = anomaly
+        self.emission_counter = emission_counter
+        self.prompt_version = prompt_version
+        self.detected_bundle_id = detected_bundle_id
+        self.resolved_context = resolved_context
+        self.app_category = app_category
+        self.audio_file = audio_file
+        self.brand_rewrites = brand_rewrites
+        self.lexicon_vetoed = lexicon_vetoed
+        self.asr_tokens = asr_tokens
+        self.dictated_mark_shortfall = dictated_mark_shortfall
+        self.post_gate_dict_replacements = post_gate_dict_replacements
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.ts = try c.decode(String.self, forKey: .ts)
+        self.session_id = try c.decode(String.self, forKey: .session_id)
+        self.lang = try c.decode(String.self, forKey: .lang)
+        self.lang_used = try c.decode(String.self, forKey: .lang_used)
+        self.mode = try c.decode(String.self, forKey: .mode)
+        self.model = try c.decode(ModelInfo.self, forKey: .model)
+        self.sampler = try c.decode(SamplerInfo.self, forKey: .sampler)
+        self.steps = try c.decode(Steps.self, forKey: .steps)
+        self.dictionary_context_keys = try c.decode([String].self, forKey: .dictionary_context_keys)
+        // Phase 27 WR-02: tolerate missing keys in pre-Phase-27 JSONL.
+        self.dictionary_replacements = try c.decodeIfPresent([DictionaryReplacementEntry].self, forKey: .dictionary_replacements) ?? []
+        self.dictionary_blocked = try c.decodeIfPresent([DictionaryBlockedEntry].self, forKey: .dictionary_blocked) ?? []
+        self.anomaly = try c.decode(Anomaly.self, forKey: .anomaly)
+        self.emission_counter = try c.decode(Int.self, forKey: .emission_counter)
+        // Phase 28 R3 (Plan 28-01): backward-compat decode for pre-Phase-28 JSONL — default to "v19c" when key absent. Mirrors Phase 27 WR-02 pattern at L91-93.
+        self.prompt_version = try c.decodeIfPresent(String.self, forKey: .prompt_version) ?? "v19c"
+        // Phase 38 Plan 01: tolerant decode for pre-Phase-38 JSONL — both default to nil when absent.
+        self.detected_bundle_id = try c.decodeIfPresent(String.self, forKey: .detected_bundle_id) ?? nil
+        self.resolved_context = try c.decodeIfPresent(String.self, forKey: .resolved_context) ?? nil
+        self.app_category = try c.decodeIfPresent(String.self, forKey: .app_category) ?? nil
+        self.audio_file = try c.decodeIfPresent(String.self, forKey: .audio_file) ?? nil
+        // Quick task 260805-qme: tolerant decode for pre-260805 JSONL — nil when absent.
+        self.brand_rewrites = try c.decodeIfPresent([BrandRewriteEntry].self, forKey: .brand_rewrites) ?? nil
+        self.lexicon_vetoed = try c.decodeIfPresent([DictionaryBlockedEntry].self, forKey: .lexicon_vetoed) ?? nil
+        // Quick task 261003-jej: tolerant decode for JSONL written before the ASR token trace.
+        self.asr_tokens = try c.decodeIfPresent(AsrTokenTrace.self, forKey: .asr_tokens) ?? nil
+        self.dictated_mark_shortfall = try c.decodeIfPresent([String].self, forKey: .dictated_mark_shortfall) ?? nil
+        self.post_gate_dict_replacements = try c.decodeIfPresent([DictionaryReplacementEntry].self, forKey: .post_gate_dict_replacements) ?? nil
+    }
+
+    public struct ModelInfo: Codable, Sendable {
+        public let name: String
+        public let sha256_prefix: String?
+    }
+
+    public struct SamplerInfo: Codable, Sendable {
+        public let temp: Double
+        public let top_k: Int
+        public let top_p: Double
+        public let max_tokens: Int
+        public let seed: UInt32?
+    }
+
+    public struct StepEntry: Codable, Sendable {
+        public let text: String
+        public let ms: Double
+    }
+
+    public struct LLMPromptEntry: Codable, Sendable {
+        public let text: String
+        public let tokens_est: Int
+    }
+
+    public struct LLMRawEntry: Codable, Sendable {
+        public let text: String
+        public let ms: Double
+    }
+
+    /// Phase 44 Plan 11 (D-11): the wire form of `EditGuard.ClassifiedEdit` —
+    /// one classified edit, ready to serialize into `GateEntry.edits`.
+    /// Field names/types are a direct passthrough of `ClassifiedEdit` so no
+    /// translation layer is needed at the call site.
+    public struct EditRecord: Codable, Sendable {
+        public let kind: String
+        public let from: String?
+        public let to: String?
+        public let accepted: Bool
+        public let accept_class: String?
+        public let reject_class: String?
+
+        public init(
+            kind: String,
+            from: String?,
+            to: String?,
+            accepted: Bool,
+            accept_class: String?,
+            reject_class: String?
+        ) {
+            self.kind = kind
+            self.from = from
+            self.to = to
+            self.accepted = accepted
+            self.accept_class = accept_class
+            self.reject_class = reject_class
+        }
+    }
+
+    /// Phase 44 Plan 11 (D-11 forensics): `edits`, `fail_closed_reason`,
+    /// `accepted_by_class`, and `rejected_by_class` are Plan 11 additions —
+    /// every one of them is OPTIONAL. `GateEntry` is `Codable` and the 44-01
+    /// corpus snapshot's historical JSONL records were written before these
+    /// fields existed; a required new field would break every historical
+    /// decode and destroy the phase's own evidence base
+    /// (`testHistoricalGateEntriesStillDecode` proves this holds for historical
+    /// records). `verdict`'s meaning is unchanged in shape but its semantics
+    /// widen: `"passed"` when zero edits were rejected AND no fail-closed
+    /// path fired; `"rejected"` otherwise — so existing corpus queries that
+    /// key off `verdict` keep working unmodified. `edit_distance` stays nil;
+    /// the edit guard does not compute a scalar distance (D-01: token-level
+    /// diff, never a similarity ratio).
+    public struct GateEntry: Codable, Sendable {
+        public let text: String
+        public let verdict: String
+        public let edit_distance: Double?
+        public let ms: Double
+        public let edits: [EditRecord]?
+        public let fail_closed_reason: String?
+        public let accepted_by_class: [String: Int]?
+        public let rejected_by_class: [String: Int]?
+
+        public init(
+            text: String,
+            verdict: String,
+            edit_distance: Double?,
+            ms: Double,
+            edits: [EditRecord]? = nil,
+            fail_closed_reason: String? = nil,
+            accepted_by_class: [String: Int]? = nil,
+            rejected_by_class: [String: Int]? = nil
+        ) {
+            self.text = text
+            self.verdict = verdict
+            self.edit_distance = edit_distance
+            self.ms = ms
+            self.edits = edits
+            self.fail_closed_reason = fail_closed_reason
+            self.accepted_by_class = accepted_by_class
+            self.rejected_by_class = rejected_by_class
+        }
+    }
+
+    public struct Steps: Codable, Sendable {
+        public let raw: StepEntry
+        public let post_dict: StepEntry
+        public let post_itn: StepEntry
+        public let post_swiss: StepEntry
+        public let post_rules: StepEntry
+        public let llm_prompt: LLMPromptEntry?
+        public let llm_raw: LLMRawEntry?
+        public let post_gate: GateEntry?
+        public let post_swiss_num: StepEntry
+        /// Quick task 260901-fs1: the text actually handed back to the caller
+        /// (and, from there, to the pasteboard/history) — captured after
+        /// EVERY pipeline mutation for EVERY mode, most notably Step 3a.6
+        /// `applyFinalCapitalization`, which runs AFTER `post_gate` and was
+        /// previously unrecorded. `post_gate` can legitimately differ from
+        /// what the user received;
+        /// `final` (the JSON key — see `CodingKeys` below; `final` is a
+        /// Swift keyword so the Swift-side property is `finalStage`) is the
+        /// byte-identical ground truth. Optional + defaulted via the
+        /// synthesized-Codable Optional rule (no key in old JSONL ⇒
+        /// `decodeIfPresent` ⇒ `nil`), so pre-260901 recordings on disk keep
+        /// decoding unchanged — mirrors `post_gate`'s own optionality.
+        ///
+        /// `var`, not `let`: an Optional `let` with an inline `= nil`
+        /// default is a well-known Swift gotcha — the compiler treats it as
+        /// a fixed constant, EXCLUDED from both the memberwise initializer
+        /// and from `Decodable` overwrite (verified empirically; the
+        /// compiler even warns "will not be decoded because it is declared
+        /// with an initial value which cannot be overwritten"). `var`
+        /// without an inline default still gets the desired
+        /// omittable-parameter / `decodeIfPresent`-on-missing-key behavior
+        /// for a stored Optional. `Steps` stays `Sendable`: a value-type
+        /// struct's `var` stored properties don't break `Sendable` — each
+        /// instance is copied on use, so there's no shared mutable state.
+        public var finalStage: StepEntry?
+
+        private enum CodingKeys: String, CodingKey {
+            case raw, post_dict, post_itn, post_swiss, post_rules
+            case llm_prompt, llm_raw, post_gate, post_swiss_num
+            case finalStage = "final"
+        }
+    }
+
+    public struct Anomaly: Codable, Sendable {
+        public let degenerate_collapse: Bool
+        public let very_short_output: Bool
+    }
+
+    public struct DictionaryReplacementEntry: Codable, Sendable {
+        public let key: String
+        public let from: String
+        public let to: String
+
+        public init(key: String, from: String, to: String) {
+            self.key = key
+            self.from = from
+            self.to = to
+        }
+    }
+
+    public struct DictionaryBlockedEntry: Codable, Sendable {
+        public let key: String
+        public let from: String
+        public let to: String
+        public let ratio: Double
+
+        public init(key: String, from: String, to: String, ratio: Double) {
+            self.key = key
+            self.from = from
+            self.to = to
+            self.ratio = ratio
+        }
+    }
+
+    /// Quick task 260805-qme: one rewrite `BrandMatcher` made at Step 1b —
+    /// the misheard surface window and the canonical it was mapped to, plus
+    /// the orthographic scores that decided the match. Field names `from`/
+    /// `to` deliberately mirror `DictionaryReplacementEntry` so one jq shape
+    /// reads both replacement sources. `jw`/`dl` are copied straight off
+    /// `BrandMatcher.Rewrite` — no new metadata is computed here.
+    public struct BrandRewriteEntry: Codable, Sendable {
+        public let from: String
+        public let to: String
+        public let jw: Double
+        public let dl: Int
+
+        public init(from: String, to: String, jw: Double, dl: Int) {
+            self.from = from
+            self.to = to
+            self.jw = jw
+            self.dl = dl
+        }
+    }
+
+    public struct AsrToken: Codable, Sendable {
+        public let id: Int
+        public let text: String
+        public let lp: Float?
+
+        public init(id: Int, text: String, lp: Float?) {
+            self.id = id
+            self.text = text
+            self.lp = lp
+        }
+    }
+
+    public struct AsrWord: Codable, Sendable {
+        public let text: String
+        public let p: Float
+        public let n: Int
+
+        public init(text: String, p: Float, n: Int) {
+            self.text = text
+            self.p = p
+            self.n = n
+        }
+    }
+
+    public struct AsrSegment: Codable, Sendable {
+        public let temperature: Float
+        public let tokens: [AsrToken]
+        public let words: [AsrWord]?
+
+        public init(temperature: Float, tokens: [AsrToken], words: [AsrWord]?) {
+            self.temperature = temperature
+            self.tokens = tokens
+            self.words = words
+        }
+
+        /// Pure derivation from one WhisperKit segment. Ids at or above `specialTokenBegin`
+        /// (SOT, language, task, notimestamps, EOT) carry placeholder logprob 0 and are dropped.
+        public static func build(
+            tokens: [Int],
+            tokenLogProbs: [[Int: Float]],
+            temperature: Float,
+            specialTokenBegin: Int,
+            decodeToken: (Int) -> String,
+            splitWords: ([Int]) -> (words: [String], wordTokens: [[Int]])
+        ) -> AsrSegment {
+            var kept: [AsrToken] = []
+            for (i, id) in tokens.enumerated() where id < specialTokenBegin {
+                let lp = i < tokenLogProbs.count ? tokenLogProbs[i][id] : nil
+                kept.append(AsrToken(id: id, text: decodeToken(id), lp: lp))
+            }
+            guard !kept.isEmpty, kept.allSatisfy({ $0.lp != nil }) else {
+                return AsrSegment(temperature: temperature, tokens: kept, words: nil)
+            }
+            let keptIds = kept.map(\.id)
+            let split = splitWords(keptIds)
+            guard split.words.count == split.wordTokens.count else {
+                return AsrSegment(temperature: temperature, tokens: kept, words: nil)
+            }
+            var words: [AsrWord] = []
+            var cursor = 0
+            for (k, group) in split.wordTokens.enumerated() {
+                let end = cursor + group.count
+                guard !group.isEmpty, end <= keptIds.count, Array(keptIds[cursor..<end]) == group else {
+                    return AsrSegment(temperature: temperature, tokens: kept, words: nil)
+                }
+                let mean = kept[cursor..<end].reduce(Float(0)) { $0 + ($1.lp ?? 0) } / Float(group.count)
+                words.append(AsrWord(text: split.words[k], p: exp(mean), n: group.count))
+                cursor = end
+            }
+            guard cursor == keptIds.count else {
+                return AsrSegment(temperature: temperature, tokens: kept, words: nil)
+            }
+            return AsrSegment(temperature: temperature, tokens: kept, words: words)
+        }
+    }
+
+    public struct AsrTokenTrace: Codable, Sendable {
+        public let ms: Double
+        public let segments: [AsrSegment]
+
+        public init(ms: Double, segments: [AsrSegment]) {
+            self.ms = ms
+            self.segments = segments
+        }
+    }
+}
+
+// MARK: - Recorder actor
+
+public actor DebugRecorder {
+
+    public static let shared = DebugRecorder()
+
+    /// Nil in production. `DicticusTestBootstrap` sets it before any test touches
+    /// `.shared` (mirrors `DicticusDefaults.overrideForTesting`); exists because
+    /// DEBUG_RECORDER test runs wrote fixture JSONL into the real log folder
+    /// (quick 261031-nil).
+    public nonisolated(unsafe) static var directoryOverrideForTesting: URL?
+
+    /// The folder every diagnostics writer logs to: the test override when set, otherwise
+    /// Application Support/Dicticus/DebugRecordings.
+    public static func recordingsDirectory() -> URL {
+        if let override = directoryOverrideForTesting {
+            return override
+        }
+        let appSupport = (try? FileManager.default.url(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask,
+            appropriateFor: nil,
+            create: true
+        )) ?? URL(fileURLWithPath: NSHomeDirectory())
+            .appendingPathComponent("Library/Application Support")
+        return appSupport
+            .appendingPathComponent("Dicticus", isDirectory: true)
+            .appendingPathComponent("DebugRecordings", isDirectory: true)
+    }
+
+    nonisolated let directoryURL: URL
+    private let retentionDays: Int = 14
+    private var hasPurgedThisLaunch = false
+    private var emissionCounter: Int = 0
+
+    /// Test-only — last record handed to record(_:). Always nil in production builds (file is fully gated by #if DEBUG_RECORDER).
+    public private(set) var lastRecordForTests: DebugCleanupRecord?
+
+    private init() {
+        self.directoryURL = Self.recordingsDirectory()
+    }
+
+    private var asrTokenStash = AsrTokenStash()
+
+    public func stageAsrTokens(_ trace: DebugCleanupRecord.AsrTokenTrace, rawText: String) {
+        asrTokenStash.stage(trace, rawText: rawText)
+    }
+
+    public func takeAsrTokens(rawText: String) -> DebugCleanupRecord.AsrTokenTrace? {
+        asrTokenStash.take(rawText: rawText)
+    }
+
+    public func nextEmissionCounter() -> Int {
+        emissionCounter += 1
+        return emissionCounter
+    }
+
+    public func record(_ rec: DebugCleanupRecord) {
+        lastRecordForTests = rec
+        ensureDirectory()
+        purgeIfNeeded()
+
+        let url = currentFileURL()
+        guard let line = encodeLine(rec) else { return }
+        appendLine(line, to: url)
+    }
+
+    private func ensureDirectory() {
+        try? FileManager.default.createDirectory(
+            at: directoryURL,
+            withIntermediateDirectories: true
+        )
+    }
+
+    private func currentFileURL() -> URL {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        f.timeZone = TimeZone(secondsFromGMT: 0)
+        let day = f.string(from: Date())
+        return directoryURL.appendingPathComponent("cleanup-\(day).jsonl")
+    }
+
+    private func encodeLine(_ rec: DebugCleanupRecord) -> Data? {
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.withoutEscapingSlashes]
+        guard var data = try? enc.encode(rec) else { return nil }
+        data.append(0x0A)  // newline (JSONL)
+        return data
+    }
+
+    private func appendLine(_ data: Data, to url: URL) {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: url.path) {
+            if let h = try? FileHandle(forWritingTo: url) {
+                defer { try? h.close() }
+                try? h.seekToEnd()
+                try? h.write(contentsOf: data)
+            }
+        } else {
+            try? data.write(to: url)
+        }
+    }
+
+    private func purgeIfNeeded() {
+        guard !hasPurgedThisLaunch else { return }
+        hasPurgedThisLaunch = true
+
+        let cutoff = Date().addingTimeInterval(-Double(retentionDays * 86_400))
+        let fm = FileManager.default
+        guard let entries = try? fm.contentsOfDirectory(
+            at: directoryURL,
+            includingPropertiesForKeys: [.contentModificationDateKey]
+        ) else { return }
+
+        for entry in entries where entry.pathExtension == "jsonl" {
+            if let mod = try? entry.resourceValues(forKeys: [.contentModificationDateKey])
+                .contentModificationDate,
+               mod < cutoff {
+                try? fm.removeItem(at: entry)
+            }
+        }
+    }
+
+    public nonisolated static func iso8601Timestamp(_ date: Date = Date()) -> String {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f.string(from: date)
+    }
+}
+
+// MARK: - ASR token hand-off TranscriptionService → TextProcessingService.
+
+/// Quick task 261003-jej: traces staged by raw text so a record only ever carries the tokens
+/// of its own dictation; a text mismatch attaches nothing.
+public struct AsrTokenStash: Sendable {
+    public static let capacity = 4
+    private var entries: [(rawText: String, trace: DebugCleanupRecord.AsrTokenTrace)] = []
+
+    public init() {}
+
+    public mutating func stage(_ trace: DebugCleanupRecord.AsrTokenTrace, rawText: String) {
+        entries.append((rawText, trace))
+        while entries.count > Self.capacity { entries.removeFirst() }
+    }
+
+    public mutating func take(rawText: String) -> DebugCleanupRecord.AsrTokenTrace? {
+        guard let i = entries.firstIndex(where: { $0.rawText == rawText }) else { return nil }
+        return entries.remove(at: i).trace
+    }
+}
+
+// MARK: - In-process trace handed from CleanupService → TextProcessingService.
+
+/// Captured by CleanupService at the end of `cleanup(...)`; consumed by
+/// TextProcessingService to build the on-disk record. Sendable across the
+/// MainActor → actor hop into DebugRecorder.
+public struct CleanupServiceTrace: Sendable {
+    public let prompt: String
+    public let llmRaw: String
+    public let llmMs: Double
+    public let modelName: String
+    public let samplerTemp: Double
+    public let samplerTopK: Int
+    public let samplerTopP: Double
+    public let samplerMaxTokens: Int
+
+    public init(
+        prompt: String,
+        llmRaw: String,
+        llmMs: Double,
+        modelName: String,
+        samplerTemp: Double,
+        samplerTopK: Int,
+        samplerTopP: Double,
+        samplerMaxTokens: Int
+    ) {
+        self.prompt = prompt
+        self.llmRaw = llmRaw
+        self.llmMs = llmMs
+        self.modelName = modelName
+        self.samplerTemp = samplerTemp
+        self.samplerTopK = samplerTopK
+        self.samplerTopP = samplerTopP
+        self.samplerMaxTokens = samplerMaxTokens
+    }
+}
+
+#endif

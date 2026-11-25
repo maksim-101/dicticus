@@ -1,0 +1,28 @@
+Dicticus
+Copyright 2026 maksim-101
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product includes or adapts the following third-party work:
+
+- Double Metaphone (Shared/Utilities/DoubleMetaphone.swift) is a Swift port of
+  Lawrence Philips' Double Metaphone algorithm, following the control flow of the
+  DoubleMetaphone class in Apache Commons Codec.
+  Apache Commons Codec, Copyright The Apache Software Foundation, licensed under the
+  Apache License, Version 2.0 (https://commons.apache.org/proper/commons-codec/).
+
+- The formatting-projection salvage in Shared/Utilities/EditGuard.swift follows the
+  approach of TranscriptFormattingProjection in natter, licensed under the Apache
+  License, Version 2.0. No code was copied; the approach was reimplemented.
+
+- The word lists in Shared/Resources (allowlist-en.txt, allowlist-de.txt,
+  lexicon-en.txt, lexicon-de.txt) are derived from hermitdave/FrequencyWords
+  (https://github.com/hermitdave/FrequencyWords), built from OpenSubtitles 2018,
+  licensed under Creative Commons Attribution-ShareAlike 4.0 International
+  (https://creativecommons.org/licenses/by-sa/4.0/). These derived lists are
+  distributed under the same licence; Shared/Resources/ALLOWLIST_LICENSE.md
+  describes how they were made.
+
+Swift packages the apps depend on (WhisperKit, FluidAudio, llama.cpp, Sparkle,
+GRDB and others resolved by Swift Package Manager) carry their own licences in
+their repositories.

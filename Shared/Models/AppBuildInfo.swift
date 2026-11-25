@@ -1,0 +1,77 @@
+import Foundation
+
+enum AppBuildInfo {
+    static var version: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+    }
+
+    static var build: String {
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+    }
+
+    static var gitCommit: String? {
+        Bundle.main.infoDictionary?["GitCommit"] as? String
+    }
+
+    static var buildDate: String? {
+        Bundle.main.infoDictionary?["BuildDate"] as? String
+    }
+
+    static var displayVersion: String {
+        var s = "Dicticus v\(version) (build \(build))"
+        if let hash = gitCommit {
+            s += " · \(hash)"
+        }
+        return s
+    }
+
+    static let recentChanges: [String] = platformChanges + [
+        "Added: Dicticus is open source under the Apache 2.0 licence, at github.com/maksim-101/dicticus",
+        "Fixed: History search finds pasted text, hyphenated words and the start of a word",
+        "Changed: plain dictation ends with a period when the text ends in a word or number",
+        "Removed: settings that had no effect, such as Voice edit commands",
+        "Fixed: German AI cleanup no longer moves the verb in front of the subject after a sentence-opening also, ja, doch, und or aber",
+        "Changed: AI cleanup instructions name only the filler words EditGuard actually removes",
+        "Fixed: German \"ein\" and \"einen\" are no longer turned into the digit 1 after an abbreviation such as PC or a word such as Ebene",
+        "Fixed: AI cleanup no longer capitalizes the word after a period it tried to turn into a comma",
+        "Changed: AI cleanup keeps a word the spell checker does not know as dictated unless the replacement is a dictionary term",
+        "Fixed: AI cleanup no longer capitalizes the word after a stray period it tried to remove",
+        "Fixed: AI cleanup no longer swaps a misheard word for an invented one",
+        "Changed: your own dictionary entries also apply after AI cleanup",
+        "Fixed: AI cleanup no longer swaps a correctly dictated German compound for a different word",
+        "Fixed: a dictation that starts with a number no longer capitalizes the word after it",
+        "Fixed: technical terms such as WebUI or YAML are no longer \"corrected\" into a different brand or word",
+        "Fixed: AI cleanup's commas in spoken lists and its sentence breaks in long dictations are kept",
+        "Added: spoken punctuation for brackets, ellipsis, question and exclamation marks, and new lines",
+    ]
+
+    #if os(macOS)
+    private static let platformChanges = [
+        "Fixed: the app file no longer contains file paths from the computer it was built on",
+        "Added: fix a misheard word right from a dictation, in the popover or from History",
+        "Changed: the dictionary shows one row per correct spelling, with search, renaming and Starter Packs explained",
+        "Changed: the popover keeps one size, with Home and Dictionary tabs and History behind the clock button",
+        "Changed: History rows open with a click and show what was heard in its own box",
+        "Changed: the AI cleanup model downloads only after you agree, the first time you use AI cleanup (or from Settings → AI Cleanup)",
+        "Fixed: a dictation too long for AI cleanup now tells you it went in without cleanup",
+        "Fixed: short dictations on a quiet USB microphone are no longer discarded as silence",
+        "Fixed: the live preview shows text for quiet USB microphones",
+        "Fixed: a dictation that loses its sound mid-hold, for example when AirPods leave, is restarted on your microphone or shows a notice",
+        "Fixed: a dictation keeps recording when AirPods or another microphone connects or disconnects",
+        "Fixed: the menu bar popover no longer freezes the app when Spotlight is slow",
+        "Added: a live transcript panel near the text cursor while you hold the dictation key (turn it off in Settings → General); now requires macOS 26",
+    ]
+    #else
+    private static let platformChanges = [
+        "Changed: Dicticus runs on every iPhone and iPad with iOS 26; AI cleanup needs 8 GB of memory, and Settings → AI Cleanup tells you whether your device has it",
+        "Fixed: a phone call, Siri or removing AirPods ends the dictation and keeps what you said",
+        "Fixed: a transcript finished in the background is copied once and no longer overwrites what you copied since",
+        "Fixed: the AI cleanup model download is checked before it is used, and a damaged file is deleted",
+        "Fixed: AI cleanup keeps the words your dictionary put into a dictation as written, as on Mac",
+        "Changed: Auto-Stop Recording is off by default, so a pause no longer ends a dictation (Settings → Transcriptions)",
+        "Changed: dictation uses the more accurate Parakeet Ultra speech model (one-time download, about 630 MB)",
+    ]
+    #endif
+
+    static let releasesURL = URL(string: "https://github.com/maksim-101/dicticus/releases")!
+}

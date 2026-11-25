@@ -1,0 +1,1046 @@
+import Foundation
+import Combine
+
+/// Provenance tag for a dictionary entry. Persisted as a Codable string inside
+/// `DictionaryMetadata`. Three cases: entries seeded by the app (default), entries
+/// created/edited by the user directly (user), and entries imported from a file
+/// (imported). Old records lacking this key decode as `.user` via `decodeIfPresent`.
+enum LexiconSource: String, Codable {
+    case `default`
+    case user
+    case imported
+
+    /// Display sort priority: lower value surfaces higher in the list.
+    /// user (0) > imported (1) > default (2).
+    var sortPriority: Int {
+        switch self {
+        case .user:     return 0
+        case .imported: return 1
+        case .default:  return 2
+        }
+    }
+}
+
+/// Metadata for a dictionary entry.
+///
+/// Custom `init(from:)` uses `decodeIfPresent` so that existing persisted records
+/// (which lack the `source` key) decode successfully with `source == .user` instead
+/// of throwing `keyNotFound` and wiping the dictionary. This is the critical
+/// upgrade-safety invariant for Phase 31-01 (RESEARCH Pitfall 1).
+struct DictionaryMetadata: Codable, Equatable {
+    let replacement: String
+    let createdAt: Date
+    let source: LexiconSource
+
+    init(replacement: String, createdAt: Date, source: LexiconSource = .user) {
+        self.replacement = replacement
+        self.createdAt = createdAt
+        self.source = source
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        replacement = try c.decode(String.self, forKey: .replacement)
+        createdAt   = try c.decode(Date.self,   forKey: .createdAt)
+        source      = (try c.decodeIfPresent(LexiconSource.self, forKey: .source)) ?? .user
+    }
+}
+
+/// Manages a custom dictionary of find-replace pairs for dictation correction.
+@MainActor
+class DictionaryService: ObservableObject {
+
+    static let dictionaryKey = "customDictionaryMetadata"
+    static let caseSensitiveKey = "dictionaryCaseSensitive"
+    /// Built-in key → the value seeded for it. A seeded key the user deleted or changed is left
+    /// alone; one the user never touched follows a corrected built-in value.
+    static let seededLexiconKey = "seededLexiconValues"
+
+    /// Phase 27 D-09: per-replacement trace entry emitted by `applyWithTrace`.
+    /// Field names mirror the JSONL schema (`dictionary_replacements`) exactly so
+    /// the recorder can encode the array with no name mapping.
+    public struct Replacement: Codable, Sendable {
+        public let key: String
+        public let from: String
+        public let to: String
+    }
+
+    /// Phase 27 D-09: blocked-fuzzy trace entry. Emitted when a candidate would
+    /// have hit under the pre-guard distance rule (distance <= 2) but the new
+    /// Levenshtein ratio cap (D-03, RESEARCH §6.1 Option 1: 0.25) blocks it.
+    /// Field names mirror the JSONL schema (`dictionary_blocked`).
+    /// `to` is included per D-06 amendment 2026-05-26 (RESEARCH §6.6) for
+    /// single-file diagnosability of JSONL logs.
+    public struct BlockedMatch: Codable, Sendable {
+        public let key: String
+        public let from: String
+        public let to: String
+        public let ratio: Double
+    }
+
+    /// Phase 27 D-03 (open-decision Option 1 per RESEARCH §6.1): Levenshtein
+    /// ratio cap above which a fuzzy candidate is rejected. 0.25 keeps a
+    /// one- or two-letter slip on a long brand (e.g. "Kubernetis"->"Kubernetes")
+    /// while blocking short common words that land near a brand key at ratio
+    /// 0.28-0.34 (e.g. "remind" near a six-letter model name).
+    private static let fuzzyRatioCap: Double = 0.25
+
+    /// 260801-m0c: single source of truth for what the fuzzy pass's tokenizer
+    /// can emit as a token. Used BOTH to walk `text` into tokens and to
+    /// filter which dictionary keys are eligible fuzzy candidates — the two
+    /// uses must never drift, or a key can be admitted as a candidate that
+    /// the tokenizer could never actually produce as a matching token.
+    private static func isFuzzyTokenChar(_ c: Character) -> Bool {
+        c.isLetter || c.isNumber
+    }
+
+    /// The active dictionary of [Original: Metadata] pairs.
+    @Published private(set) var dictionary: [String: DictionaryMetadata] = [:]
+
+    /// Whether matching should be case-sensitive.
+    @Published var isCaseSensitive: Bool = false {
+        didSet {
+            Self.defaults.set(isCaseSensitive, forKey: Self.caseSensitiveKey)
+        }
+    }
+
+    /// Phase 27 D-01a / D-02 / D-04: bundled common-word allowlist. Tokens
+    /// matching an entry (lowercased) short-circuit the fuzzy pass entirely.
+    /// Loaded once at init from `Shared/Resources/allowlist-{en,de}.txt`.
+    private let commonWords: Set<String>
+
+    /// Quick 260926-bcc: the comprehensive 518k-word EN+DE lexicon Guard A
+    /// also consults (BrandMatcher.combinedLexicon). Assigned once at init
+    /// from `BrandMatcher.shared` — assigning a `Set` shares its backing
+    /// storage, so this is not a second in-memory copy. DictionaryService
+    /// must never read the lexicon `.txt` files itself.
+    private let lexiconWords: Set<String>
+
+    /// Test-only accessor for the loaded allowlist. Used by
+    /// `DictionaryServiceHallucinationGuardTests.testAllowlistLoadedFromBundle`.
+    internal var commonWordsForTests: Set<String> { commonWords }
+
+    /// Platform-conditional UserDefaults suite — single access point for all
+    /// DictionaryService persistence. On macOS: .standard; on iOS: group suite.
+    static var defaults: UserDefaults { DicticusDefaults.suite }
+
+    /// Shared instance for use in TextProcessingService and DictionaryView.
+    static let shared = DictionaryService()
+
+    private init() {
+        self.isCaseSensitive = Self.defaults.bool(forKey: Self.caseSensitiveKey)
+        self.commonWords = Self.loadCommonWords()
+        self.lexiconWords = BrandMatcher.shared.combinedLexicon
+        // DATA-LOSS GUARD. loadGuarded returns suppressSeed == true
+        // when a persisted dictionary blob is PRESENT but reads empty (a transient
+        // UserDefaults/cfprefsd read/decode failure on relaunch) — in which case
+        // the seed/migration path below MUST NOT run, or it would overwrite the
+        // user's dictionary with bundled defaults (this has happened: most
+        // user entries were lost on one relaunch). Leaving the on-disk blob untouched
+        // lets the next launch recover it. Regression-locked by
+        // DictionaryDataLossGuardTests.
+        let loadOutcome = Self.loadGuarded(from: Self.defaults, key: Self.dictionaryKey)
+        dictionary = loadOutcome.dictionary
+        guard !loadOutcome.suppressSeed else {
+            print("[DictionaryService] DATA-LOSS GUARD: persisted dictionary present but unreadable this launch — skipping all seeding/migration to protect it.")
+            return
+        }
+
+        // Migrate old data if it exists and new data is empty
+        if dictionary.isEmpty {
+            migrateOldFormat()
+        }
+
+        // Drop entries we previously shipped as defaults but have since
+        // retired as harmful. Runs once per launch on the persisted set —
+        // cheap, idempotent, and required for users who already have the
+        // bad keys cached in UserDefaults.
+        purgeRetiredDefaults()
+
+        // Merge built-in entries not seeded before — adds new ones on updates and leaves every
+        // entry the user changed or deleted as it is.
+        prepopulateWithDefaults()
+    }
+
+    /// Phase 27 D-02 / D-05: load the bundled common-word allowlist into a
+    /// single `Set<String>` (union of EN + DE top-N corpora). Returns an empty
+    /// Set on any failure (RESEARCH §6.3 Assumption A2 defensive fallback) so
+    /// init never crashes — the ratio cap (Guard B) still provides defense.
+    ///
+    /// Phase 27 WR-03: every entry is normalized to NFC
+    /// (`.precomposedStringWithCanonicalMapping`). Swift `String` hashing /
+    /// equality is byte-identical at the underlying storage level, so
+    /// graphemically-equal NFD vs NFC forms hash differently. ASR pipelines
+    /// occasionally emit decomposed German diacritics (`ü` = `u` + U+0308)
+    /// while the bundled `.txt` corpora ship precomposed forms (`ü` = U+00FC).
+    /// Without normalization the allowlist veto silently misses on exactly the
+    /// German tokens the guard is designed to protect. Lookup site must NFC
+    /// the token symmetrically — see fuzzyReplaceTokenWithTrace().
+    private static func loadCommonWords() -> Set<String> {
+        var words: Set<String> = []
+        for resourceName in ["allowlist-en", "allowlist-de"] {
+            guard let url = Bundle.main.url(forResource: resourceName, withExtension: "txt") else {
+                print("[DictionaryService] allowlist load failed: \(resourceName).txt not found in bundle")
+                continue
+            }
+            do {
+                let content = try String(contentsOf: url, encoding: .utf8)
+                for line in content.split(separator: "\n", omittingEmptySubsequences: true) {
+                    let trimmed = line.trimmingCharacters(in: .whitespaces)
+                        .lowercased()
+                        .precomposedStringWithCanonicalMapping
+                    if !trimmed.isEmpty {
+                        words.insert(trimmed)
+                    }
+                }
+            } catch {
+                print("[DictionaryService] allowlist load failed: \(resourceName).txt — \(error.localizedDescription)")
+            }
+        }
+        return words
+    }
+
+    /// Keys we previously shipped in `prepopulateWithDefaults()` but
+    /// have since identified as net-harmful (false-positive matches
+    /// against legitimate dictation). Removed on every launch from the
+    /// persisted dictionary so existing installs converge to the new
+    /// behavior without requiring a manual reset.
+    ///
+    /// Dropped a short-phrase cluster whose key matched
+    /// inside ordinary multi-word text when ASR introduced any
+    /// punctuation/space between tokens, producing false replacements.
+    ///
+    /// Dropped a retired key that matched a common word at
+    /// Levenshtein distance 2, causing every spoken instance of that word to
+    /// be replaced with a brand name. Replaced by an exact-match key (distance 3
+    /// from the common word, outside fuzzy threshold). Phase 26 P2.
+    private func purgeRetiredDefaults() {
+        let retired: [String] = [
+            "1m", "1 m", "I m", "one m", "One m",
+            "Versal",
+        ]
+        var changed = false
+        for key in retired {
+            if dictionary.removeValue(forKey: key) != nil {
+                changed = true
+            }
+        }
+        if changed {
+            save()
+        }
+    }
+
+    private func migrateOldFormat() {
+        let oldKey = "customDictionary"
+        // Route through the storage seam (Self.defaults = DicticusDefaults.suite) so the
+        // read and remove target the correct store on both macOS (.standard) and iOS
+        // (group suite). Using UserDefaults.standard here would miss legacy iOS entries
+        // stored in the group suite.
+        if let oldStored = Self.defaults.dictionary(forKey: oldKey) as? [String: String] {
+            for (original, replacement) in oldStored {
+                dictionary[original] = DictionaryMetadata(replacement: replacement, createdAt: Date())
+            }
+            save()
+            Self.defaults.removeObject(forKey: oldKey)
+        }
+    }
+
+    /// Phase 27 WR-04: lifted from `private` → internal so the WR-04
+    /// regression test can invoke the merge loop directly and assert
+    /// the D-12 invariant (existing user customizations are never
+    /// overwritten on re-merge). Not exposed publicly — `@testable
+    /// import Dicticus` provides access; production callers continue
+    /// to go through the singleton's private init only.
+    ///
+    /// Phase 31-01: the inline `defaults` literal has been extracted to
+    /// `DefaultLexicon.entries` (always, public seed — empty for v2.4) and
+    /// `PersonalLexicon.entries` (dev builds only, gitignored). Both are
+    /// merged with `source: .default` using the same idempotent guard.
+    internal func prepopulateWithDefaults() {
+        // Public default entries (empty in v2.4; future releases may add entries here), plus the
+        // developer-personal entries in dev builds only (gitignored file; Release builds compile
+        // that part to zero bytes).
+        var lexicon = DefaultLexicon.entries
+#if PERSONAL_LEXICON
+        lexicon.merge(PersonalLexicon.entries) { current, _ in current }
+#endif
+        // Each built-in key is seeded once. Earlier dev builds removed and re-seeded
+        // every built-in key on each launch, which undid the user's renames and deletions.
+        var seeded = Self.defaults.dictionary(forKey: Self.seededLexiconKey) as? [String: String] ?? [:]
+        for (original, replacement) in lexicon {
+            // Identical pairs are no-ops and break export→import round-tripping, since the
+            // import merge correctly refuses them (see DictionaryIOService.merge).
+            if original == replacement { continue }
+            if let before = seeded[original] {
+                // A corrected built-in reaches an entry the user left as seeded.
+                if before != replacement, let entry = dictionary[original],
+                   entry.source == .default, entry.replacement == before {
+                    dictionary[original] = DictionaryMetadata(replacement: replacement, createdAt: entry.createdAt, source: .default)
+                }
+            } else if dictionary[original] == nil {
+                dictionary[original] = DictionaryMetadata(replacement: replacement, createdAt: Date(), source: .default)
+            }
+            seeded[original] = replacement
+        }
+        // The dictionary first: a stop between the two writes then re-seeds, never hides, a key.
+        save()
+        Self.defaults.set(seeded, forKey: Self.seededLexiconKey)
+    }
+
+    func load() {
+        dictionary = Self.loadGuarded(from: Self.defaults, key: Self.dictionaryKey).dictionary
+    }
+
+    /// Pure, injectable core of the 2026-07-19 data-loss guard (regression-locked
+    /// by `DictionaryDataLossGuardTests`). Reads the persisted dictionary from
+    /// `defaults[key]` and reports whether it is SAFE to seed bundled defaults.
+    /// `suppressSeed` is true ONLY when a blob is PRESENT but decodes empty even
+    /// after a retry — the present-but-unreadable case a caller must NEVER
+    /// overwrite. A genuinely absent blob (real first run) returns
+    /// `suppressSeed == false` so seeding proceeds normally.
+    nonisolated static func loadGuarded(from defaults: UserDefaults, key: String) -> (dictionary: [String: DictionaryMetadata], suppressSeed: Bool) {
+        func decode() -> [String: DictionaryMetadata] {
+            guard let data = defaults.data(forKey: key),
+                  let stored = try? JSONDecoder().decode([String: DictionaryMetadata].self, from: data) else { return [:] }
+            return stored
+        }
+        let blobExists = defaults.data(forKey: key) != nil
+        var dict = decode()
+        if dict.isEmpty && blobExists {
+            dict = decode()  // retry — cfprefsd races usually resolve on a second read
+            if dict.isEmpty { return ([:], true) }
+        }
+        return (dict, false)
+    }
+
+    /// Pure, injectable core of the exact-match pass (Phase 49.7 D-19) — the same
+    /// pattern as `loadGuarded`; `applyWithTrace` is the production caller; tests
+    /// call this directly with a local `entries` map so no test needs the
+    /// singleton.
+    nonisolated static func applyExactPass(to text: String, entries: [String: DictionaryMetadata], caseSensitive: Bool) -> (text: String, replacements: [Replacement]) {
+        var result = text
+        var replacements: [Replacement] = []
+
+        let sortedKeys = entries.keys.sorted { $0.count > $1.count }
+
+        for original in sortedKeys {
+            guard let metadata = entries[original] else { continue }
+
+            // \b only works between \w (alphanumeric) and \W (non-alphanumeric).
+            // It fails for "Swiss \" because " matches \W.
+            // We use lookarounds to simulate word boundaries for any string.
+            let escaped = NSRegularExpression.escapedPattern(for: original)
+
+            // Pattern: Ensure match is not preceded or followed by an alphanumeric character
+            // unless the original string itself starts/ends with one.
+            let pattern = "(?<![a-zA-Z0-9])\(escaped)(?![a-zA-Z0-9])"
+
+            // Phase 49.7 D-07: a single-token all-uppercase key (e.g. "ZAP",
+            // Whisper's all-caps rendering of a spoken product name) matches
+            // case-sensitively so the capitalised greeting form is left
+            // alone; multi-word all-caps keys (USB C, A I) and everything
+            // else keep the global toggle.
+            let keyCaseSensitive = caseSensitive ||
+                (!original.contains(where: { $0.isWhitespace }) && original.allSatisfy { $0.isUppercase })
+            let options: NSRegularExpression.Options = keyCaseSensitive ? [] : [.caseInsensitive]
+
+            do {
+                let regex = try NSRegularExpression(pattern: pattern, options: options)
+                let nsResult = result as NSString
+                let fullRange = NSRange(location: 0, length: nsResult.length)
+                let matches = regex.matches(in: result, options: [], range: fullRange)
+                if !matches.isEmpty {
+                    // Capture matched substrings (in original positions) before
+                    // mutating `result` so trace.from carries the actual text.
+                    for m in matches {
+                        let matched = nsResult.substring(with: m.range)
+                        replacements.append(Replacement(key: original, from: matched, to: metadata.replacement))
+                    }
+                    result = regex.stringByReplacingMatches(in: result, options: [], range: fullRange, withTemplate: metadata.replacement)
+                }
+            } catch {
+                // Fallback: best-effort replacement; cannot reliably emit trace entries here.
+                result = result.replacingOccurrences(of: original, with: metadata.replacement, options: keyCaseSensitive ? [] : [.caseInsensitive])
+            }
+        }
+
+        return (result, replacements)
+    }
+
+    /// Quick task 261017-g3j (Step 3a.10): the exact pass over the user's own entries
+    /// (`.user`, `.imported`) once more after the AI step. Built-in entries stay pre-LLM only,
+    /// and an entry whose key sits inside a value the pre-LLM pass already wrote is skipped.
+    nonisolated static func applyPostGatePass(
+        to text: String,
+        entries: [String: DictionaryMetadata],
+        caseSensitive: Bool,
+        dictProtected: Set<String>
+    ) -> (text: String, replacements: [Replacement]) {
+        let protectedValues = dictProtected.map { $0.lowercased() }
+        let eligible = entries.filter { key, metadata in
+            guard metadata.source != .default else { return false }
+            let lowerKey = key.lowercased()
+            return !protectedValues.contains { $0.contains(lowerKey) }
+        }
+        return applyExactPass(to: text, entries: eligible, caseSensitive: caseSensitive)
+    }
+
+    /// Rolling one-step backup key: `save()` copies the PREVIOUS persisted blob
+    /// here before overwriting, so a single bad overwrite is always recoverable
+    /// (belt-and-suspenders behind the init data-loss guard; 2026-07-19).
+    static let dictionaryBackupKey = "customDictionaryMetadata_prevBackup"
+
+    func save() {
+        guard let data = try? JSONEncoder().encode(dictionary) else { return }
+        if let previous = Self.defaults.data(forKey: Self.dictionaryKey), previous != data {
+            Self.defaults.set(previous, forKey: Self.dictionaryBackupKey)
+        }
+        Self.defaults.set(data, forKey: Self.dictionaryKey)
+    }
+
+    func setReplacement(for original: String, with replacement: String) {
+        let trimmedOriginal = original.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedReplacement = replacement.trimmingCharacters(in: .whitespacesAndNewlines)
+        // An empty replacement deletes the heard word from every dictation.
+        // An identical pair stays allowed: it anchors the fuzzy pass ("Kubernetes" → "Kubernetes").
+        guard !trimmedOriginal.isEmpty, !trimmedReplacement.isEmpty else { return }
+
+        dictionary[trimmedOriginal] = DictionaryMetadata(
+            replacement: trimmedReplacement,
+            createdAt: Date()
+        )
+        save()
+    }
+
+    /// Result of an in-place entry edit (quick task 260801-ftf).
+    enum EntryEditResult: Equatable {
+        case saved
+        case notFound
+        case collision(String)   // the existing key that would have been clobbered
+        case invalid(String)     // user-facing reason
+    }
+
+    /// Edit an existing entry's original and/or replacement in place — the shared
+    /// service method backing both the macOS row "Edit…" affordance and the iOS
+    /// tappable row (quick task 260801-ftf, backlog: dictionary-entry-editing.md).
+    ///
+    /// Two intentional metadata decisions, both sanctioned by the backlog:
+    /// - `createdAt` is PRESERVED from the pre-edit entry. An edit is not a
+    ///   creation; re-stamping it here would silently reshuffle the "Recent"
+    ///   sort every time a user fixed a typo.
+    /// - `source` is deliberately PROMOTED to `.user`. An edited entry is now
+    ///   user-authored content, and the source-priority sort then surfaces it
+    ///   where the user who just touched it expects to find it.
+    ///
+    /// Renaming an entry whose key exists in `DefaultLexicon`/`PersonalLexicon`
+    /// frees that key; `prepopulateWithDefaults()` seeds each built-in key only
+    /// once, so the old entry does not come back.
+    ///
+    /// Every guard below runs BEFORE any mutation, so no rejected path can
+    /// leave the dictionary half-changed. Reaches persistence only through
+    /// `save()` — never `Self.defaults` directly.
+    @discardableResult
+    func renameEntry(from oldOriginal: String, to newOriginal: String, replacement: String) -> EntryEditResult {
+        // oldOriginal comes from the dictionary (a selected row's id), not a
+        // text field — used verbatim as the lookup key, never trimmed.
+        guard let existing = dictionary[oldOriginal] else { return .notFound }
+
+        let trimmedNew = newOriginal.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedReplacement = replacement.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !trimmedNew.isEmpty else { return .invalid("Original cannot be empty.") }
+        guard !trimmedReplacement.isEmpty else { return .invalid("Replacement cannot be empty.") }
+        guard trimmedNew != trimmedReplacement else { return .invalid("Original and replacement cannot be identical.") }
+
+        // Exact-key collision only: the store is keyed by exact string, so
+        // exact-key collision is precisely the clobber risk. A case-only
+        // rename produces a distinct key and is therefore a legal rename, not
+        // a collision — matching is case-insensitive by default, so this is a
+        // no-op for matching behavior; the UI must not imply otherwise.
+        if trimmedNew != oldOriginal, dictionary[trimmedNew] != nil {
+            return .collision(trimmedNew)
+        }
+
+        dictionary.removeValue(forKey: oldOriginal)
+        dictionary[trimmedNew] = DictionaryMetadata(replacement: trimmedReplacement, createdAt: existing.createdAt, source: .user)
+        save()
+        return .saved
+    }
+
+    func removeReplacement(for original: String) {
+        dictionary.removeValue(forKey: original)
+        save()
+    }
+
+    // MARK: - Groups: one row per correct spelling (slice 52)
+
+    /// All entries that share one replacement string. Storage stays one entry
+    /// per heard form; a group is only a view over it.
+    struct DictionaryGroup: Identifiable, Equatable {
+        var id: String { spelling }
+        let spelling: String
+        let forms: [String]
+        let newestCreatedAt: Date
+        let source: LexiconSource
+    }
+
+    /// Exact replacement string is the group key: "claude" and "Claude" are
+    /// different outputs, so merging them would let a rename change one silently.
+    nonisolated static func groups(of entries: [String: DictionaryMetadata]) -> [DictionaryGroup] {
+        Dictionary(grouping: entries, by: { $0.value.replacement }).map { spelling, members in
+            DictionaryGroup(
+                spelling: spelling,
+                forms: members.map(\.key).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending },
+                newestCreatedAt: members.map(\.value.createdAt).max() ?? .distantPast,
+                source: members.map(\.value.source).min { $0.sortPriority < $1.sortPriority } ?? .user
+            )
+        }
+    }
+
+    /// Rows whose spelling or one of whose heard forms contains `query`, ignoring case and
+    /// diacritics; an empty query keeps every row (dictionary window search).
+    nonisolated static func filter(_ groups: [DictionaryGroup], query: String) -> [DictionaryGroup] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return groups }
+        func hit(_ s: String) -> Bool { s.range(of: q, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
+        return groups.filter { hit($0.spelling) || $0.forms.contains(where: hit) }
+    }
+
+    /// The key that already stands for `form`, compared the way the exact pass matches:
+    /// case-insensitively, except a key the pass matches case-sensitively.
+    func existingKey(for form: String) -> String? {
+        let trimmed = form.trimmingCharacters(in: .whitespacesAndNewlines)
+        if dictionary[trimmed] != nil { return trimmed }
+        return dictionary.keys.first { key in
+            let caseSensitive = isCaseSensitive ||
+                (!key.contains(where: { $0.isWhitespace }) && key.allSatisfy { $0.isUppercase })
+            return !caseSensitive && key.caseInsensitiveCompare(trimmed) == .orderedSame
+        }
+    }
+
+    /// The refusal when `spelling` is itself a heard form of another entry; `allowed`
+    /// are the keys that may hold that spelling (the forms being renamed or added).
+    func spellingClashReason(_ spelling: String, allowed: Set<String>) -> String? {
+        guard let key = existingKey(for: spelling), !allowed.contains(key),
+              let owner = dictionary[key]?.replacement, owner != spelling else { return nil }
+        return "“\(spelling)” is itself a heard form of “\(owner)”; choose another spelling."
+    }
+
+    /// Adds `form` as a heard form of `spelling`. A form that already exists as a key
+    /// (case-insensitively) has that entry changed, so no second key matches the same text.
+    @discardableResult
+    func addHeardForm(_ form: String, to spelling: String) -> EntryEditResult {
+        let trimmedForm = form.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedSpelling = spelling.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedForm.isEmpty else { return .invalid("Heard form cannot be empty.") }
+        guard !trimmedSpelling.isEmpty else { return .invalid("Correct spelling cannot be empty.") }
+        guard trimmedForm != trimmedSpelling else { return .invalid("Heard form and correct spelling cannot be identical.") }
+
+        let key = existingKey(for: trimmedForm) ?? trimmedForm
+        if let reason = spellingClashReason(trimmedSpelling, allowed: [key]) { return .invalid(reason) }
+        dictionary[key] = DictionaryMetadata(replacement: trimmedSpelling, createdAt: Date(), source: .user)
+        save()
+        return .saved
+    }
+
+    /// Returns the removed entry, for Undo.
+    @discardableResult
+    func removeHeardForm(_ form: String) -> [String: DictionaryMetadata] {
+        guard let removed = dictionary[form] else { return [:] }
+        removeReplacement(for: form)
+        return [form: removed]
+    }
+
+    /// Gives every heard form of `oldSpelling` the new spelling. `createdAt` is kept and
+    /// `source` promoted to `.user`, as in `renameEntry`. A spelling equal to another
+    /// row's merges the two rows.
+    @discardableResult
+    func renameSpelling(from oldSpelling: String, to newSpelling: String) -> EntryEditResult {
+        let keys = dictionary.filter { $0.value.replacement == oldSpelling }.map(\.key)
+        guard !keys.isEmpty else { return .notFound }
+        let trimmed = newSpelling.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return .invalid("Correct spelling cannot be empty.") }
+        if trimmed == oldSpelling { return .saved }
+        if let clash = keys.first(where: { $0 == trimmed }) {
+            return .invalid("'\(clash)' is one of this word's heard forms; remove it first.")
+        }
+        if let reason = spellingClashReason(trimmed, allowed: Set(keys)) { return .invalid(reason) }
+        for key in keys {
+            let existing = dictionary[key]!
+            dictionary[key] = DictionaryMetadata(replacement: trimmed, createdAt: existing.createdAt, source: .user)
+        }
+        save()
+        return .saved
+    }
+
+    /// Removes every row in `spellings` with one save; returns the removed entries, for Undo.
+    @discardableResult
+    func removeGroups(spellings: Set<String>) -> [String: DictionaryMetadata] {
+        let removed = dictionary.filter { spellings.contains($0.value.replacement) }
+        guard !removed.isEmpty else { return [:] }
+        for key in removed.keys { dictionary.removeValue(forKey: key) }
+        save()
+        return removed
+    }
+
+    /// Puts removed entries back unchanged (Undo of a removal); one save. A key added
+    /// again since the removal keeps its current value.
+    func restoreEntries(_ entries: [String: DictionaryMetadata]) {
+        let absent = entries.filter { existingKey(for: $0.key) == nil }
+        guard !absent.isEmpty else { return }
+        dictionary.merge(absent) { current, _ in current }
+        save()
+    }
+
+    /// True for a single word found in the same allowlist and lexicon Guard A uses:
+    /// an entry with this heard form rewrites an everyday word everywhere.
+    func isEverydayWord(_ form: String) -> Bool {
+        let trimmed = form.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !trimmed.contains(where: { $0.isWhitespace }) else { return false }
+        let lowered = trimmed.lowercased().precomposedStringWithCanonicalMapping
+        return commonWords.contains(lowered) || lexiconWords.contains(lowered)
+    }
+
+    /// Restores one key to an earlier state (nil removes it); the undo of a sheet save.
+    func restoreEntry(_ key: String, to metadata: DictionaryMetadata?) {
+        dictionary[key] = metadata
+        save()
+    }
+
+    /// Also forgets which built-ins were seeded, so the next launch seeds them again, as before.
+    func removeAll() {
+        dictionary.removeAll()
+        Self.defaults.removeObject(forKey: Self.seededLexiconKey)
+        save()
+    }
+
+    // MARK: - Import / Export (Phase 31-02)
+
+    /// Result of a dictionary import operation.
+    ///
+    /// `added`   — new corrections actually applied.
+    /// `kept`    — valid rows that were already in the dictionary and left unchanged.
+    /// `warnings`— invalid rows (empty replacement, or identical original/replacement).
+    /// added + kept + warnings.count accounts for every row in the file, so the
+    /// summary never appears to "lose" rows.
+    enum ImportResult {
+        case success(added: Int, kept: Int, warnings: [String])
+        case failure(String)
+
+        /// User-facing summary for an import-result alert. Accounts for every row —
+        /// added, already-present (kept unchanged), and invalid — instead of listing
+        /// each skipped line, which overwhelms the dialog. `source` optionally names
+        /// the origin (e.g. a starter pack title).
+        func summaryMessage(source: String? = nil) -> String {
+            switch self {
+            case .failure(let error):
+                return "Import failed: \(error)"
+            case .success(let added, let kept, let warnings):
+                let from = source.map { " from \($0)" } ?? ""
+                var lines = ["Imported \(added) new \(added == 1 ? "entry" : "entries")\(from)."]
+                if kept > 0 {
+                    lines.append("\(kept) already in your dictionary (kept unchanged).")
+                }
+                if !warnings.isEmpty {
+                    lines.append("\(warnings.count) \(warnings.count == 1 ? "row" : "rows") skipped — empty or identical original/replacement.")
+                }
+                return lines.joined(separator: "\n")
+            }
+        }
+    }
+
+    /// Thrown by `parseRows` for an unrecognized format string. `errorDescription`
+    /// reproduces the pre-existing `importData` failure text verbatim, so
+    /// extracting the format switch into a shared helper does not change the
+    /// user-visible message.
+    private struct UnsupportedFormatError: LocalizedError {
+        let format: String
+        var errorDescription: String? { "Unsupported format: \(format). Use 'csv' or 'json'." }
+    }
+
+    /// Format-switch + row-validation, shared by `importData` and `previewImport`
+    /// (quick task 260801-ftf) so there is exactly one parse/validate path.
+    /// Returns ALWAYS-VALID rows: csv rows are already stripped by
+    /// `io.parseCSV`; json rows are filtered here with the same two rules
+    /// (empty replacement, original == replacement) `importData` applied
+    /// inline before this extraction. Throws `UnsupportedFormatError` for any
+    /// other format string.
+    private func parseRows(_ data: Data, format: String) throws -> (rows: [CSVImportRow], warnings: [String]) {
+        let io = DictionaryIOService()
+        switch format.lowercased() {
+        case "csv":
+            let result = try io.parseCSV(String(data: data, encoding: .utf8) ?? "")
+            return (result.rows, result.warnings.map { $0.message })
+        case "json":
+            let parsed = try io.parseJSON(data)
+            var validRows: [CSVImportRow] = []
+            var warningMessages: [String] = []
+            for (offset, row) in parsed.enumerated() {
+                if row.replacement.isEmpty {
+                    warningMessages.append("Entry \(offset + 1): empty replacement for '\(row.original)' — skipped")
+                    continue
+                }
+                if row.original == row.replacement {
+                    warningMessages.append("Entry \(offset + 1): original == replacement '\(row.original)' — skipped")
+                    continue
+                }
+                validRows.append(row)
+            }
+            return (validRows, warningMessages)
+        default:
+            throw UnsupportedFormatError(format: format)
+        }
+    }
+
+    /// Import a CSV or JSON file into the dictionary using the specified merge strategy.
+    ///
+    /// Instantiates DictionaryIOService synchronously on the main actor (Finding 8 — safe
+    /// at ~1000-row scale, <1ms parse time). Imported entries are tagged source: .imported.
+    /// On parse/decode error, returns .failure with the localized error description.
+    func importData(_ data: Data, format: String, strategy: MergeStrategy) -> ImportResult {
+        let io = DictionaryIOService()
+        do {
+            let (incoming, warningMessages) = try parseRows(data, format: format)
+            let merged = io.merge(incoming: incoming, into: dictionary, strategy: strategy)
+            let addedCount = merged.keys.filter { dictionary[$0] != merged[$0] }.count
+            // Valid rows that were not applied are duplicates left unchanged.
+            let keptCount = max(0, incoming.count - addedCount)
+            dictionary = merged
+            save()
+            return .success(added: addedCount, kept: keptCount, warnings: warningMessages)
+        } catch {
+            return .failure(error.localizedDescription)
+        }
+    }
+
+    /// Result of a read-only import preview (quick task 260801-ftf): the
+    /// file-side stats shown BEFORE the merge-strategy dialog appears, or the
+    /// parse/format failure. Never mutates `dictionary`, never calls `save()`.
+    enum ImportPreviewResult: Equatable {
+        case preview(DictionaryIOService.ImportPreview)
+        case failure(String)
+    }
+
+    /// Compute the import preview for a file without mutating the dictionary.
+    /// Reuses `parseRows` — the exact same parse/validate path `importData`
+    /// uses — so the preview numbers can never diverge from what an actual
+    /// import would do.
+    func previewImport(_ data: Data, format: String) -> ImportPreviewResult {
+        let io = DictionaryIOService()
+        do {
+            let (rows, warnings) = try parseRows(data, format: format)
+            let preview = io.preview(incoming: rows, against: dictionary).addingSkipped(warnings.count)
+            return .preview(preview)
+        } catch {
+            return .failure(error.localizedDescription)
+        }
+    }
+
+    /// Export the full dictionary (all entries regardless of provenance) to CSV or JSON Data.
+    func exportData(format: String) -> Data {
+        let io = DictionaryIOService()
+        switch format.lowercased() {
+        case "json":
+            return io.serializeJSON(dictionary)
+        default:
+            return Data(io.serializeCSV(dictionary).utf8)
+        }
+    }
+
+    // MARK: - Starter Packs (Phase 31-03)
+
+    /// Hard-coded registry of bundled offline starter packs (RESEARCH Finding 7 —
+    /// hard-code to avoid scanning the bundle directory, which could pull in test CSVs).
+    /// Raw values map to the CSV resource names under Shared/Resources/.
+    enum StarterPack: String, CaseIterable {
+        case tech    = "starter-pack-tech"
+        case brands  = "starter-pack-brands"
+        case general = "starter-pack-general"
+
+        var displayTitle: String {
+            switch self {
+            case .tech:    return "Tech Terms"
+            case .brands:  return "Brand Names"
+            case .general: return "General Terms"
+            }
+        }
+    }
+
+    /// Import a bundled starter pack via the existing DICT-IO pipeline (existing-wins,
+    /// entries tagged source: .imported). Reads the CSV from the app bundle.
+    ///
+    /// Returns .success(added: 0) on a missing/unreadable resource — same defensive
+    /// pattern as loadCommonWords() (never throws, never crashes init or import).
+    func importStarterPack(_ pack: StarterPack) -> ImportResult {
+        guard let url = Bundle.main.url(forResource: pack.rawValue, withExtension: "csv") else {
+            print("[DictionaryService] starter pack not found: \(pack.rawValue).csv")
+            return .success(added: 0, kept: 0, warnings: ["Pack resource not found in bundle: \(pack.rawValue).csv"])
+        }
+        guard let content = try? String(contentsOf: url, encoding: .utf8) else {
+            print("[DictionaryService] starter pack unreadable: \(pack.rawValue).csv")
+            return .success(added: 0, kept: 0, warnings: ["Pack resource could not be read: \(pack.rawValue).csv"])
+        }
+        return importData(Data(content.utf8), format: "csv", strategy: .existingWins)
+    }
+
+    /// A starter pack's valid corrections (heard form, spelling), in file order; empty for a
+    /// missing, unreadable or empty pack. Cheap (packs are tiny, parsed on demand).
+    func starterPackRows(_ pack: StarterPack) -> [(original: String, replacement: String)] {
+        guard let url = Bundle.main.url(forResource: pack.rawValue, withExtension: "csv"),
+              let content = try? String(contentsOf: url, encoding: .utf8),
+              let parsed = try? DictionaryIOService().parseCSV(content) else {
+            return []
+        }
+        return parsed.rows
+            .filter { !$0.replacement.isEmpty && $0.original != $0.replacement }
+            .map { ($0.original, $0.replacement) }
+    }
+
+    /// Whether every valid correction in a starter pack is already present in the
+    /// dictionary — drives the "Added" state in the UI. False for a missing/unreadable/empty pack.
+    func isStarterPackImported(_ pack: StarterPack) -> Bool {
+        let valid = starterPackRows(pack)
+        guard !valid.isEmpty else { return false }
+        return valid.allSatisfy { dictionary[$0.original] != nil }
+    }
+
+    /// Phase 27 D-08: `apply(to:)` is a thin wrapper over `applyWithTrace(to:)`.
+    /// Single source of truth — production and recorder share one code path.
+    func apply(to text: String) -> String {
+        return applyWithTrace(to: text).text
+    }
+
+    /// Phase 27 D-08: canonical traced dictionary application. Returns the
+    /// processed text plus per-replacement, per-blocked-fuzzy-candidate and (quick
+    /// 260930-s1e) per-real-word-vetoed-near-match trace arrays. All are empty when
+    /// nothing happened (D-07 default-empty contract for downstream JSONL stability).
+    public func applyWithTrace(to text: String) -> (text: String, replacements: [Replacement], blocked: [BlockedMatch], vetoed: [BlockedMatch]) {
+        let exact = Self.applyExactPass(to: text, entries: dictionary, caseSensitive: isCaseSensitive)
+        var result = exact.text
+        var replacements = exact.replacements
+        var blocked: [BlockedMatch] = []
+        var vetoed: [BlockedMatch] = []
+
+        // Phase 25.1-03: fuzzy second pass after exact-match completes.
+        let fuzzy = applyFuzzyPassWithTrace(result)
+        result = fuzzy.text
+        replacements.append(contentsOf: fuzzy.replacements)
+        blocked.append(contentsOf: fuzzy.blocked)
+        vetoed.append(contentsOf: fuzzy.vetoed)
+
+        return (result, replacements, blocked, vetoed)
+    }
+
+    /// Phase 25.1-03 — paper §2.2 fuzzy-match second pass.
+    ///
+    /// Runs after the exact-match lookaround regex pass in `applyWithTrace(to:)`.
+    /// For each token of length ≥ 6 in `text`, checks dictionary keys of length
+    /// ≥ 6 (single-token only) where `abs(token.count - key.count) <= 2`.
+    ///
+    /// Phase 27 D-01 defense-in-depth: each candidate must pass BOTH (a) the
+    /// real-word veto — allowlist + bundled lexicon, extended 260926-bcc —
+    /// and (b) the Levenshtein ratio cap (D-01b, D-03) before a replacement
+    /// fires.
+    ///
+    /// Length-prefilter ≥ 6 is mandatory: distance-2 matches against short tokens
+    /// (e.g. `the`/`she`) catastrophically false-positive. Multi-word keys are
+    /// skipped — the exact-match regex pass handles those.
+    private func applyFuzzyPassWithTrace(_ text: String) -> (text: String, replacements: [Replacement], blocked: [BlockedMatch], vetoed: [BlockedMatch]) {
+        // Phase 27 WR-01: sort candidates lexicographically to make
+        // fuzzy-match outcomes deterministic across launches. Dictionary key
+        // iteration order is unspecified in Swift, so a token with two distinct
+        // keys within distance ≤ 2 (one passing the ratio cap, one blocked)
+        // could otherwise produce different outputs across runs depending on
+        // which key the hash table happened to surface first. Lexicographic
+        // sort is the simplest stable order; no quality signal is encoded.
+        // 260801-m0c: the candidate filter and the tokenizer below must agree
+        // on what a token is. The tokenizer (isFuzzyTokenChar) can only ever
+        // emit letter-or-number characters, so a key containing any other
+        // character (e.g. ".cloud") can never equal a token — yet admitting
+        // such keys as candidates let Levenshtein treat the punctuation as
+        // one ordinary substitutable character (".store" vs "istore":
+        // distance 1, ratio 0.167, under the 0.25 cap), corrupting a
+        // correctly-heard word like "iStore" into ".store". This is safe
+        // to reject: punctuation-bearing keys are still fully served by the
+        // exact-match lookaround regex pass above — the guard only removes
+        // matches the tokenizer could never have produced legitimately. A
+        // miss is preferable to a stage-1 corruption no downstream guard
+        // can see. Subsumes the prior no-spaces condition (a space is
+        // neither a letter nor a number).
+        // Defect E (260809-g7h): a casing-only entry (key ≡ replacement
+        // modulo case, e.g. "Screenshot" -> "screenshot" — the two strings
+        // DIFFER, but only in case) is a casing-normalization entry, not a
+        // repair. As a fuzzy CANDIDATE it acts as an inflection-eating
+        // shadow — a plural is within ratio of its own singular
+        // ("screenshots" -> "screenshot" via key "Screenshot"). The
+        // exact-match pass above still applies these entries verbatim, so
+        // user-visible casing behaviour is unchanged; this filter only
+        // removes them from fuzzy candidacy.
+        //
+        // Deliberately does NOT exclude a TRUE identity entry (key and
+        // replacement byte-identical, e.g. "Kubernetes" -> "Kubernetes",
+        // "BarBaz1" -> "BarBaz1") — these are a pre-existing, widely-used
+        // pattern (DictionaryServiceTests) for seeding a canonical spelling
+        // as its OWN fuzzy-correction anchor so a nearby mishearing
+        // ("Kubernetis") still resolves to it. Excluding those broke that
+        // path outright; the shadow-eating failure mode is specific to a
+        // GENUINE case difference between key and replacement.
+        let candidateKeys = dictionary.keys
+            .filter { $0.count >= 6 && $0.allSatisfy(Self.isFuzzyTokenChar) }
+            .filter { key in
+                guard let replacement = dictionary[key]?.replacement, replacement != key else { return true }
+                let normKey = key.lowercased().precomposedStringWithCanonicalMapping
+                let normReplacement = replacement.lowercased().precomposedStringWithCanonicalMapping
+                return normKey != normReplacement
+            }
+            .sorted()
+        if candidateKeys.isEmpty { return (text, [], [], []) }
+
+        // Defect D (260809-g7h): canonical-collision veto. A token that IS
+        // one of the user's own dictionary canonicals is by definition
+        // correctly heard — any fuzzy candidate matching it is a collision
+        // between two canonicals, never a repair (failure shape: one brand
+        // the user spells correctly is rewritten to another brand via a
+        // near-identical mishearing key at ratio exactly 0.250). Built from EVERY entry (not just `candidateKeys`, which is
+        // already filtered down) so a canonical protected only by a
+        // punctuation-bearing or casing-only sibling key still protects.
+        // Splitting multi-word replacements into their constituent words
+        // matters: a user whose dictionary only has a multi-word
+        // replacement ("Visual Studio") would otherwise be unprotected for
+        // the single-word canonical it contains ("Studio").
+        var protectedCanonicals = Set<String>()
+        for (key, metadata) in dictionary {
+            protectedCanonicals.insert(Self.sanitizeForFuzzyComparison(key))
+            protectedCanonicals.insert(Self.sanitizeForFuzzyComparison(metadata.replacement))
+            for word in metadata.replacement.split(separator: " ") {
+                protectedCanonicals.insert(Self.sanitizeForFuzzyComparison(String(word)))
+            }
+        }
+
+        var replacements: [Replacement] = []
+        var blocked: [BlockedMatch] = []
+        var vetoed: [BlockedMatch] = []
+
+        // Walk character by character, collecting word tokens and preserving
+        // all non-word characters (punctuation, whitespace) in their original
+        // positions. Split on whitespace; preserve trailing punctuation per token.
+        var result = ""
+        var current = ""
+        for ch in text {
+            if Self.isFuzzyTokenChar(ch) {
+                current.append(ch)
+            } else {
+                if !current.isEmpty {
+                    let r = fuzzyReplaceTokenWithTrace(current, candidates: candidateKeys, protected: protectedCanonicals)
+                    result.append(r.0)
+                    if let rep = r.1 { replacements.append(rep) }
+                    if let blk = r.2 { blocked.append(blk) }
+                    if let vet = r.3 { vetoed.append(vet) }
+                    current = ""
+                }
+                result.append(ch)
+            }
+        }
+        if !current.isEmpty {
+            let r = fuzzyReplaceTokenWithTrace(current, candidates: candidateKeys, protected: protectedCanonicals)
+            result.append(r.0)
+            if let rep = r.1 { replacements.append(rep) }
+            if let blk = r.2 { blocked.append(blk) }
+            if let vet = r.3 { vetoed.append(vet) }
+        }
+        return (result, replacements, blocked, vetoed)
+    }
+
+    /// Lowercased, NFC-normalized, and stripped of characters the fuzzy-pass
+    /// tokenizer (`isFuzzyTokenChar`) can never emit — the shared sanitizer
+    /// for the Defect D protected-canonical set, so a punctuation- or
+    /// space-bearing key/replacement compares correctly against a token that
+    /// only ever contains letters/numbers.
+    private static func sanitizeForFuzzyComparison(_ s: String) -> String {
+        let lowered = s.lowercased().precomposedStringWithCanonicalMapping
+        return String(lowered.filter(Self.isFuzzyTokenChar))
+    }
+
+    /// Phase 27 D-01 fuzzy-pass guard. Returns the (possibly replaced) token
+    /// plus at most ONE non-nil optional: a `Replacement` (a candidate fires), a
+    /// `BlockedMatch` (a candidate would have hit pre-guard but the ratio cap
+    /// rejects it), or a veto `BlockedMatch` (Guard A suppressed a near-match;
+    /// quick 260930-s1e). The token is returned unchanged for the last two.
+    private func fuzzyReplaceTokenWithTrace(_ token: String, candidates: [String], protected: Set<String>) -> (String, Replacement?, BlockedMatch?, BlockedMatch?) {
+        guard token.count >= 6 else { return (token, nil, nil, nil) }
+        // Phase 27 WR-03: NFC-normalize before allowlist lookup. The allowlist
+        // is loaded NFC (loadCommonWords), and ASR may emit NFD-decomposed
+        // German diacritics. Without symmetric normalization the Set<String>
+        // contains check would silently miss on ä/ö/ü/ß tokens — exactly the
+        // inputs Guard A is built to protect.
+        let lowered = token.lowercased().precomposedStringWithCanonicalMapping
+
+        // Guard A (D-01a, D-04; extended 260926-bcc): real-word veto. A token
+        // is never a fuzzy candidate if it is a correctly spelled word — first
+        // checked against the small allowlist, then against the bundled
+        // 518k-word EN+DE lexicon (the same lexicon BrandMatcher uses, so the
+        // process holds one copy). Exact NFC-lowercased membership only, no
+        // inflection backoff: the plan-time probe (quick 260926-bcc) found
+        // that backoff changes none of the mishearing keys in a typical
+        // dictionary. A lexicon miss only preserves prior behaviour (no
+        // regression) — see quick 260926-bcc for why a platform spell
+        // checker (SpellLexicon's case for the opposite failure direction)
+        // is not used here. Failure shape: an ordinary word such as
+        // "safeguard" rewritten to a similar-sounding brand via a mishearing
+        // key under the 0.25 cap.
+        // A suppressed near-match is reported in `vetoed` (JSONL
+        // `lexicon_vetoed`, quick 260930-s1e); `dictionary_blocked` still
+        // means "ratio cap blocked" only.
+        if commonWords.contains(lowered) || lexiconWords.contains(lowered) {
+            guard let hit = Self.firstActedOnCandidate(lowered: lowered, tokenCount: token.count, candidates: candidates) else {
+                return (token, nil, nil, nil)
+            }
+            let to = dictionary[hit.key]?.replacement ?? token
+            if hit.fires && to == token { return (token, nil, nil, nil) }
+            return (token, nil, nil, BlockedMatch(key: hit.key, from: token, to: to, ratio: hit.ratio))
+        }
+
+        // Defect D (260809-g7h): canonical-collision veto. `token` only ever
+        // contains letters/numbers (the tokenizer emits nothing else), so it
+        // is already directly comparable to the sanitized protected set.
+        if protected.contains(lowered) {
+            return (token, nil, nil, nil)
+        }
+
+        guard let hit = Self.firstActedOnCandidate(lowered: lowered, tokenCount: token.count, candidates: candidates) else {
+            return (token, nil, nil, nil)
+        }
+        let to = dictionary[hit.key]?.replacement ?? token
+        if hit.fires {
+            // Guard B passes — fire the replacement. Skip trace emission when the
+            // replacement produces no visible change (the exact-match pass
+            // already produced the final form).
+            if to == token { return (token, nil, nil, nil) }
+            return (to, Replacement(key: hit.key, from: token, to: to), nil, nil)
+        }
+        // Would have hit pre-guard; record as blocked for telemetry.
+        return (token, nil, BlockedMatch(key: hit.key, from: token, to: to, ratio: hit.ratio), nil)
+    }
+
+    /// The candidate scan shared by the live fuzzy path and the Guard A veto
+    /// trace (quick 260930-s1e), so a veto entry names exactly the key the live
+    /// path would have acted on. Walks the sorted candidates and stops at the
+    /// first key that is identical to the token (nil), within the ratio cap
+    /// (`fires`), or over the cap but within distance 2 (`!fires`).
+    private static func firstActedOnCandidate(lowered: String, tokenCount: Int, candidates: [String]) -> (key: String, ratio: Double, fires: Bool)? {
+        for key in candidates {
+            guard abs(tokenCount - key.count) <= 2 else { continue }
+            let keyLowered = key.lowercased()
+            // Skip identity — already handled by exact-match pass.
+            if lowered == keyLowered { return nil }
+
+            let ratio = LevenshteinDistance.normalizedDistance(lowered, keyLowered)
+            if ratio <= fuzzyRatioCap {
+                return (key, ratio, true)
+            } else if LevenshteinDistance.distance(lowered, keyLowered) <= 2 {
+                return (key, ratio, false)
+            }
+        }
+        return nil
+    }
+}
